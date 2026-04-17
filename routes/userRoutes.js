@@ -10,6 +10,7 @@ const authMiddleware = require('../middleware/auth');
 // Public routes (no authentication required)
 router.post('/signup', UserController.signup);
 router.post('/login', UserController.login);
+router.post('/verify-otp', UserController.verifyOTP);
 
 // Protected routes (authentication required)
 router.get('/profile', authMiddleware, UserController.getProfile);

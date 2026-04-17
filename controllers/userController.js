@@ -1,6 +1,8 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const OTP = require('../models/OTP');
+const emailService = require('../services/emailService');
 
 /**
  * User Controller
@@ -164,6 +166,96 @@ class UserController {
         });
       }
 
+      // Generate and send OTP
+      const otpRecord = await OTP.create(user.id, 'login');
+      
+      // Send OTP email
+      const isDevelopment = process.env.NODE_ENV === 'development';
+      let emailSent = false;
+      
+      try {
+        await emailService.sendOTP(user.email, otpRecord.otp_code, user.first_name);
+        emailSent = true;
+        console.log('✅ OTP email sent successfully');
+      } catch (emailError) {
+        console.error('❌ Failed to send OTP email:', emailError.message);
+        
+        // In production, fail if email doesn't send
+        if (!isDevelopment) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP email. Please try again.'
+          });
+        }
+        
+        // In development, continue without email
+        console.log('⚠️  Development mode: Skipping email requirement');
+      }
+
+      // Response object
+      const response = {
+        success: true,
+        message: emailSent 
+          ? 'OTP sent to your email. Please verify to complete login.'
+          : 'OTP generated. Check server logs for code (development mode).',
+        data: {
+          email: user.email,
+          expiresIn: '10 minutes'
+        }
+      };
+      
+      // In development mode, include OTP in response if email failed
+      if (isDevelopment && !emailSent) {
+        response.data.otp_code = otpRecord.otp_code;
+        response.data.dev_note = 'OTP included in response (development mode only)';
+        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
+      }
+
+      res.status(200).json(response);
+
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error logging in',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Verify OTP and Complete Login
+   */
+  static async verifyOTP(req, res) {
+    try {
+      const { email, otp_code } = req.body;
+
+      // Validate required fields
+      if (!email || !otp_code) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email and OTP code are required'
+        });
+      }
+
+      // Find user by email
+      const user = await User.findByEmail(email);
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid email or OTP'
+        });
+      }
+
+      // Verify OTP
+      const isOTPValid = await OTP.verify(user.id, otp_code, 'login');
+      if (!isOTPValid) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired OTP code'
+        });
+      }
+
       // Remove password_hash from response
       delete user.password_hash;
 
@@ -188,10 +280,10 @@ class UserController {
       });
 
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Verify OTP error:', error);
       res.status(500).json({
         success: false,
-        message: 'Error logging in',
+        message: 'Error verifying OTP',
         error: error.message
       });
     }
