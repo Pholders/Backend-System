@@ -17,7 +17,9 @@ class User {
         last_name VARCHAR(100) NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
-        phone VARCHAR(20),
+        phone VARCHAR(20) NOT NULL,
+        id_passport_number VARCHAR(50) UNIQUE NOT NULL,
+        nationality VARCHAR(20) NOT NULL CHECK (nationality IN ('South African', 'Other')),
         date_of_birth DATE,
         gender VARCHAR(20),
         address TEXT,
@@ -35,6 +37,7 @@ class User {
       );
 
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_users_id_passport ON users(id_passport_number);
       CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
     `;
     
@@ -57,6 +60,8 @@ class User {
       email,
       password_hash,
       phone,
+      id_passport_number,
+      nationality,
       date_of_birth,
       gender,
       address,
@@ -72,17 +77,17 @@ class User {
 
     const insertQuery = `
       INSERT INTO users (
-        first_name, last_name, email, password_hash, phone, 
+        first_name, last_name, email, password_hash, phone, id_passport_number, nationality,
         date_of_birth, gender, address, city, state, zip_code,
         blood_type, allergies, medical_history, 
         emergency_contact_name, emergency_contact_phone
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING *
     `;
 
     const values = [
-      first_name, last_name, email, password_hash, phone,
+      first_name, last_name, email, password_hash, phone, id_passport_number, nationality,
       date_of_birth, gender, address, city, state, zip_code,
       blood_type, allergies, medical_history,
       emergency_contact_name, emergency_contact_phone
@@ -105,6 +110,14 @@ class User {
    */
   static async findById(id) {
     const result = await query('SELECT * FROM users WHERE id = $1', [id]);
+    return result.rows[0];
+  }
+
+  /**
+   * Find user by ID/Passport number
+   */
+  static async findByIdPassport(id_passport_number) {
+    const result = await query('SELECT * FROM users WHERE id_passport_number = $1', [id_passport_number]);
     return result.rows[0];
   }
 

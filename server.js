@@ -3,6 +3,9 @@ const cors = require('cors');
 require('dotenv').config();
 const { pool } = require('./config/db');
 
+// Import routes
+const userRoutes = require('./routes/userRoutes');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -10,6 +13,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Routes
+app.use('/api/users', userRoutes);
 
 // Test database connection endpoint
 app.get('/api/test-db', async (req, res) => {
@@ -40,6 +46,8 @@ app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
   console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
+  console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
+  console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
 });
 
 // Graceful shutdown
