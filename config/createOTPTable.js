@@ -12,7 +12,7 @@ const runMigration = async () => {
     await query(`
       CREATE TABLE IF NOT EXISTS otps (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
         otp_code VARCHAR(6) NOT NULL,
         purpose VARCHAR(50) NOT NULL DEFAULT 'login',
         expires_at TIMESTAMP NOT NULL,

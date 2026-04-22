@@ -1,44 +1,32 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const Pharmacy = require('../models/Pharmacy');
 const OTP = require('../models/OTP');
 const emailService = require('../services/emailService');
 
-/**
- * User Controller
- * Handles user authentication and registration
- */
-
-class UserController {
+class PharmacyController {
   /**
-   * User Signup/Registration
+   * Pharmacy Signup/Registration
    */
   static async signup(req, res) {
     try {
-      const { 
-        first_name, 
-        last_name, 
-        email, 
-        phone, 
-        id_passport_number,
-        nationality, 
-        password 
+      const {
+        pharmacy_name,
+        first_name,
+        last_name,
+        email,
+        phone,
+        password,
+        license_number,
+        city,
+        province
       } = req.body;
 
       // Validate required fields
-      if (!first_name || !last_name || !email || !phone || !id_passport_number || !nationality || !password) {
+      if (!pharmacy_name || !first_name || !last_name || !email || !phone || !password || !license_number || !city || !province) {
         return res.status(400).json({
           success: false,
-          message: 'All fields are required: first_name, last_name, email, phone, id_passport_number, nationality, password'
-        });
-      }
-
-      // Validate nationality
-      const validNationalities = ['South African', 'Other'];
-      if (!validNationalities.includes(nationality)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Nationality must be either "South African" or "Other"'
+          message: 'All fields are required: pharmacy_name, first_name, last_name, email, phone, password, license_number, city, province'
         });
       }
 
@@ -51,7 +39,7 @@ class UserController {
         });
       }
 
-      // Validate password strength (minimum 6 characters)
+      // Validate password strength
       if (password.length < 6) {
         return res.status(400).json({
           success: false,
@@ -60,20 +48,20 @@ class UserController {
       }
 
       // Check if email already exists
-      const existingUserByEmail = await User.findByEmail(email);
-      if (existingUserByEmail) {
+      const existingPharmacy = await Pharmacy.findByEmail(email);
+      if (existingPharmacy) {
         return res.status(409).json({
           success: false,
           message: 'Email already registered'
         });
       }
 
-      // Check if ID/Passport number already exists
-      const existingUserByIdPassport = await User.findByIdPassport(id_passport_number);
-      if (existingUserByIdPassport) {
+      // Check if license number already exists
+      const existingLicense = await Pharmacy.findByLicense(license_number);
+      if (existingLicense) {
         return res.status(409).json({
           success: false,
-          message: 'ID/Passport number already registered'
+          message: 'License number already registered'
         });
       }
 
@@ -81,58 +69,44 @@ class UserController {
       const saltRounds = 10;
       const password_hash = await bcrypt.hash(password, saltRounds);
 
-      // Create new user
-      const newUser = await User.create({
+      // Create new pharmacy
+      const newPharmacy = await Pharmacy.create({
+        pharmacy_name,
         first_name,
         last_name,
         email,
         phone,
-        id_passport_number,
-        nationality,
+        license_number,
+        city,
+        province,
         password_hash
       });
 
-      // Remove password_hash from response
-      delete newUser.password_hash;
-
-      // Generate JWT token
-      const token = jwt.sign(
-        { 
-          id: newUser.id, 
-          email: newUser.email,
-          type: 'user'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+      delete newPharmacy.password_hash;
 
       res.status(201).json({
         success: true,
-        message: 'User registered successfully',
-        data: {
-          user: newUser,
-          token
-        }
+        message: 'Pharmacy registered successfully',
+        data: { pharmacy: newPharmacy }
       });
 
     } catch (error) {
-      console.error('Signup error:', error);
+      console.error('Pharmacy signup error:', error);
       res.status(500).json({
         success: false,
-        message: 'Error registering user',
+        message: 'Error registering pharmacy',
         error: error.message
       });
     }
   }
 
   /**
-   * User Login
+   * Pharmacy Login - initiates OTP flow
    */
   static async login(req, res) {
     try {
       const { email, password } = req.body;
 
-      // Validate required fields
       if (!email || !password) {
         return res.status(400).json({
           success: false,
@@ -140,33 +114,22 @@ class UserController {
         });
       }
 
-      // Find user by email
-      const user = await User.findByEmail(email);
-      if (!user) {
+      const pharmacy = await Pharmacy.findByEmail(email);
+      if (!pharmacy) {
         return res.status(403).json({
           success: false,
-          message: 'No patient account found with this email. Please use the correct login page.'
+          message: 'No pharmacy account found with this email. Please use the correct login page.'
         });
       }
 
-      // Check if user is active
-      if (user.status !== 'active') {
+      if (pharmacy.status !== 'active') {
         return res.status(403).json({
           success: false,
           message: 'Account is inactive. Please contact support.'
         });
       }
 
-      // Restrict login to patient role only
-      if (user.role !== 'patient') {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied. This login is for patients only. Please use the correct login page.'
-        });
-      }
-
-      // Verify password
-      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      const isPasswordValid = await bcrypt.compare(password, pharmacy.password_hash);
       if (!isPasswordValid) {
         return res.status(401).json({
           success: false,
@@ -175,44 +138,39 @@ class UserController {
       }
 
       // Generate and send OTP
-      const otpRecord = await OTP.create(user.id, 'login');
-      
-      // Send OTP email
+      const otpRecord = await OTP.create(pharmacy.id, 'login', 'pharmacy');
+
       const isDevelopment = process.env.NODE_ENV === 'development';
       let emailSent = false;
-      
+
       try {
-        await emailService.sendOTP(user.email, otpRecord.otp_code, user.first_name);
+        await emailService.sendOTP(pharmacy.email, otpRecord.otp_code, pharmacy.name);
         emailSent = true;
-        console.log('✅ OTP email sent successfully');
+        console.log('✅ OTP email sent to pharmacy successfully');
       } catch (emailError) {
         console.error('❌ Failed to send OTP email:', emailError.message);
-        
-        // In production, fail if email doesn't send
+
         if (!isDevelopment) {
           return res.status(500).json({
             success: false,
             message: 'Failed to send OTP email. Please try again.'
           });
         }
-        
-        // In development, continue without email
+
         console.log('⚠️  Development mode: Skipping email requirement');
       }
 
-      // Response object
       const response = {
         success: true,
-        message: emailSent 
+        message: emailSent
           ? 'OTP sent to your email. Please verify to complete login.'
           : 'OTP generated. Check server logs for code (development mode).',
         data: {
-          email: user.email,
+          email: pharmacy.email,
           expiresIn: '10 minutes'
         }
       };
-      
-      // In development mode, include OTP in response if email failed
+
       if (isDevelopment && !emailSent) {
         response.data.otp_code = otpRecord.otp_code;
         response.data.dev_note = 'OTP included in response (development mode only)';
@@ -222,7 +180,7 @@ class UserController {
       res.status(200).json(response);
 
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Pharmacy login error:', error);
       res.status(500).json({
         success: false,
         message: 'Error logging in',
@@ -232,13 +190,12 @@ class UserController {
   }
 
   /**
-   * Verify OTP and Complete Login
+   * Verify OTP and complete login
    */
   static async verifyOTP(req, res) {
     try {
       const { email, otp_code } = req.body;
 
-      // Validate required fields
       if (!email || !otp_code) {
         return res.status(400).json({
           success: false,
@@ -246,34 +203,30 @@ class UserController {
         });
       }
 
-      // Find user by email
-      const user = await User.findByEmail(email);
-      if (!user) {
+      const pharmacy = await Pharmacy.findByEmail(email);
+      if (!pharmacy) {
         return res.status(403).json({
           success: false,
-          message: 'No patient account found with this email. Please use the correct login page.'
+          message: 'No pharmacy account found with this email. Please use the correct login page.'
         });
       }
 
-      // Verify OTP
-      const isOTPValid = await OTP.verify(user.id, otp_code, 'login', 'patient');
-      if (!isOTPValid || !isOTPValid.valid) {
+      const otpResult = await OTP.verify(pharmacy.id, otp_code, 'login', 'pharmacy');
+      if (!otpResult.valid) {
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired OTP code'
         });
       }
 
-      // Remove password_hash from response
-      delete user.password_hash;
+      delete pharmacy.password_hash;
 
-      // Generate JWT token
       const token = jwt.sign(
-        { 
-          id: user.id, 
-          email: user.email,
-          role: user.role,
-          type: 'user'
+        {
+          id: pharmacy.id,
+          email: pharmacy.email,
+          role: 'pharmacy',
+          type: 'pharmacy'
         },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
@@ -282,14 +235,11 @@ class UserController {
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        data: {
-          user,
-          token
-        }
+        data: { pharmacy, token }
       });
 
     } catch (error) {
-      console.error('Verify OTP error:', error);
+      console.error('Pharmacy verify OTP error:', error);
       res.status(500).json({
         success: false,
         message: 'Error verifying OTP',
@@ -299,30 +249,29 @@ class UserController {
   }
 
   /**
-   * Get User Profile
+   * Get Pharmacy Profile
    */
   static async getProfile(req, res) {
     try {
-      const userId = req.user.id; // Assuming middleware sets req.user
+      const pharmacyId = req.user.id;
 
-      const user = await User.findById(userId);
-      if (!user) {
+      const pharmacy = await Pharmacy.findById(pharmacyId);
+      if (!pharmacy) {
         return res.status(404).json({
           success: false,
-          message: 'User not found'
+          message: 'Pharmacy not found'
         });
       }
 
-      // Remove password_hash from response
-      delete user.password_hash;
+      delete pharmacy.password_hash;
 
       res.status(200).json({
         success: true,
-        data: user
+        data: pharmacy
       });
 
     } catch (error) {
-      console.error('Get profile error:', error);
+      console.error('Get pharmacy profile error:', error);
       res.status(500).json({
         success: false,
         message: 'Error fetching profile',
@@ -332,39 +281,38 @@ class UserController {
   }
 
   /**
-   * Update User Profile
+   * Update Pharmacy Profile
    */
   static async updateProfile(req, res) {
     try {
-      const userId = req.user.id;
+      const pharmacyId = req.user.id;
       const updateData = req.body;
 
       // Remove fields that shouldn't be updated directly
       delete updateData.id;
       delete updateData.password_hash;
-      delete updateData.email; // Email changes might need verification
-      delete updateData.id_passport_number; // ID/Passport shouldn't be changed
+      delete updateData.email;
+      delete updateData.license_number;
       delete updateData.created_at;
 
-      const updatedUser = await User.update(userId, updateData);
-      if (!updatedUser) {
+      const updatedPharmacy = await Pharmacy.update(pharmacyId, updateData);
+      if (!updatedPharmacy) {
         return res.status(404).json({
           success: false,
-          message: 'User not found'
+          message: 'Pharmacy not found'
         });
       }
 
-      // Remove password_hash from response
-      delete updatedUser.password_hash;
+      delete updatedPharmacy.password_hash;
 
       res.status(200).json({
         success: true,
         message: 'Profile updated successfully',
-        data: updatedUser
+        data: updatedPharmacy
       });
 
     } catch (error) {
-      console.error('Update profile error:', error);
+      console.error('Update pharmacy profile error:', error);
       res.status(500).json({
         success: false,
         message: 'Error updating profile',
@@ -374,4 +322,4 @@ class UserController {
   }
 }
 
-module.exports = UserController;
+module.exports = PharmacyController;

@@ -13,16 +13,16 @@ class Pharmacy {
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS pharmacies (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
+        pharmacy_name VARCHAR(255) NOT NULL,
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(100) NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         phone VARCHAR(20),
         license_number VARCHAR(100) UNIQUE NOT NULL,
-        owner_name VARCHAR(200),
-        registration_number VARCHAR(100),
-        address TEXT NOT NULL,
         city VARCHAR(100) NOT NULL,
-        state VARCHAR(100) NOT NULL,
+        province VARCHAR(100) NOT NULL,
+        address TEXT,
         zip_code VARCHAR(20),
         latitude DECIMAL(10, 8),
         longitude DECIMAL(11, 8),
@@ -60,47 +60,29 @@ class Pharmacy {
    */
   static async create(pharmacyData) {
     const {
-      name,
+      pharmacy_name,
+      first_name,
+      last_name,
       email,
       password_hash,
       phone,
       license_number,
-      owner_name,
-      registration_number,
-      address,
       city,
-      state,
-      zip_code,
-      latitude,
-      longitude,
-      operating_hours,
-      services,
-      delivery_available,
-      delivery_radius,
-      website,
-      description,
-      profile_image,
-      is_24_hours
+      province
     } = pharmacyData;
 
     const insertQuery = `
       INSERT INTO pharmacies (
-        name, email, password_hash, phone, license_number,
-        owner_name, registration_number, address, city, state, zip_code,
-        latitude, longitude, operating_hours, services,
-        delivery_available, delivery_radius, website, description,
-        profile_image, is_24_hours
+        pharmacy_name, first_name, last_name, email, password_hash,
+        phone, license_number, city, province
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
 
     const values = [
-      name, email, password_hash, phone, license_number,
-      owner_name, registration_number, address, city, state, zip_code,
-      latitude, longitude, JSON.stringify(operating_hours), services,
-      delivery_available, delivery_radius, website, description,
-      profile_image, is_24_hours
+      pharmacy_name, first_name, last_name, email, password_hash,
+      phone, license_number, city, province
     ];
 
     const result = await query(insertQuery, values);

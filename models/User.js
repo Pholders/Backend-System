@@ -11,7 +11,7 @@ class User {
    */
   static async createTable() {
     const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS patients (
         id SERIAL PRIMARY KEY,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
@@ -32,13 +32,14 @@ class User {
         emergency_contact_name VARCHAR(200),
         emergency_contact_phone VARCHAR(20),
         status VARCHAR(20) DEFAULT 'active',
+        role VARCHAR(20) DEFAULT 'patient' CHECK (role IN ('patient')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-      CREATE INDEX IF NOT EXISTS idx_users_id_passport ON users(id_passport_number);
-      CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+      CREATE INDEX IF NOT EXISTS idx_patients_email ON patients(email);
+      CREATE INDEX IF NOT EXISTS idx_patients_id_passport ON patients(id_passport_number);
+      CREATE INDEX IF NOT EXISTS idx_patients_status ON patients(status);
     `;
     
     try {
@@ -76,7 +77,7 @@ class User {
     } = userData;
 
     const insertQuery = `
-      INSERT INTO users (
+      INSERT INTO patients (
         first_name, last_name, email, password_hash, phone, id_passport_number, nationality,
         date_of_birth, gender, address, city, state, zip_code,
         blood_type, allergies, medical_history, 
@@ -101,7 +102,7 @@ class User {
    * Find user by email
    */
   static async findByEmail(email) {
-    const result = await query('SELECT * FROM users WHERE email = $1', [email]);
+    const result = await query('SELECT * FROM patients WHERE email = $1', [email]);
     return result.rows[0];
   }
 
@@ -109,7 +110,7 @@ class User {
    * Find user by ID
    */
   static async findById(id) {
-    const result = await query('SELECT * FROM users WHERE id = $1', [id]);
+    const result = await query('SELECT * FROM patients WHERE id = $1', [id]);
     return result.rows[0];
   }
 
@@ -117,7 +118,7 @@ class User {
    * Find user by ID/Passport number
    */
   static async findByIdPassport(id_passport_number) {
-    const result = await query('SELECT * FROM users WHERE id_passport_number = $1', [id_passport_number]);
+    const result = await query('SELECT * FROM patients WHERE id_passport_number = $1', [id_passport_number]);
     return result.rows[0];
   }
 
@@ -141,8 +142,7 @@ class User {
     values.push(id);
 
     const updateQuery = `
-      UPDATE users 
-      SET ${fields.join(', ')}
+      UPDATE patients 
       WHERE id = $${paramCount}
       RETURNING *
     `;
@@ -156,7 +156,7 @@ class User {
    */
   static async findAll(limit = 100, offset = 0) {
     const result = await query(
-      'SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      'SELECT * FROM patients ORDER BY created_at DESC LIMIT $1 OFFSET $2',
       [limit, offset]
     );
     return result.rows;
@@ -167,7 +167,7 @@ class User {
    */
   static async delete(id) {
     const result = await query(
-      'UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      'UPDATE patients SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       ['inactive', id]
     );
     return result.rows[0];

@@ -13,7 +13,7 @@ class OTP {
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS otps (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
         otp_code VARCHAR(6) NOT NULL,
         purpose VARCHAR(50) NOT NULL DEFAULT 'login',
         expires_at TIMESTAMP NOT NULL,
@@ -44,43 +44,52 @@ class OTP {
 
   /**
    * Create new OTP
+   * @param {number} userId - ID of the user/doctor/pharmacy
+   * @param {string} purpose - Purpose of the OTP (e.g. 'login')
+   * @param {string} userType - Type of entity: 'patient', 'doctor', or 'pharmacy'
+   * @param {number} expiryMinutes - OTP validity in minutes
    */
-  static async create(userId, purpose = 'login', expiryMinutes = 10) {
+  static async create(userId, purpose = 'login', userType = 'patient', expiryMinutes = 10) {
     const otpCode = this.generateCode();
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
-    // Invalidate previous unused OTPs for this user and purpose
+    // Invalidate previous unused OTPs for this entity and purpose
     await query(
-      'UPDATE otps SET is_used = true WHERE user_id = $1 AND purpose = $2 AND is_used = false',
-      [userId, purpose]
+      'UPDATE otps SET is_used = true WHERE user_id = $1 AND purpose = $2 AND user_type = $3 AND is_used = false',
+      [userId, purpose, userType]
     );
 
     const insertQuery = `
-      INSERT INTO otps (user_id, otp_code, purpose, expires_at)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO otps (user_id, otp_code, purpose, expires_at, user_type)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
 
-    const result = await query(insertQuery, [userId, otpCode, purpose, expiresAt]);
+    const result = await query(insertQuery, [userId, otpCode, purpose, expiresAt, userType]);
     return result.rows[0];
   }
 
   /**
    * Verify OTP
+   * @param {number} userId - ID of the user/doctor/pharmacy
+   * @param {string} otpCode - The OTP code to verify
+   * @param {string} purpose - Purpose of the OTP
+   * @param {string} userType - Type of entity: 'patient', 'doctor', or 'pharmacy'
    */
-  static async verify(userId, otpCode, purpose = 'login') {
+  static async verify(userId, otpCode, purpose = 'login', userType = 'patient') {
     const selectQuery = `
       SELECT * FROM otps 
       WHERE user_id = $1 
         AND otp_code = $2 
         AND purpose = $3
+        AND user_type = $4
         AND is_used = false 
         AND expires_at > NOW()
       ORDER BY created_at DESC
       LIMIT 1
     `;
 
-    const result = await query(selectQuery, [userId, otpCode, purpose]);
+    const result = await query(selectQuery, [userId, otpCode, purpose, userType]);
 
     if (result.rows.length === 0) {
       return { valid: false, message: 'Invalid or expired OTP' };
@@ -105,12 +114,12 @@ class OTP {
   /**
    * Get OTP by user and purpose
    */
-  static async getLatest(userId, purpose = 'login') {
+  static async getLatest(userId, purpose = 'login', userType = 'patient') {
     const result = await query(
       `SELECT * FROM otps 
-       WHERE user_id = $1 AND purpose = $2 AND is_used = false 
+       WHERE user_id = $1 AND purpose = $2 AND user_type = $3 AND is_used = false 
        ORDER BY created_at DESC LIMIT 1`,
-      [userId, purpose]
+      [userId, purpose, userType]
     );
     return result.rows[0];
   }

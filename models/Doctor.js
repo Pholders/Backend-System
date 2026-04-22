@@ -18,14 +18,14 @@ class Doctor {
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         phone VARCHAR(20),
-        license_number VARCHAR(100) UNIQUE NOT NULL,
+        hpcsa_number VARCHAR(100) UNIQUE NOT NULL,
         specialization VARCHAR(100) NOT NULL,
-        qualification VARCHAR(255),
-        experience_years INTEGER,
-        hospital_affiliation VARCHAR(255),
-        address TEXT,
+        experience INTEGER,
+        clinic_name VARCHAR(255),
         city VARCHAR(100),
-        state VARCHAR(100),
+        province VARCHAR(100),
+        qualification VARCHAR(255),
+        address TEXT,
         zip_code VARCHAR(20),
         consultation_fee DECIMAL(10, 2),
         bio TEXT,
@@ -37,7 +37,7 @@ class Doctor {
       );
 
       CREATE INDEX IF NOT EXISTS idx_doctors_email ON doctors(email);
-      CREATE INDEX IF NOT EXISTS idx_doctors_license ON doctors(license_number);
+      CREATE INDEX IF NOT EXISTS idx_doctors_hpcsa ON doctors(hpcsa_number);
       CREATE INDEX IF NOT EXISTS idx_doctors_specialization ON doctors(specialization);
       CREATE INDEX IF NOT EXISTS idx_doctors_status ON doctors(status);
     `;
@@ -61,37 +61,28 @@ class Doctor {
       email,
       password_hash,
       phone,
-      license_number,
+      hpcsa_number,
       specialization,
-      qualification,
-      experience_years,
-      hospital_affiliation,
-      address,
+      experience,
+      clinic_name,
       city,
-      state,
-      zip_code,
-      consultation_fee,
-      bio,
-      profile_image,
-      availability
+      province
     } = doctorData;
 
     const insertQuery = `
       INSERT INTO doctors (
         first_name, last_name, email, password_hash, phone,
-        license_number, specialization, qualification, experience_years,
-        hospital_affiliation, address, city, state, zip_code,
-        consultation_fee, bio, profile_image, availability
+        hpcsa_number, specialization, experience,
+        clinic_name, city, province
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
 
     const values = [
       first_name, last_name, email, password_hash, phone,
-      license_number, specialization, qualification, experience_years,
-      hospital_affiliation, address, city, state, zip_code,
-      consultation_fee, bio, profile_image, JSON.stringify(availability)
+      hpcsa_number, specialization, experience,
+      clinic_name, city, province
     ];
 
     const result = await query(insertQuery, values);
@@ -107,10 +98,10 @@ class Doctor {
   }
 
   /**
-   * Find doctor by license number
+   * Find doctor by HPCSA number
    */
-  static async findByLicense(license_number) {
-    const result = await query('SELECT * FROM doctors WHERE license_number = $1', [license_number]);
+  static async findByHpcsaNumber(hpcsa_number) {
+    const result = await query('SELECT * FROM doctors WHERE hpcsa_number = $1', [hpcsa_number]);
     return result.rows[0];
   }
 
