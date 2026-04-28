@@ -1,8 +1,17 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const Pharmacy = require('../models/Pharmacy');
 const OTP = require('../models/OTP');
+const Session = require('../models/Session');
+const AuditLog = require('../models/AuditLog');
+const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+
+/**
+ * Pharmacy Controller
+ * Handles pharmacy authentication and profile management
+ */
 
 class PharmacyController {
   /**
@@ -24,6 +33,7 @@ class PharmacyController {
 
       // Validate required fields
       if (!pharmacy_name || !first_name || !last_name || !email || !phone || !password || !license_number || !city || !province) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'failed', 'Missing required fields');
         return res.status(400).json({
           success: false,
           message: 'All fields are required: pharmacy_name, first_name, last_name, email, phone, password, license_number, city, province'
@@ -33,6 +43,7 @@ class PharmacyController {
       // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'failed', 'Invalid email format');
         return res.status(400).json({
           success: false,
           message: 'Invalid email format'
@@ -40,16 +51,21 @@ class PharmacyController {
       }
 
       // Validate password strength
-      if (password.length < 6) {
+      const passwordValidation = PasswordValidator.validate(password);
+      if (!passwordValidation.valid) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'failed', `Weak password: ${passwordValidation.errors.join(', ')}`);
         return res.status(400).json({
           success: false,
-          message: 'Password must be at least 6 characters long'
+          message: 'Password does not meet security requirements',
+          errors: passwordValidation.errors,
+          strength: PasswordValidator.getStrengthDescription(PasswordValidator.getStrength(password))
         });
       }
 
       // Check if email already exists
       const existingPharmacy = await Pharmacy.findByEmail(email);
       if (existingPharmacy) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'failed', 'Email already registered');
         return res.status(409).json({
           success: false,
           message: 'Email already registered'
@@ -59,6 +75,7 @@ class PharmacyController {
       // Check if license number already exists
       const existingLicense = await Pharmacy.findByLicense(license_number);
       if (existingLicense) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'failed', 'License number already registered');
         return res.status(409).json({
           success: false,
           message: 'License number already registered'
@@ -82,11 +99,14 @@ class PharmacyController {
         password_hash
       });
 
+      // Log successful signup
+      await AuditLog.logSecurityEvent(req, newPharmacy.id, 'pharmacy', email, 'signup', 'success');
+
       delete newPharmacy.password_hash;
 
       res.status(201).json({
         success: true,
-        message: 'Pharmacy registered successfully',
+        message: 'Pharmacy registered successfully. Please log in.',
         data: { pharmacy: newPharmacy }
       });
 
@@ -108,14 +128,26 @@ class PharmacyController {
       const { email, password } = req.body;
 
       if (!email || !password) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'login', 'failed', 'Missing email or password');
         return res.status(400).json({
           success: false,
           message: 'Email and password are required'
         });
       }
 
+      // Check for suspicious activity
+      const failedAttempts = await AuditLog.getFailedLoginAttempts(email, 1);
+      if (failedAttempts >= 5) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'login_failed', 'failed', `Too many failed attempts: ${failedAttempts}`);
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed login attempts. Please try again later or contact support.'
+        });
+      }
+
       const pharmacy = await Pharmacy.findByEmail(email);
       if (!pharmacy) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'login', 'failed', 'Pharmacy not found');
         return res.status(403).json({
           success: false,
           message: 'No pharmacy account found with this email. Please use the correct login page.'
@@ -123,6 +155,7 @@ class PharmacyController {
       }
 
       if (pharmacy.status !== 'active') {
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'login', 'failed', 'Account inactive');
         return res.status(403).json({
           success: false,
           message: 'Account is inactive. Please contact support.'
@@ -131,6 +164,7 @@ class PharmacyController {
 
       const isPasswordValid = await bcrypt.compare(password, pharmacy.password_hash);
       if (!isPasswordValid) {
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'login_failed', 'failed', 'Invalid password');
         return res.status(401).json({
           success: false,
           message: 'Invalid email or password'
@@ -140,17 +174,21 @@ class PharmacyController {
       // Generate and send OTP
       const otpRecord = await OTP.create(pharmacy.id, 'login', 'pharmacy');
 
+      // Log OTP generation
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'success');
+
       const isDevelopment = process.env.NODE_ENV === 'development';
       let emailSent = false;
 
       try {
-        await emailService.sendOTP(pharmacy.email, otpRecord.otp_code, pharmacy.name);
+        await emailService.sendOTP(pharmacy.email, otpRecord.otp_code, pharmacy.first_name);
         emailSent = true;
         console.log('✅ OTP email sent to pharmacy successfully');
       } catch (emailError) {
         console.error('❌ Failed to send OTP email:', emailError.message);
 
         if (!isDevelopment) {
+          await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
           return res.status(500).json({
             success: false,
             message: 'Failed to send OTP email. Please try again.'
@@ -196,7 +234,11 @@ class PharmacyController {
     try {
       const { email, otp_code } = req.body;
 
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+
       if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'otp_verified', 'failed', 'Missing email or OTP');
         return res.status(400).json({
           success: false,
           message: 'Email and OTP code are required'
@@ -205,6 +247,7 @@ class PharmacyController {
 
       const pharmacy = await Pharmacy.findByEmail(email);
       if (!pharmacy) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'otp_verified', 'failed', 'Pharmacy not found');
         return res.status(403).json({
           success: false,
           message: 'No pharmacy account found with this email. Please use the correct login page.'
@@ -213,6 +256,7 @@ class PharmacyController {
 
       const otpResult = await OTP.verify(pharmacy.id, otp_code, 'login', 'pharmacy');
       if (!otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_failed', 'failed', 'Invalid or expired OTP');
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired OTP code'
@@ -232,10 +276,37 @@ class PharmacyController {
         { expiresIn: '7d' }
       );
 
+      // Create session
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
+      };
+      
+      const session = await Session.create(
+        pharmacy.id,
+        'pharmacy',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'login', 'success');
+
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        data: { pharmacy, token }
+        data: {
+          pharmacy,
+          token,
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
+          }
+        }
       });
 
     } catch (error) {
@@ -243,6 +314,89 @@ class PharmacyController {
       res.status(500).json({
         success: false,
         message: 'Error verifying OTP',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Pharmacy Logout
+   */
+  static async logout(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const sessionId = req.session?.id;
+
+      if (sessionId) {
+        await Session.revoke(sessionId, 'User logout');
+        await AuditLog.logSecurityEvent(req, pharmacyId, 'pharmacy', req.user.email, 'logout', 'success');
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Logged out successfully'
+      });
+
+    } catch (error) {
+      console.error('Logout error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error logging out',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Active Sessions
+   */
+  static async getSessions(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+
+      const sessions = await Session.getUserActiveSessions(pharmacyId);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          sessions,
+          count: sessions.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Get sessions error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching sessions',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Activity Log
+   */
+  static async getActivityLog(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const limit = parseInt(req.query.limit) || 50;
+
+      const activityLog = await AuditLog.getUserActivity(pharmacyId, limit);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          activities: activityLog,
+          count: activityLog.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Get activity log error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching activity log',
         error: error.message
       });
     }
@@ -288,7 +442,6 @@ class PharmacyController {
       const pharmacyId = req.user.id;
       const updateData = req.body;
 
-      // Remove fields that shouldn't be updated directly
       delete updateData.id;
       delete updateData.password_hash;
       delete updateData.email;
@@ -304,6 +457,8 @@ class PharmacyController {
       }
 
       delete updatedPharmacy.password_hash;
+
+      await AuditLog.logSecurityEvent(req, pharmacyId, 'pharmacy', updatedPharmacy.email, 'profile_updated', 'success');
 
       res.status(200).json({
         success: true,
