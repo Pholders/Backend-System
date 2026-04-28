@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const { pool } = require('./config/db');
+const cache = require('./services/cacheService');
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
@@ -38,17 +39,50 @@ app.get('/api/test-db', async (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    cache: cache.isAvailable() ? 'connected' : 'unavailable'
+  });
+});
+
+// Cache stats endpoint
+app.get('/api/cache-stats', async (req, res) => {
+  try {
+    const stats = await cache.stats();
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
-  console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
-  console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
-});
+async function startServer() {
+  try {
+    // Initialize Redis cache
+    await cache.initialize();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server is running on port ${PORT}`);
+      console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
+      console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
+      console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
+      console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
