@@ -1,4 +1,4 @@
-# Password Reset - Quick Reference Guide
+# 🔐 Password Reset Feature - Quick Reference Guide
 
 ## Quick Setup (5 minutes)
 
@@ -194,80 +194,13 @@ AND used = FALSE;
 
 ---
 
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────┐
-│         Patient Forgets Password        │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-    ┌──────────────────────────┐
-    │ POST /forgot-password    │
-    │ (email)                  │
-    └──────────────┬───────────┘
-                   │
-    ┌──────────────▼─────────────────────┐
-    │ 1. Validate email format           │
-    │ 2. Find user by email              │
-    │ 3. Generate unique token           │
-    │ 4. Create token record             │
-    │ 5. Send reset email                │
-    │ 6. Log attempt                     │
-    └──────────────┬──────────────────────┘
-                   │
-                   ▼
-        ┌──────────────────────┐
-        │ Email with reset link│
-        └──────────────┬───────┘
-                       │
-                       ▼
-         ┌─────────────────────────────┐
-         │ User clicks reset link      │
-         │ Navigates to frontend       │
-         │ /reset-password?token=...   │
-         └──────────────┬──────────────┘
-                        │
-                        ▼
-         ┌─────────────────────────────┐
-         │ User enters new password    │
-         └──────────────┬──────────────┘
-                        │
-                        ▼
-    ┌─────────────────────────────────┐
-    │ POST /reset-password            │
-    │ (token, new_password)           │
-    └──────────────┬──────────────────┘
-                   │
-    ┌──────────────▼────────────────────┐
-    │ 1. Validate token                 │
-    │ 2. Check token not expired/used   │
-    │ 3. Validate password strength     │
-    │ 4. Hash new password              │
-    │ 5. Update user password           │
-    │ 6. Mark token as used             │
-    │ 7. Invalidate all sessions        │
-    │ 8. Send confirmation email        │
-    │ 9. Log success                    │
-    └──────────────┬─────────────────────┘
-                   │
-                   ▼
-    ┌──────────────────────────┐
-    │ Password Reset Complete! │
-    │ User can login with      │
-    │ new password             │
-    └──────────────────────────┘
-```
-
----
-
 ## Files Created/Modified
 
 ### Created:
 - `config/addPasswordReset.js` - Migration script
 - `models/PasswordResetToken.js` - Token model
-- `PASSWORD_RESET_DOCUMENTATION.md` - Full documentation
-- `PASSWORD_RESET_QUICK_REFERENCE.md` - This file
+- `docs/password-reset/` - Documentation folder
+- `tests/password-reset/` - Testing folder
 
 ### Modified:
 - `services/emailService.js` - Added email methods
@@ -289,4 +222,4 @@ AND used = FALSE;
 
 ---
 
-**Need help?** Check PASSWORD_RESET_DOCUMENTATION.md for detailed information.
+**Need more help?** Check the other documentation files in this folder.

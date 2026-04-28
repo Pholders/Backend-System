@@ -1,3 +1,5 @@
+# 🚀 Deployment Guide - Security Features Implementation
+
 ## Implementation Checklist & Setup Guide
 
 ### ✅ Completed Implementations
@@ -14,9 +16,11 @@
 - [x] Migration Script (`config/addSessionsAndAuditLogs.js`)
 - [x] Documentation (`SECURITY_ENHANCEMENTS.md`)
 
-### 🚀 How to Deploy
+---
 
-#### Step 1: Run Migration
+## 🚀 How to Deploy
+
+### Step 1: Run Migration
 Execute the migration script to create the new database tables:
 
 ```bash
@@ -38,14 +42,14 @@ Expected output:
    - Device tracking and login activity monitoring
 ```
 
-#### Step 2: Restart Server
+### Step 2: Restart Server
 ```bash
 npm start
 # or for development
 npm run dev
 ```
 
-#### Step 3: Test the Features
+### Step 3: Test the Features
 
 **Test 1: Strong Password Validation**
 ```bash
@@ -97,7 +101,9 @@ curl -X POST http://localhost:5000/api/users/logout \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 📊 Database Verification
+---
+
+## 📊 Database Verification
 
 You can verify the tables were created with:
 
@@ -118,9 +124,11 @@ WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour'
 GROUP BY email, ip_address;
 ```
 
-### 🔍 Monitoring & Troubleshooting
+---
 
-#### Check Audit Logs in Real-time
+## 🔍 Monitoring & Troubleshooting
+
+### Check Audit Logs in Real-time
 ```bash
 # Monitor failed login attempts
 SELECT email, ip_address, event_type, status, created_at
@@ -130,7 +138,7 @@ ORDER BY created_at DESC
 LIMIT 20;
 ```
 
-#### Review User Sessions
+### Review User Sessions
 ```bash
 # Get all active sessions for a user
 SELECT id, user_type, ip_address, created_at, last_activity_at, expires_at
@@ -138,7 +146,7 @@ FROM sessions
 WHERE user_id = 1 AND is_active = true;
 ```
 
-#### Detect Suspicious Activity
+### Detect Suspicious Activity
 ```bash
 -- Get accounts with multiple failed attempts
 SELECT 
@@ -152,7 +160,9 @@ GROUP BY email
 HAVING COUNT(*) >= 3;
 ```
 
-### 🚨 Known Behaviors
+---
+
+## 🚨 Known Behaviors
 
 1. **Password Requirements**: Users will see detailed error messages if password doesn't meet requirements
 2. **Rate Limiting**: After 5 failed login attempts in 1 hour, user gets 429 error
@@ -160,7 +170,9 @@ HAVING COUNT(*) >= 3;
 4. **Audit Logging**: Every authentication event is logged (successful and failed)
 5. **IP Tracking**: Original IP is captured from X-Forwarded-For header if behind proxy
 
-### 💡 Tips for Production
+---
+
+## 💡 Tips for Production
 
 1. **Enable HTTPS**: All authentication should be over HTTPS
 2. **Monitor Audit Logs**: Set up alerts for suspicious activity
@@ -170,7 +182,9 @@ HAVING COUNT(*) >= 3;
 6. **Backup**: Regularly backup audit logs for compliance
 7. **Rate Limiting**: Implement API-level rate limiting on authentication endpoints
 
-### 📱 Client-Side Integration
+---
+
+## 📱 Client-Side Integration
 
 No changes needed for OTP flow. The existing flow works as before:
 1. User signs up/logs in
@@ -180,7 +194,9 @@ No changes needed for OTP flow. The existing flow works as before:
 5. JWT token returned to client
 6. Client stores token and uses it for authenticated requests
 
-### 🔗 Related Files Modified
+---
+
+## 🔗 Related Files Modified
 
 - `middleware/auth.js` - Enhanced session validation
 - `controllers/userController.js` - Password validation, audit logging
@@ -193,7 +209,9 @@ No changes needed for OTP flow. The existing flow works as before:
 - `models/AuditLog.js` - NEW - Audit logging
 - `config/addSessionsAndAuditLogs.js` - NEW - Migration script
 
-### ✨ Features Summary
+---
+
+## ✨ Features Summary
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -208,4 +226,4 @@ No changes needed for OTP flow. The existing flow works as before:
 
 ---
 
-**Status**: All features implemented and ready for deployment! 🎉
+**Status**: ✅ All features implemented and ready for deployment!

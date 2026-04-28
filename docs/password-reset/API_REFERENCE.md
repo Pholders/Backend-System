@@ -15,32 +15,7 @@ The password reset feature allows patients to securely reset their forgotten pas
 ✅ **Rate Limiting Ready** - Architecture supports adding rate limiting
 ✅ **Development Mode** - Token and links available in development for testing
 
-## Database Schema
-
-### Password Reset Tokens Table
-
-```sql
-CREATE TABLE password_reset_tokens (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-  email VARCHAR(255) NOT NULL,
-  reset_token VARCHAR(500) UNIQUE NOT NULL,
-  reset_token_expires_at TIMESTAMP NOT NULL,
-  used BOOLEAN DEFAULT FALSE,
-  used_at TIMESTAMP,
-  ip_address VARCHAR(45),
-  user_agent TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Indices:**
-- `idx_password_reset_tokens_user_id` - For user lookups
-- `idx_password_reset_tokens_email` - For email lookups
-- `idx_password_reset_tokens_token` - For token validation
-- `idx_password_reset_tokens_expires_at` - For cleanup queries
-- `idx_password_reset_tokens_used` - For tracking used tokens
+---
 
 ## API Endpoints
 
@@ -422,24 +397,30 @@ curl -X POST http://localhost:3000/api/auth/reset-password \
 
 ---
 
-## Cleanup and Maintenance
+## Database Schema
 
-### Automatic Token Cleanup
-Expired tokens are cleaned up automatically. You can manually run cleanup:
+### Password Reset Tokens Table
 
-```bash
-# Add this to your cron job (daily recommended)
-node -e "
-  const PasswordResetToken = require('./models/PasswordResetToken');
-  PasswordResetToken.cleanupExpiredTokens();
-"
-```
+```sql
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  reset_token VARCHAR(500) UNIQUE NOT NULL,
+  reset_token_expires_at TIMESTAMP NOT NULL,
+  used BOOLEAN DEFAULT FALSE,
+  used_at TIMESTAMP,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-### View Token History
-```javascript
-const PasswordResetToken = require('./models/PasswordResetToken');
-const history = await PasswordResetToken.getUserTokenHistory(userId, 10);
-console.log(history);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email ON password_reset_tokens(email);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(reset_token);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(reset_token_expires_at);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_used ON password_reset_tokens(used);
 ```
 
 ---
@@ -456,7 +437,6 @@ console.log(history);
 3. Check spam/junk folder
 4. Verify frontend URL in `FRONTEND_URL` env var
 5. Check server logs for email errors
-6. Run: `npm test` (if test script available)
 
 ### Token Issues
 
@@ -488,158 +468,6 @@ console.log(history);
 - `MyPassword123!`
 - `Secure@Pass2024`
 - `Reset#Password1`
-
----
-
-## API Integration Examples
-
-### JavaScript/Node.js
-
-```javascript
-// Request password reset
-async function requestPasswordReset(email) {
-  try {
-    const response = await fetch('/api/auth/forgot-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
-    });
-    
-    const data = await response.json();
-    if (data.success) {
-      console.log('Check your email for reset link');
-    } else {
-      console.error(data.message);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-  }
-}
-
-// Reset password
-async function resetPassword(token, newPassword) {
-  try {
-    const response = await fetch('/api/auth/reset-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token,
-        new_password: newPassword,
-        confirm_password: newPassword
-      })
-    });
-    
-    const data = await response.json();
-    if (data.success) {
-      console.log('Password reset successful! You can now login.');
-      window.location.href = '/login';
-    } else {
-      console.error(data.message);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-  }
-}
-
-// Usage
-requestPasswordReset('patient@example.com');
-
-// After user clicks reset link and submits form:
-const token = new URLSearchParams(window.location.search).get('token');
-resetPassword(token, 'NewPassword123!');
-```
-
-### React Example
-
-```jsx
-import React, { useState } from 'react';
-
-function ForgotPasswordForm() {
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    
-    try {
-      const response = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      
-      const data = await response.json();
-      setMessage(data.message);
-    } catch (error) {
-      setMessage('Error: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="Enter your email"
-        required
-      />
-      <button type="submit" disabled={loading}>
-        {loading ? 'Sending...' : 'Send Reset Link'}
-      </button>
-      {message && <p>{message}</p>}
-    </form>
-  );
-}
-
-export default ForgotPasswordForm;
-```
-
----
-
-## Files Modified/Created
-
-### New Files:
-- `config/addPasswordReset.js` - Database migration
-- `models/PasswordResetToken.js` - Token model
-- `PASSWORD_RESET_DOCUMENTATION.md` - This file
-
-### Modified Files:
-- `services/emailService.js` - Added password reset email methods
-- `controllers/userController.js` - Added password reset endpoints
-- `routes/userRoutes.js` - Added password reset routes
-- `models/Session.js` - Added session invalidation method
-- `package.json` - Added migration script
-
----
-
-## Future Enhancements
-
-Potential improvements:
-- [ ] Rate limiting on forgot-password endpoint
-- [ ] SMS-based password reset (alternative to email)
-- [ ] Security questions as additional verification
-- [ ] Device fingerprinting for reset verification
-- [ ] Require old password confirmation for authenticated users
-- [ ] Admin dashboard for monitoring password resets
-- [ ] Analytics on password reset usage
-- [ ] Multi-step verification process
-- [ ] TOTP/2FA for password reset
-- [ ] Reset token delivery via alternative methods
-
----
-
-## Support
-
-For issues or questions:
-1. Check the Troubleshooting section
-2. Review audit logs: `SELECT * FROM audit_logs WHERE event_type LIKE '%password%'`
-3. Check email service logs
-4. Verify .env configuration
 
 ---
 
