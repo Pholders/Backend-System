@@ -1,8 +1,11 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const Session = require('../models/Session');
 
 /**
  * Authentication Middleware
  * Verifies JWT token and attaches user info to request
+ * Also validates active session
  */
 
 const authMiddleware = async (req, res, next) => {
@@ -23,8 +26,23 @@ const authMiddleware = async (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Attach user info to request
+    // Verify session is still active
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const session = await Session.findByTokenHash(tokenHash);
+    
+    if (!session) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session expired or revoked. Please login again.'
+      });
+    }
+
+    // Update last activity
+    await Session.updateLastActivity(session.id);
+    
+    // Attach user info and session to request
     req.user = decoded;
+    req.session = session;
     
     next();
   } catch (error) {

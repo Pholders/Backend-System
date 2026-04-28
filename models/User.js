@@ -1,4 +1,5 @@
 const { query } = require('../config/db');
+const cache = require('../services/cacheService');
 
 /**
  * User (Patient) Model
@@ -102,16 +103,48 @@ class User {
    * Find user by email
    */
   static async findByEmail(email) {
+    const cacheKey = `user:email:${email}`;
+    
+    // Check cache first
+    let user = await cache.get(cacheKey);
+    if (user) {
+      return user;
+    }
+
+    // Query database
     const result = await query('SELECT * FROM patients WHERE email = $1', [email]);
-    return result.rows[0];
+    user = result.rows[0];
+
+    // Cache the result (30 minutes)
+    if (user) {
+      await cache.set(cacheKey, user, 1800);
+    }
+
+    return user;
   }
 
   /**
    * Find user by ID
    */
   static async findById(id) {
+    const cacheKey = `user:id:${id}`;
+    
+    // Check cache first
+    let user = await cache.get(cacheKey);
+    if (user) {
+      return user;
+    }
+
+    // Query database
     const result = await query('SELECT * FROM patients WHERE id = $1', [id]);
-    return result.rows[0];
+    user = result.rows[0];
+
+    // Cache the result (30 minutes)
+    if (user) {
+      await cache.set(cacheKey, user, 1800);
+    }
+
+    return user;
   }
 
   /**
@@ -148,7 +181,15 @@ class User {
     `;
 
     const result = await query(updateQuery, values);
-    return result.rows[0];
+    const updatedUser = result.rows[0];
+
+    // Invalidate cache
+    if (updatedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${updatedUser.email}`);
+    }
+
+    return updatedUser;
   }
 
   /**
