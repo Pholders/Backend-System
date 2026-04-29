@@ -106,6 +106,9 @@ router.post('/doctor/logout', authMiddleware, requireRole('doctor'), DoctorContr
 router.get('/doctor/sessions', authMiddleware, requireRole('doctor'), DoctorController.getSessions);
 router.get('/doctor/activity-log', authMiddleware, requireRole('doctor'), DoctorController.getActivityLog);
 
+// Find nearby doctors by user location (available to authenticated patients)
+router.post('/doctors/nearby', authMiddleware, requireRole('patient'), DoctorController.getNearbyDoctors);
+
 /**
  * Pharmacy Routes
  */

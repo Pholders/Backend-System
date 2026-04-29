@@ -7,6 +7,7 @@ const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+const GeolocationService = require('../services/geolocationService');
 
 /**
  * Doctor Controller
@@ -475,6 +476,129 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error updating profile',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get nearby doctors by user location
+   * Filters doctors within specified radius
+   */
+  static async getNearbyDoctors(req, res) {
+    try {
+      const { latitude, longitude, radius = 15 } = req.body;
+      const userId = req.user ? req.user.id : null;
+
+      // Validate required location parameters
+      if (latitude === undefined || longitude === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude and longitude are required'
+        });
+      }
+
+      // Validate that coordinates are valid numbers
+      if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude and longitude must be valid numbers'
+        });
+      }
+
+      // Validate latitude range
+      if (latitude < -90 || latitude > 90) {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude must be between -90 and 90'
+        });
+      }
+
+      // Validate longitude range
+      if (longitude < -180 || longitude > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'Longitude must be between -180 and 180'
+        });
+      }
+
+      // Validate radius
+      if (radius < 1 || radius > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Radius must be between 1 and 100 km'
+        });
+      }
+
+      // Get all active doctors
+      const allDoctors = await Doctor.findAll(1000, 0);
+
+      // Filter and calculate distances
+      const nearbyDoctors = [];
+
+      for (const doctor of allDoctors) {
+        // Skip doctors without location data
+        if (!doctor.latitude || !doctor.longitude) {
+          continue;
+        }
+
+        // Calculate distance using Haversine formula
+        const distance = GeolocationService.calculateDistance(
+          latitude,
+          longitude,
+          doctor.latitude,
+          doctor.longitude
+        );
+
+        // Include if within radius
+        if (distance <= radius) {
+          nearbyDoctors.push({
+            ...doctor,
+            distance_km: parseFloat(distance.toFixed(2))
+          });
+        }
+      }
+
+      // Sort by distance (closest first)
+      nearbyDoctors.sort((a, b) => a.distance_km - b.distance_km);
+
+      // Remove password hashes
+      nearbyDoctors.forEach(doc => {
+        delete doc.password_hash;
+      });
+
+      // Log search for analytics
+      if (userId) {
+        await AuditLog.logSecurityEvent(
+          req,
+          userId,
+          'patient',
+          req.user.email,
+          'nearby_doctors_search',
+          'success',
+          `Found ${nearbyDoctors.length} doctors within ${radius}km`
+        );
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Found ${nearbyDoctors.length} doctors within ${radius}km`,
+        data: {
+          user_location: {
+            latitude,
+            longitude
+          },
+          radius_km: radius,
+          doctors_count: nearbyDoctors.length,
+          doctors: nearbyDoctors
+        }
+      });
+
+    } catch (error) {
+      console.error('Get nearby doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching nearby doctors',
         error: error.message
       });
     }
