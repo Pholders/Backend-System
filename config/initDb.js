@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
+const AccountDeletionToken = require('../models/AccountDeletionToken');
 
 /**
  * Initialize Database Tables
@@ -19,6 +20,9 @@ const initializeDatabase = async () => {
     
     // Create Pharmacies table
     await Pharmacy.createTable();
+
+    // Create Account Deletion Tokens table
+    await AccountDeletionToken.createTable();
     
     console.log('✅ Database initialization completed successfully');
     return true;

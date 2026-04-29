@@ -451,6 +451,248 @@ Thank you for using Pholders Healthcare!
   }
 
   /**
+   * Send account deletion confirmation email
+   * User must click link to confirm deletion
+   */
+  async sendAccountDeletionConfirmation(email, firstName, deletionLink) {
+    const mailOptions = {
+      from: `"Pholders Healthcare" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Confirm Account Deletion - Pholders Healthcare',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              background-color: #f4f4f9;
+              margin: 0;
+              padding: 0;
+              color: #333;
+            }
+            .container {
+              max-width: 600px;
+              margin: 20px auto;
+              background: #ffffff;
+              border-radius: 8px;
+              box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+              overflow: hidden;
+            }
+            .header {
+              background-color: #d9534f;
+              color: #ffffff;
+              text-align: center;
+              padding: 30px 20px;
+              border-bottom: 5px solid #c9302c;
+            }
+            .header img {
+              max-width: 80px;
+              margin-bottom: 10px;
+            }
+            .header h1 {
+              font-size: 24px;
+              margin: 0;
+            }
+            .header p {
+              font-size: 14px;
+              margin: 5px 0 0;
+              color: #ffcccc;
+            }
+            .content {
+              padding: 30px;
+            }
+            .content h2 {
+              color: #333;
+              margin-top: 0;
+            }
+            .warning-box {
+              background-color: #fff3cd;
+              border-left: 5px solid #d9534f;
+              padding: 15px;
+              margin: 20px 0;
+              border-radius: 3px;
+            }
+            .warning-box strong {
+              color: #d9534f;
+            }
+            .action-buttons {
+              margin: 30px 0;
+              text-align: center;
+            }
+            .confirm-button {
+              display: inline-block;
+              background-color: #d9534f;
+              color: #ffffff;
+              padding: 12px 30px;
+              text-decoration: none;
+              border-radius: 5px;
+              margin: 10px 5px;
+              font-weight: bold;
+            }
+            .confirm-button:hover {
+              background-color: #c9302c;
+            }
+            .cancel-button {
+              display: inline-block;
+              background-color: #5cb85c;
+              color: #ffffff;
+              padding: 12px 30px;
+              text-decoration: none;
+              border-radius: 5px;
+              margin: 10px 5px;
+              font-weight: bold;
+            }
+            .cancel-button:hover {
+              background-color: #4cae4c;
+            }
+            .token-info {
+              background-color: #f0f0f0;
+              padding: 15px;
+              border-radius: 5px;
+              margin: 15px 0;
+              font-size: 12px;
+              color: #666;
+              word-break: break-all;
+              max-height: 100px;
+              overflow-y: auto;
+            }
+            .footer {
+              text-align: center;
+              padding: 15px;
+              font-size: 12px;
+              color: #888;
+              background-color: #f9f9f9;
+            }
+            .expiry-warning {
+              color: #d9534f;
+              font-weight: bold;
+            }
+            .info-list {
+              background-color: #f5f5f5;
+              padding: 15px;
+              border-radius: 5px;
+              margin: 15px 0;
+            }
+            .info-list li {
+              margin: 8px 0;
+              color: #666;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <img src="cid:logo" alt="Pholders Healthcare">
+              <h1>Pholders Healthcare</h1>
+              <p>Account Deletion Request</p>
+            </div>
+            <div class="content">
+              <h2>Hello ${firstName},</h2>
+              
+              <div class="warning-box">
+                <strong>⚠️ IMPORTANT:</strong> You have requested to delete your Pholders Healthcare account.
+              </div>
+              
+              <p><strong>This action is permanent and cannot be undone.</strong></p>
+              
+              <p>When you confirm the deletion, we will:</p>
+              <ul class="info-list">
+                <li>✓ Permanently delete your account and all personal data</li>
+                <li>✓ Remove all your medical records and health information</li>
+                <li>✓ Delete all appointments and consultations</li>
+                <li>✓ Clear all stored communications and files</li>
+              </ul>
+              
+              <p><strong>To confirm account deletion, click the button below:</strong></p>
+              
+              <div class="action-buttons">
+                <a href="${deletionLink}" class="confirm-button">Confirm Deletion</a>
+              </div>
+              
+              <p>Or copy and paste this link in your browser:</p>
+              <div class="token-info">${deletionLink}</div>
+              
+              <div class="warning-box">
+                <strong>⏰ Action Required:</strong>
+                <p>This confirmation link will expire in <span class="expiry-warning">24 hours</span>.</p>
+                <p>If you do not click this link, your account will NOT be deleted.</p>
+              </div>
+              
+              <p><strong>Changed your mind?</strong></p>
+              <p>If you no longer want to delete your account, simply ignore this email. Your account will remain active.</p>
+              
+              <p><strong>For your security:</strong></p>
+              <ul class="info-list">
+                <li>✓ Never share this link with anyone</li>
+                <li>✓ Only click this link if you requested account deletion</li>
+                <li>✓ If you didn't request this, please contact support immediately</li>
+              </ul>
+              
+              <p>Thank you for using Pholders Healthcare.</p>
+            </div>
+            <div class="footer">
+              <p>&copy; 2026 Pholders Healthcare. All rights reserved.</p>
+              <p>This is an automated email. Please do not reply.</p>
+              <p>For support, contact: support@pholders.com</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+Hello ${firstName},
+
+⚠️ IMPORTANT: You have requested to delete your Pholders Healthcare account.
+
+THIS ACTION IS PERMANENT AND CANNOT BE UNDONE.
+
+When you confirm deletion, we will:
+✓ Permanently delete your account and all personal data
+✓ Remove all your medical records and health information
+✓ Delete all appointments and consultations
+✓ Clear all stored communications and files
+
+To confirm account deletion, click the link below:
+${deletionLink}
+
+This link will expire in 24 hours.
+
+If you do not click this link, your account will NOT be deleted.
+
+CHANGED YOUR MIND?
+If you no longer want to delete your account, simply ignore this email. Your account will remain active.
+
+SECURITY NOTICE:
+- Never share this link with anyone
+- Only click this link if you requested account deletion
+- If you didn't request this, contact support immediately
+
+Thank you for using Pholders Healthcare.
+
+---
+© 2026 Pholders Healthcare. All rights reserved.
+      `,
+      attachments: [
+        {
+          filename: 'logo.png',
+          path: path.join(__dirname, '..', 'images', 'PHolders 2.png'),
+          cid: 'logo'
+        }
+      ]
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Account deletion confirmation email sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Account deletion confirmation email sending failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Verify email configuration
    */
   async verifyConnection() {

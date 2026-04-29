@@ -14,6 +14,12 @@ docs/
 ├── api/
 │   └── DOCUMENTATION.md
 ├── features/
+│   ├── account-deletion/
+│   │   ├── README.md
+│   │   ├── SETUP_GUIDE.md
+│   │   ├── QUICK_REFERENCE.md
+│   │   ├── IMPLEMENTATION.md
+│   │   └── EMAIL_TEMPLATE.md
 │   ├── patient-profile/
 │   │   ├── SYSTEM.md
 │   │   └── QUICK_REFERENCE.md
@@ -56,6 +62,7 @@ docs/
 | **Add security features** | [security/ENHANCEMENTS.md](security/ENHANCEMENTS.md) |
 | **Track locations/fraud** | [features/geolocation/SETUP.md](features/geolocation/SETUP.md) |
 | **Reset forgotten passwords** | [features/password-reset/README.md](features/password-reset/README.md) |
+| **Allow account deletion** | [features/account-deletion/README.md](features/account-deletion/README.md) |
 | **Explore enhanced APIs** | [features/enhanced-api/API.md](features/enhanced-api/API.md) |
 
 ---
@@ -64,6 +71,7 @@ docs/
 
 ### 🔐 Authentication & Security
 - **OTP Email Setup**: [features/otp/SETUP.md](features/otp/SETUP.md)
+- **Account Deletion**: [features/account-deletion/](features/account-deletion/)
 - **Password Reset**: [features/password-reset/](features/password-reset/)
 - **Security Enhancements**: [security/ENHANCEMENTS.md](security/ENHANCEMENTS.md)
 
@@ -127,6 +135,15 @@ docs/
 - Email-based password recovery
 - Cryptographically secure tokens
 - 24-hour expiration
+
+### 🗑️ Account Deletion
+**Files**: [features/account-deletion/](features/account-deletion/)
+- Two-step secure deletion process
+- Exact text confirmation required
+- Email verification link
+- 24-hour expiration
+- Complete data deletion with audit logs
+- GDPR/CCPA compliant
 - Session invalidation
 
 ### 🛡️ Security

@@ -36,6 +36,17 @@ router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 router.post('/forgot-password', UserController.forgotPassword);
 router.post('/reset-password', UserController.resetPassword);
 
+// Account Deletion Routes
+// Step 1: Request deletion (must be logged in and type "Delete my account")
+router.post('/request-account-deletion', authMiddleware, requireRole('patient'), UserController.requestAccountDeletion);
+
+// Step 2: Confirm deletion (click link in email - no authentication needed)
+router.get('/confirm-account-deletion', UserController.confirmAccountDeletion);
+router.post('/confirm-account-deletion', UserController.confirmAccountDeletion);
+
+// Step 3: Cancel deletion (can be done before confirmation)
+router.post('/cancel-account-deletion', authMiddleware, requireRole('patient'), UserController.cancelAccountDeletion);
+
 router.get('/profile', authMiddleware, requireRole('patient'), UserController.getProfile);
 router.put('/profile', authMiddleware, requireRole('patient'), UserController.updateProfile);
 

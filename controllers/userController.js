@@ -717,6 +717,316 @@ class UserController {
       });
     }
   }
+
+  /**
+   * Request Account Deletion
+   * User must:
+   * 1. Be logged in
+   * 2. Type "Delete my account" to confirm
+   * 3. Receive confirmation email
+   * 4. Click link in email to actually delete account
+   */
+  static async requestAccountDeletion(req, res) {
+    try {
+      const userId = req.user.id;
+      const { confirmation_text } = req.body;
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+
+      // Get user data
+      const user = await User.findById(userId);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, userId, 'patient', user?.email, 'delete_account_request', 'failed', 'User not found');
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Validate confirmation text
+      const requiredConfirmation = 'Delete my account';
+      if (!confirmation_text || confirmation_text.trim() !== requiredConfirmation) {
+        await AuditLog.logSecurityEvent(req, userId, 'patient', user.email, 'delete_account_request', 'failed', `Invalid confirmation text. Expected: "${requiredConfirmation}"`);
+        return res.status(400).json({
+          success: false,
+          message: `To delete your account, you must type exactly: "${requiredConfirmation}"`,
+          required_text: requiredConfirmation
+        });
+      }
+
+      // Check if there's already an active deletion request
+      const AccountDeletionToken = require('../models/AccountDeletionToken');
+      const activeDeletion = await AccountDeletionToken.getActiveDeletionRequest(userId);
+      
+      if (activeDeletion) {
+        await AuditLog.logSecurityEvent(req, userId, 'patient', user.email, 'delete_account_request', 'failed', 'Active deletion request already exists');
+        return res.status(409).json({
+          success: false,
+          message: 'You already have an active account deletion request. Check your email for the confirmation link.',
+          expiresAt: activeDeletion.deletion_token_expires_at
+        });
+      }
+
+      // Create deletion token
+      const tokenResult = await AccountDeletionToken.create(userId, user.email, ipAddress, userAgent);
+      if (!tokenResult.success) {
+        throw new Error('Failed to create deletion token');
+      }
+
+      // Build deletion confirmation link
+      const deletionLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/confirm-account-deletion?token=${tokenResult.token}`;
+
+      // Send confirmation email
+      try {
+        await emailService.sendAccountDeletionConfirmation(user.email, user.first_name, deletionLink);
+      } catch (emailError) {
+        console.error('Failed to send deletion confirmation email:', emailError.message);
+        // Invalidate the token if email fails
+        await AccountDeletionToken.cancel(tokenResult.data.id, 'Email sending failed');
+        
+        await AuditLog.logSecurityEvent(req, userId, 'patient', user.email, 'delete_account_request', 'failed', 'Email sending failed');
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send confirmation email. Please try again.',
+          error: emailError.message
+        });
+      }
+
+      // Log the deletion request
+      await AuditLog.logSecurityEvent(req, userId, 'patient', user.email, 'delete_account_request', 'success', 'Deletion confirmation email sent');
+
+      res.status(200).json({
+        success: true,
+        message: 'Confirmation email sent! Please check your email to confirm account deletion.',
+        details: {
+          email: user.email,
+          expiresAt: tokenResult.data.deletion_token_expires_at,
+          note: 'Check your spam folder if you don\'t see the email'
+        }
+      });
+
+    } catch (error) {
+      console.error('Request account deletion error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error requesting account deletion',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Confirm Account Deletion
+   * Called when user clicks link in confirmation email
+   * Actually deletes the account
+   */
+  static async confirmAccountDeletion(req, res) {
+    try {
+      const { token } = req.query || req.body;
+
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          message: 'Deletion token is required'
+        });
+      }
+
+      // Verify deletion token
+      const AccountDeletionToken = require('../models/AccountDeletionToken');
+      const deletionTokenData = await AccountDeletionToken.findByToken(token);
+
+      if (!deletionTokenData) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired deletion token. Please request deletion again.',
+          code: 'INVALID_TOKEN'
+        });
+      }
+
+      const userId = deletionTokenData.user_id;
+      const userEmail = deletionTokenData.email;
+
+      // Get user data before deletion for audit log
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      try {
+        // Start deletion process
+        console.log(`🗑️  Deleting account for user: ${userEmail}`);
+
+        // 1. Invalidate all sessions
+        await Session.invalidateUserSessions(userId, 'Account deletion');
+
+        // 2. Delete related data (in order of foreign key dependencies)
+        // Note: Adjust based on your actual database schema
+        const { query } = require('../config/db');
+
+        // Delete OTPs
+        await query('DELETE FROM otps WHERE user_id = $1', [userId]);
+
+        // Delete password reset tokens
+        await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+
+        // Delete account deletion tokens
+        await AccountDeletionToken.invalidateAllUserTokens(userId, 'Account deleted');
+
+        // Delete audit logs (if you want to keep history, you can skip this)
+        // await query('DELETE FROM audit_logs WHERE user_id = $1', [userId]);
+
+        // Delete patient profiles (if exists)
+        await query('DELETE FROM patient_profiles WHERE user_id = $1', [userId]);
+
+        // Delete the user account
+        const deleteUserQuery = 'DELETE FROM patients WHERE id = $1 RETURNING *';
+        const deleteResult = await query(deleteUserQuery, [userId]);
+
+        if (deleteResult.rows.length === 0) {
+          throw new Error('Failed to delete user');
+        }
+
+        // Mark deletion token as confirmed
+        await AccountDeletionToken.markAsConfirmed(deletionTokenData.id);
+
+        // Log the account deletion
+        await AuditLog.logSecurityEvent(
+          req,
+          userId,
+          'patient',
+          userEmail,
+          'account_deleted',
+          'success',
+          'Account permanently deleted via email confirmation'
+        );
+
+        // Clear user's cache if using cache service
+        const cache = require('../services/cacheService');
+        try {
+          await cache.delete(`user:id:${userId}`);
+          await cache.delete(`user:email:${userEmail}`);
+        } catch (cacheError) {
+          console.warn('Warning: Cache cleanup failed:', cacheError.message);
+        }
+
+        console.log(`✅ Account deleted successfully for: ${userEmail}`);
+
+        res.status(200).json({
+          success: true,
+          message: 'Your account has been permanently deleted.',
+          details: {
+            email: userEmail,
+            deletedAt: new Date().toISOString(),
+            note: 'All your personal data and medical records have been removed from our system.'
+          }
+        });
+
+      } catch (deletionError) {
+        console.error('Error deleting account:', deletionError);
+        
+        await AuditLog.logSecurityEvent(
+          req,
+          userId,
+          'patient',
+          userEmail,
+          'account_deleted',
+          'failed',
+          `Deletion failed: ${deletionError.message}`
+        );
+
+        throw deletionError;
+      }
+
+    } catch (error) {
+      console.error('Confirm account deletion error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error confirming account deletion',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Cancel Account Deletion
+   * User can cancel deletion request before confirmation
+   */
+  static async cancelAccountDeletion(req, res) {
+    try {
+      const userId = req.user?.id;
+      const { token } = req.query || req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authentication required'
+        });
+      }
+
+      const AccountDeletionToken = require('../models/AccountDeletionToken');
+      
+      // If token is provided, anyone can cancel (for unauthenticated users)
+      // If no token, only logged-in user can cancel their own deletion
+      let deletionTokenData;
+      
+      if (token) {
+        deletionTokenData = await AccountDeletionToken.findByToken(token);
+      } else {
+        deletionTokenData = await AccountDeletionToken.getActiveDeletionRequest(userId);
+      }
+
+      if (!deletionTokenData) {
+        return res.status(404).json({
+          success: false,
+          message: 'No active deletion request found'
+        });
+      }
+
+      // Verify ownership (if token not provided)
+      if (!token && deletionTokenData.user_id !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized'
+        });
+      }
+
+      // Cancel the deletion request
+      await AccountDeletionToken.cancel(deletionTokenData.id, 'User cancelled deletion request');
+
+      // Log cancellation
+      const user = await User.findById(deletionTokenData.user_id);
+      await AuditLog.logSecurityEvent(
+        req,
+        deletionTokenData.user_id,
+        'patient',
+        user.email,
+        'delete_account_cancelled',
+        'success',
+        'User cancelled account deletion request'
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Account deletion request has been cancelled. Your account is safe.',
+        details: {
+          email: deletionTokenData.email,
+          status: 'Active',
+          note: 'If you wish to delete your account in the future, you can request it anytime.'
+        }
+      });
+
+    } catch (error) {
+      console.error('Cancel account deletion error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error cancelling account deletion',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = UserController;
