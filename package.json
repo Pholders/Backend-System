@@ -14,6 +14,8 @@
     "migrate:patient-profile": "node config/createPatientProfile.js",
     "migrate:enhanced-features": "node config/addEnhancedProfileFeatures.js",
     "migrate:password-reset": "node config/addPasswordReset.js",
+    "migrate:login-locations": "node config/addLoginLocationTracking.js",
+    "migrate:security-alerts": "node config/addSecurityAlerts.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -31,6 +33,7 @@
     "pg": "^8.20.0",
     "redis": "^4.6.14",
     "socket.io": "^4.8.3",
+    "ua-parser-js": "^0.7.41",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

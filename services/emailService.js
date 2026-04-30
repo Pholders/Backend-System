@@ -693,6 +693,116 @@ Thank you for using Pholders Healthcare.
   }
 
   /**
+   * Send threat notification email
+   */
+  async sendThreatNotification(email, firstName, alert) {
+    const mailOptions = {
+      from: `"Pholders Security" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: '🚨 URGENT: Suspicious Activity Confirmed on Your Account',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; color: #333; }
+            .container { max-width: 600px; margin: 20px auto; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+            .header { background: linear-gradient(135deg, #d32f2f, #b71c1c); color: #fff; padding: 30px; text-align: center; }
+            .alert-icon { font-size: 60px; margin: 10px 0; }
+            .content { padding: 25px; }
+            .threat-box { background: #ffebee; border: 2px solid #d32f2f; padding: 15px; border-radius: 4px; margin: 15px 0; }
+            .threat-box strong { color: #d32f2f; }
+            .action-required { background: #fff3cd; padding: 15px; border-left: 4px solid #ff9800; margin: 15px 0; }
+            .button { display: inline-block; padding: 12px 25px; background: #d32f2f; color: #fff; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 15px; }
+            .detail { padding: 8px 0; border-bottom: 1px solid #eee; }
+            .footer { background: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #eee; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="alert-icon">🚨</div>
+              <h1>Account Security Alert</h1>
+            </div>
+            <div class="content">
+              <h2 style="color: #d32f2f;">Suspicious Activity Confirmed</h2>
+              <p>Hi ${firstName},</p>
+              <p>Our security team has detected and <strong>confirmed suspicious activity</strong> on your Pholders Healthcare account.</p>
+              
+              <div class="threat-box">
+                <strong>⚠️ What Happened:</strong><br>
+                ${alert.alert_message || 'Unauthorized access detected'}
+              </div>
+
+              <div class="action-required">
+                <strong>🔴 IMMEDIATE ACTION REQUIRED:</strong><br>
+                <ul style="margin: 10px 0;">
+                  <li><strong>Change your password immediately</strong></li>
+                  <li>Review all active sessions and sign out of unrecognized devices</li>
+                  <li>Contact our support team if this wasn't you</li>
+                  <li>Consider enabling two-factor authentication</li>
+                </ul>
+              </div>
+
+              <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 15px 0;">
+                <strong>Alert Details:</strong>
+                <div class="detail"><strong>Alert Type:</strong> ${alert.alert_type || 'Unknown'}</div>
+                <div class="detail"><strong>Risk Level:</strong> ${alert.severity || 'Unknown'}</div>
+                <div class="detail"><strong>Timestamp:</strong> ${new Date(alert.created_at).toLocaleString()}</div>
+                <div class="detail"><strong>IP Address:</strong> ${alert.ip_address || 'Unknown'}</div>
+              </div>
+
+              <center>
+                <a href="${process.env.FRONTEND_URL}/settings/security" class="button">Review Security Settings</a>
+              </center>
+
+              <p style="font-size: 12px; color: #999; margin-top: 20px;">
+                If you believe this is a mistake or didn't authorize these activities, please contact our support team immediately.
+              </p>
+            </div>
+            <div class="footer">
+              <p>&copy; 2026 Pholders Healthcare. Your security is our priority.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+URGENT: SUSPICIOUS ACTIVITY CONFIRMED
+
+Hi ${firstName},
+
+Our security team has detected and confirmed suspicious activity on your account.
+
+Alert: ${alert.alert_message || 'Unauthorized access'}
+Alert Type: ${alert.alert_type}
+Risk Level: ${alert.severity}
+Timestamp: ${new Date(alert.created_at).toLocaleString()}
+IP Address: ${alert.ip_address || 'Unknown'}
+
+IMMEDIATE ACTION REQUIRED:
+1. Change your password immediately
+2. Review all active sessions
+3. Contact support if this wasn't you
+4. Enable two-factor authentication
+
+Visit your security settings: ${process.env.FRONTEND_URL}/settings/security
+
+Pholders Healthcare Security Team
+      `
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Threat notification sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Failed to send threat notification:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Verify email configuration
    */
   async verifyConnection() {

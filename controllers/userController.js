@@ -5,8 +5,11 @@ const User = require('../models/User');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
+const LoginLocation = require('../models/LoginLocation');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+const SecurityAlertService = require('../services/securityAlertService');
+const GeolocationService = require('../services/geolocationService');
 const PasswordResetToken = require('../models/PasswordResetToken');
 
 /**
@@ -320,6 +323,58 @@ class UserController {
       // Log successful login
       await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'success', null);
 
+      // 🔒 ENTERPRISE SECURITY: Analyze for suspicious activity
+      let activityAnalysis = { alerts: [], riskScore: 0 };
+      let geolocation = null;
+      
+      try {
+        // Get geolocation from IP
+        geolocation = await GeolocationService.getLocationFromIP(ipAddress);
+        
+        // Generate device fingerprint
+        const deviceFingerprint = crypto.createHash('sha256').update(userAgent || '').digest('hex');
+        
+        // Parse device info
+        const userAgentParser = require('ua-parser-js');
+        const parser = new userAgentParser();
+        const deviceInfo = parser.setUA(userAgent).getResult();
+        
+        // Analyze login activity for anomalies
+        activityAnalysis = await SecurityAlertService.analyzeLoginActivity({
+          userId: user.id,
+          userType: 'patient',
+          email: user.email,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          ipAddress,
+          geolocation,
+          deviceFingerprint,
+          deviceName: `${deviceInfo.device.name || 'Unknown'} ${deviceInfo.device.type || ''}`.trim(),
+          browser: `${deviceInfo.browser.name || 'Unknown'} ${deviceInfo.browser.version || ''}`.trim(),
+          os: `${deviceInfo.os.name || 'Unknown'} ${deviceInfo.os.version || ''}`.trim(),
+          userAgent
+        });
+        
+        // Send alerts if high risk
+        if (activityAnalysis.riskScore > 40) {
+          const riskLevel = SecurityAlertService.getRiskLevel(activityAnalysis.riskScore);
+          await SecurityAlertService.sendSecurityAlert({
+            email: user.email,
+            firstName: user.first_name,
+            lastName: user.last_name,
+            eventType: 'NEW_LOGIN',
+            details: activityAnalysis,
+            location: geolocation,
+            deviceInfo,
+            timestamp: new Date(),
+            riskLevel,
+            actionRequired: activityAnalysis.riskScore > 70
+          });
+        }
+      } catch (alertError) {
+        console.error('❌ Security alert error (non-blocking):', alertError.message);
+      }
+
       res.status(200).json({
         success: true,
         message: 'Login successful',
@@ -329,6 +384,10 @@ class UserController {
           session: {
             id: session.id,
             expiresAt: session.expires_at
+          },
+          security: {
+            riskScore: activityAnalysis.riskScore,
+            alertsSent: activityAnalysis.alerts?.length > 0
           }
         }
       });
@@ -694,6 +753,28 @@ class UserController {
 
       // Log successful password reset
       await AuditLog.logSecurityEvent(req, user.id, 'patient', user.email, 'reset_password', 'success', `IP: ${ipAddress}`);
+
+      // 🔒 ENTERPRISE SECURITY: Send password change security alert
+      let geolocation = null;
+      try {
+        geolocation = await GeolocationService.getLocationFromIP(ipAddress);
+        const userAgent = req.headers['user-agent'];
+        const userAgentParser = require('ua-parser-js');
+        const parser = new userAgentParser();
+        const deviceInfo = parser.setUA(userAgent).getResult();
+        
+        await SecurityAlertService.sendPasswordChangeAlert({
+          email: user.email,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          timestamp: new Date(),
+          ipAddress,
+          location: geolocation,
+          deviceInfo
+        });
+      } catch (alertError) {
+        console.error('❌ Password change alert error (non-blocking):', alertError.message);
+      }
 
       // Send confirmation email
       try {
