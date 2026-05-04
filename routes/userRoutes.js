@@ -6,6 +6,7 @@ const PharmacyController = require('../controllers/pharmacyController');
 const AdminController = require('../controllers/adminController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
+const RefreshController = require('../controllers/refreshController');
 
 /**
  * Patient Routes
@@ -45,5 +46,9 @@ router.post('/admin/verify-otp', preventAuthenticated, AdminController.verifyOTP
 
 router.get('/admin/profile', authMiddleware, requireRole('admin'), AdminController.getProfile);
 router.put('/admin/profile', authMiddleware, requireRole('admin'), AdminController.updateProfile);
+
+// authenticataion routes
+router.post('/refresh-token', RefreshController.refreshToken);
+router.post('/logout', RefreshController.logout);
 
 module.exports = router;
