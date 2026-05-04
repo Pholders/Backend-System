@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const OTP = require('../models/OTP');
+const RefreshToken = require('../models/RefreshToken');
 const emailService = require('../services/emailService');
 
 /**
@@ -279,12 +280,32 @@ class UserController {
         { expiresIn: '7d' }
       );
 
-      res.status(200).json({
+      // Generate access token (shorter expiration)
+      const accessToken = jwt.sign(
+        { 
+          id: user.id, 
+          email: user.email,
+          type: 'user' // or 'patient'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' } // Shorter expiration
+      );
+
+      // Generate refresh token
+      const refreshTokenData = await RefreshToken.create(
+        user.id, 
+        'patient', // or appropriate user type
+        req.headers['user-agent'] // Optional device info
+      );
+
+      res.json({
         success: true,
         message: 'Login successful',
         data: {
           user,
-          token
+          accessToken,
+          refreshToken: refreshTokenData.token,
+          expiresIn: 900 // 15 minutes in seconds
         }
       });
 
