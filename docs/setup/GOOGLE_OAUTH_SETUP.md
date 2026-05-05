@@ -47,19 +47,7 @@ This guide explains how to implement and use Google OAuth signup/login in the ba
 
 Add these variables to your `.env` file:
 
-```bash
-# Google OAuth Configuration
-GOOGLE_CLIENT_ID=your_google_client_id_here
-GOOGLE_CLIENT_SECRET=your_google_client_secret_here
-GOOGLE_CALLBACK_URL=http://localhost:3000/api/users/auth/google/callback
 
-# Session Configuration
-SESSION_SECRET=your_very_secure_session_secret_here_change_in_production
-
-# Frontend URL (for redirects after OAuth)
-FRONTEND_URL=http://localhost:3000  # or your frontend URL
-NODE_ENV=development
-```
 
 **Important:** 
 - Never commit `.env` to version control
