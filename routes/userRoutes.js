@@ -33,6 +33,18 @@ router.post('/signup', preventAuthenticated, UserController.signup);
 router.post('/login', preventAuthenticated, UserController.login);
 router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 
+/**
+ * Google OAuth Routes
+ */
+// Initiate Google login/signup
+router.get('/auth/google', UserController.googleAuth);
+
+// Google OAuth callback
+router.get('/auth/google/callback', UserController.googleAuthCallback);
+
+// Complete OAuth profile (required for new OAuth users)
+router.post('/auth/complete-profile', authMiddleware, requireRole('patient'), UserController.completeOAuthProfile);
+
 // Password Reset Routes (No authentication required)
 router.post('/forgot-password', UserController.forgotPassword);
 router.post('/reset-password', UserController.resetPassword);
