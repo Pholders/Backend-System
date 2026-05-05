@@ -8,6 +8,7 @@ const AuditLog = require('../models/AuditLog');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
+const GeocodingService = require('../services/geocodingService');
 
 /**
  * Doctor Controller
@@ -31,7 +32,10 @@ class DoctorController {
         experience,
         clinic_name,
         city,
-        province
+        province,
+        latitude,
+        longitude,
+        clinic_address
       } = req.body;
 
       // Validate required fields
@@ -85,6 +89,32 @@ class DoctorController {
         });
       }
 
+      // Process location data
+      let finalLatitude = null;
+      let finalLongitude = null;
+      let finalClinicAddress = clinic_address;
+
+      if (latitude !== undefined || longitude !== undefined || clinic_address) {
+        const locationResult = await GeocodingService.processLocation({
+          latitude,
+          longitude,
+          clinic_address
+        });
+
+        if (!locationResult.success) {
+          await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding error: ${locationResult.error}`);
+          return res.status(400).json({
+            success: false,
+            message: locationResult.error,
+            hint: 'Provide either manual coordinates (latitude, longitude) or clinic_address for auto-geocoding'
+          });
+        }
+
+        finalLatitude = locationResult.latitude;
+        finalLongitude = locationResult.longitude;
+        finalClinicAddress = locationResult.formatted_address;
+      }
+
       // Hash password
       const saltRounds = 10;
       const password_hash = await bcrypt.hash(password, saltRounds);
@@ -101,6 +131,9 @@ class DoctorController {
         clinic_name,
         city,
         province,
+        latitude: finalLatitude,
+        longitude: finalLongitude,
+        clinic_address: finalClinicAddress,
         password_hash
       });
 
@@ -112,7 +145,14 @@ class DoctorController {
       res.status(201).json({
         success: true,
         message: 'Doctor registered successfully. Please log in.',
-        data: { doctor: newDoctor }
+        data: { 
+          doctor: newDoctor,
+          location_info: {
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+            clinic_address: finalClinicAddress
+          }
+        }
       });
 
     } catch (error) {

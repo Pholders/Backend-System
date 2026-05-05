@@ -11,6 +11,7 @@
     "migrate:nationality": "node config/addNationalityField.js",
     "migrate:remove-oauth": "node config/removeOAuthSupport.js",
     "migrate:geolocation": "node config/addGeolocationSupport.js",
+    "migrate:doctor-geolocation": "node config/addGeolocationToDoctors.js",
     "migrate:patient-profile": "node config/createPatientProfile.js",
     "migrate:enhanced-features": "node config/addEnhancedProfileFeatures.js",
     "migrate:password-reset": "node config/addPasswordReset.js",

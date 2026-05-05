@@ -66,23 +66,26 @@ class Doctor {
       experience,
       clinic_name,
       city,
-      province
+      province,
+      latitude,
+      longitude,
+      clinic_address
     } = doctorData;
 
     const insertQuery = `
       INSERT INTO doctors (
         first_name, last_name, email, password_hash, phone,
         hpcsa_number, specialization, experience,
-        clinic_name, city, province
+        clinic_name, city, province, latitude, longitude, clinic_address
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `;
 
     const values = [
       first_name, last_name, email, password_hash, phone,
       hpcsa_number, specialization, experience,
-      clinic_name, city, province
+      clinic_name, city, province, latitude, longitude, clinic_address
     ];
 
     const result = await query(insertQuery, values);
@@ -179,6 +182,49 @@ class Doctor {
       ['inactive', id]
     );
     return result.rows[0];
+  }
+
+  /**
+   * Find doctors with location data (for nearby searches)
+   */
+  static async findDocsWithLocation() {
+    const result = await query(
+      `SELECT * FROM doctors 
+       WHERE status = $1 AND latitude IS NOT NULL AND longitude IS NOT NULL 
+       ORDER BY created_at DESC`,
+      ['active']
+    );
+    return result.rows;
+  }
+
+  /**
+   * Find nearby doctors by coordinates
+   */
+  static async findNearby(latitude, longitude, radiusKm = 15) {
+    // Uses PostGIS-style distance calculation
+    // Distance formula: sqrt((lat2-lat1)^2 + (lon2-lon1)^2) * 111 km per degree
+    const result = await query(
+      `SELECT *, 
+        (
+          6371 * acos(
+            cos(radians($1)) * cos(radians(latitude)) * 
+            cos(radians(longitude) - radians($2)) + 
+            sin(radians($1)) * sin(radians(latitude))
+          )
+        ) as distance_km
+       FROM doctors
+       WHERE status = $3 AND latitude IS NOT NULL AND longitude IS NOT NULL
+       HAVING (
+         6371 * acos(
+           cos(radians($1)) * cos(radians(latitude)) * 
+           cos(radians(longitude) - radians($2)) + 
+           sin(radians($1)) * sin(radians(latitude))
+         )
+       ) <= $4
+       ORDER BY distance_km ASC`,
+      [latitude, longitude, 'active', radiusKm]
+    );
+    return result.rows;
   }
 }
 

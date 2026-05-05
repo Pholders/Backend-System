@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
+const Doctor = require('../models/Doctor');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -326,10 +327,37 @@ class UserController {
       // 🔒 ENTERPRISE SECURITY: Analyze for suspicious activity
       let activityAnalysis = { alerts: [], riskScore: 0 };
       let geolocation = null;
+      let nearbyDoctors = [];
       
       try {
         // Get geolocation from IP
         geolocation = await GeolocationService.getLocationFromIP(ipAddress);
+        
+        // Fetch nearby doctors if geolocation is available and has valid coordinates
+        if (geolocation && geolocation.latitude && geolocation.longitude && !geolocation.is_private) {
+          try {
+            const radiusKm = 15; // Default 15km radius
+            nearbyDoctors = await Doctor.findNearby(geolocation.latitude, geolocation.longitude, radiusKm);
+            
+            // Remove password hashes and limit results
+            nearbyDoctors = nearbyDoctors.slice(0, 10).map(doc => ({
+              id: doc.id,
+              first_name: doc.first_name,
+              last_name: doc.last_name,
+              specialization: doc.specialization,
+              clinic_name: doc.clinic_name,
+              phone: doc.phone,
+              distance_km: doc.distance_km,
+              experience: doc.experience,
+              consultation_fee: doc.consultation_fee
+            }));
+            
+            console.log(`✅ Found ${nearbyDoctors.length} nearby doctors for patient ${user.id}`);
+          } catch (doctorError) {
+            console.error('❌ Error fetching nearby doctors (non-blocking):', doctorError.message);
+            nearbyDoctors = [];
+          }
+        }
         
         // Generate device fingerprint
         const deviceFingerprint = crypto.createHash('sha256').update(userAgent || '').digest('hex');
@@ -384,6 +412,18 @@ class UserController {
           session: {
             id: session.id,
             expiresAt: session.expires_at
+          },
+          location: geolocation ? {
+            city: geolocation.city,
+            country: geolocation.country,
+            latitude: geolocation.latitude,
+            longitude: geolocation.longitude,
+            timezone: geolocation.timezone
+          } : null,
+          nearby_doctors: {
+            count: nearbyDoctors.length,
+            radius_km: 15,
+            doctors: nearbyDoctors
           },
           security: {
             riskScore: activityAnalysis.riskScore,
