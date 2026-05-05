@@ -7,6 +7,7 @@ const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const LoginLocation = require('../models/LoginLocation');
+const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const SecurityAlertService = require('../services/securityAlertService');
@@ -403,12 +404,34 @@ class UserController {
         console.error('❌ Security alert error (non-blocking):', alertError.message);
       }
 
+      // Generate access token (shorter expiration)
+      const accessToken = jwt.sign(
+        { 
+          id: user.id, 
+          email: user.email,
+          type: 'user' // or 'patient'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' } // Shorter expiration
+      );
+
+      // Generate refresh token
+      const refreshTokenData = await RefreshToken.create(
+        user.id, 
+        'patient', // or appropriate user type
+        req.headers['user-agent'] // Optional device info
+      );
+
       res.status(200).json({
         success: true,
         message: 'Login successful',
         data: {
           user,
-          token,
+          tokens: {
+            accessToken,
+            refreshToken: refreshTokenData.token,
+            expiresIn: 900 // 15 minutes in seconds
+          },
           session: {
             id: session.id,
             expiresAt: session.expires_at

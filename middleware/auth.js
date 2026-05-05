@@ -10,20 +10,17 @@ const Session = require('../models/Session');
 
 const authMiddleware = async (req, res, next) => {
   try {
-    // Get token from header
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
-        message: 'No token provided. Access denied.'
+        message: 'No token provided. Access denied.',
+        code: 'NO_TOKEN'
       });
     }
 
-    // Extract token
     const token = authHeader.split(' ')[1];
-
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Verify session is still active
@@ -45,18 +42,21 @@ const authMiddleware = async (req, res, next) => {
     req.session = session;
     
     next();
+    
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
-        message: 'Token expired. Please login again.'
+        message: 'Token expired. Please refresh token.',
+        code: 'TOKEN_EXPIRED'
       });
     }
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         success: false,
-        message: 'Invalid token. Access denied.'
+        message: 'Invalid token. Access denied.',
+        code: 'INVALID_TOKEN'
       });
     }
 

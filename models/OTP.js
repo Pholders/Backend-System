@@ -1,8 +1,9 @@
 const { query } = require('../config/db');
+const bcrypt = require('bcrypt');
 
 /**
  * OTP Model
- * Handles OTP generation, storage, and verification
+ * Handles OTP generation, storage, and verification with hashed codes
  */
 
 class OTP {
@@ -14,7 +15,7 @@ class OTP {
       CREATE TABLE IF NOT EXISTS otps (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-        otp_code VARCHAR(6) NOT NULL,
+        otp_hash VARCHAR(255) NOT NULL,
         purpose VARCHAR(50) NOT NULL DEFAULT 'login',
         expires_at TIMESTAMP NOT NULL,
         is_used BOOLEAN DEFAULT false,
@@ -22,7 +23,6 @@ class OTP {
       );
 
       CREATE INDEX IF NOT EXISTS idx_otps_user_id ON otps(user_id);
-      CREATE INDEX IF NOT EXISTS idx_otps_code ON otps(otp_code);
       CREATE INDEX IF NOT EXISTS idx_otps_expires ON otps(expires_at);
     `;
     
@@ -51,6 +51,7 @@ class OTP {
    */
   static async create(userId, purpose = 'login', userType = 'patient', expiryMinutes = 10) {
     const otpCode = this.generateCode();
+    const otpHash = await bcrypt.hash(otpCode, 10);
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
     // Invalidate previous unused OTPs for this entity and purpose
@@ -60,13 +61,16 @@ class OTP {
     );
 
     const insertQuery = `
-      INSERT INTO otps (user_id, otp_code, purpose, expires_at, user_type)
+      INSERT INTO otps (user_id, otp_hash, purpose, expires_at, user_type)
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
+      RETURNING id, purpose, expires_at, user_type, is_used, created_at
     `;
 
-    const result = await query(insertQuery, [userId, otpCode, purpose, expiresAt, userType]);
-    return result.rows[0];
+    const result = await query(insertQuery, [userId, otpHash, purpose, expiresAt, userType]);
+    return {
+      ...result.rows[0],
+      otp_code: otpCode // Return plain OTP only at creation time
+    };
   }
 
   /**
@@ -80,18 +84,24 @@ class OTP {
     const selectQuery = `
       SELECT * FROM otps 
       WHERE user_id = $1 
-        AND otp_code = $2 
-        AND purpose = $3
-        AND user_type = $4
+        AND purpose = $2
+        AND user_type = $3
         AND is_used = false 
         AND expires_at > NOW()
       ORDER BY created_at DESC
       LIMIT 1
     `;
 
-    const result = await query(selectQuery, [userId, otpCode, purpose, userType]);
+    const result = await query(selectQuery, [userId, purpose, userType]);
 
     if (result.rows.length === 0) {
+      return { valid: false, message: 'Invalid or expired OTP' };
+    }
+
+    // Compare provided OTP against the stored hash
+    const isValidOTP = await bcrypt.compare(otpCode, result.rows[0].otp_hash);
+
+    if (!isValidOTP) {
       return { valid: false, message: 'Invalid or expired OTP' };
     }
 

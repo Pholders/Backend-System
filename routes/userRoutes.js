@@ -9,6 +9,7 @@ const PatientProfileController = require('../controllers/patientProfileControlle
 const EnhancedProfileController = require('../controllers/enhancedProfileController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
+const RefreshController = require('../controllers/refreshController');
 
 // Configure multer for file uploads
 const upload = multer({
@@ -173,5 +174,12 @@ router.post('/profile/files/:fileId/verify-integrity', authMiddleware, requireRo
 // Category Management Routes
 router.put('/profile/categories/:categoryId/rename', authMiddleware, requireRole('patient'), EnhancedProfileController.renameCategory);
 router.post('/profile/categories/reorder', authMiddleware, requireRole('patient'), EnhancedProfileController.reorderCategories);
+
+/**
+ * Token Management Routes (for access/refresh token system)
+ */
+// Refresh Token Routes
+router.post('/refresh-token', RefreshController.refreshToken);
+router.post('/logout', authMiddleware, RefreshController.logout);
 
 module.exports = router;
