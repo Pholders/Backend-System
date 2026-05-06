@@ -1171,6 +1171,202 @@ class UserController {
       });
     }
   }
+
+  /**
+   * Google OAuth - Initiate Login/Signup
+   * Redirects to Google OAuth consent screen
+   */
+  static googleAuth(req, res, next) {
+    // Check if Google credentials are configured
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      return res.status(503).json({
+        success: false,
+        message: 'Google OAuth is not configured',
+        details: 'Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables'
+      });
+    }
+
+    const passport = require('passport');
+    passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+  }
+
+  /**
+   * Google OAuth - Callback Handler
+   * Called after user approves OAuth permissions on Google
+   */
+  static async googleAuthCallback(req, res) {
+    try {
+      const passport = require('passport');
+      
+      // Use passport to authenticate
+      passport.authenticate('google', async (err, user, info) => {
+        if (err) {
+          console.error('Google OAuth error:', err);
+          return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`);
+        }
+
+        if (!user) {
+          return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=auth_failed`);
+        }
+
+        // Check if user needs to complete profile
+        const isProfileComplete = user.phone && user.id_passport_number && user.nationality;
+
+        if (!isProfileComplete) {
+          // Generate temporary token for profile completion
+          const tempToken = jwt.sign(
+            { 
+              id: user.id, 
+              email: user.email,
+              temporary: true,
+              type: 'oauth_profile_completion'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+          );
+
+          // Redirect to profile completion page
+          return res.redirect(
+            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/complete-profile?token=${tempToken}&email=${encodeURIComponent(user.email)}`
+          );
+        }
+
+        // User profile is complete, log them in
+        const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+
+        // Generate JWT token
+        const token = jwt.sign(
+          { 
+            id: user.id, 
+            email: user.email,
+            role: user.role,
+            type: 'patient'
+          },
+          process.env.JWT_SECRET,
+          { expiresIn: '7d' }
+        );
+
+        // Create session
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const session = await Session.create(
+          user.id,
+          'patient',
+          tokenHash,
+          ipAddress,
+          userAgent,
+          { userAgent, ipAddress, timestamp: new Date().toISOString() }
+        );
+
+        // Generate access token
+        const accessToken = jwt.sign(
+          { 
+            id: user.id, 
+            email: user.email,
+            type: 'user'
+          },
+          process.env.JWT_SECRET,
+          { expiresIn: '15m' }
+        );
+
+        // Generate refresh token
+        const refreshTokenData = await RefreshToken.create(user.id, 'patient', userAgent);
+
+        // Log successful login
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', user.email, 'google_login', 'success');
+
+        // Build redirect URL with tokens
+        const redirectUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth-callback`);
+        redirectUrl.searchParams.append('accessToken', accessToken);
+        redirectUrl.searchParams.append('refreshToken', refreshTokenData.token);
+        redirectUrl.searchParams.append('userId', user.id);
+        redirectUrl.searchParams.append('email', user.email);
+        redirectUrl.searchParams.append('success', 'true');
+
+        res.redirect(redirectUrl.toString());
+
+      })(req, res);
+
+    } catch (error) {
+      console.error('Google OAuth callback error:', error);
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=callback_failed`);
+    }
+  }
+
+  /**
+   * Complete OAuth Profile
+   * New OAuth users must complete their profile with required fields
+   * Phone, ID/Passport, and Nationality are required
+   */
+  static async completeOAuthProfile(req, res) {
+    try {
+      const userId = req.user.id;
+      const { phone, id_passport_number, nationality } = req.body;
+
+      // Validate required fields
+      if (!phone || !id_passport_number || !nationality) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone, ID/Passport number, and nationality are required',
+          requiredFields: ['phone', 'id_passport_number', 'nationality']
+        });
+      }
+
+      // Validate nationality
+      const validNationalities = ['South African', 'Other'];
+      if (!validNationalities.includes(nationality)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Nationality must be either "South African" or "Other"'
+        });
+      }
+
+      // Check if ID/Passport already exists
+      const existingUserByIdPassport = await User.findByIdPassport(id_passport_number);
+      if (existingUserByIdPassport && existingUserByIdPassport.id !== userId) {
+        return res.status(409).json({
+          success: false,
+          message: 'ID/Passport number already registered'
+        });
+      }
+
+      // Update user profile
+      const updatedUser = await User.update(userId, {
+        phone,
+        id_passport_number,
+        nationality
+      });
+
+      if (!updatedUser) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Log profile completion
+      await AuditLog.logSecurityEvent(req, userId, 'patient', updatedUser.email, 'oauth_profile_completed', 'success');
+
+      delete updatedUser.password_hash;
+
+      res.status(200).json({
+        success: true,
+        message: 'Profile completed successfully',
+        data: {
+          user: updatedUser,
+          message: 'Your profile is now complete. You can now access all features.'
+        }
+      });
+
+    } catch (error) {
+      console.error('Complete OAuth profile error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error completing profile',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = UserController;

@@ -156,6 +156,70 @@ class User {
   }
 
   /**
+   * Find user by OAuth provider
+   */
+  static async findByOAuthProvider(provider, providerId) {
+    const result = await query(
+      'SELECT * FROM patients WHERE oauth_provider = $1 AND oauth_provider_id = $2',
+      [provider, providerId]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Create a new OAuth user
+   * OAuth users may not have all required fields initially
+   */
+  static async createOAuthUser(userData) {
+    const {
+      first_name,
+      last_name,
+      email,
+      oauth_provider,
+      oauth_provider_id,
+      oauth_profile_picture,
+      phone,
+      id_passport_number,
+      nationality,
+      date_of_birth,
+      gender,
+      address,
+      city,
+      state,
+      zip_code,
+      blood_type,
+      allergies,
+      medical_history,
+      emergency_contact_name,
+      emergency_contact_phone
+    } = userData;
+
+    const insertQuery = `
+      INSERT INTO patients (
+        first_name, last_name, email, phone, id_passport_number, nationality,
+        date_of_birth, gender, address, city, state, zip_code,
+        blood_type, allergies, medical_history, 
+        emergency_contact_name, emergency_contact_phone,
+        oauth_provider, oauth_provider_id, oauth_profile_picture,
+        status, role
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient')
+      RETURNING *
+    `;
+
+    const values = [
+      first_name, last_name, email, phone, id_passport_number, nationality,
+      date_of_birth, gender, address, city, state, zip_code,
+      blood_type, allergies, medical_history,
+      emergency_contact_name, emergency_contact_phone,
+      oauth_provider, oauth_provider_id, oauth_profile_picture
+    ];
+
+    const result = await query(insertQuery, values);
+    return result.rows[0];
+  }
+
+  /**
    * Update user
    */
   static async update(id, userData) {
