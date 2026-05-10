@@ -1,18 +1,43 @@
 const express = require('express');
 const cors = require('cors');
+const session = require('express-session');
+const passport = require('passport');
 require('dotenv').config();
 const { pool } = require('./config/db');
+const cache = require('./services/cacheService');
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+
+// Import Passport config
+require('./config/passport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Session middleware (required for Passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Passport middleware
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Routes
 app.use('/api/users', userRoutes);
@@ -38,17 +63,50 @@ app.get('/api/test-db', async (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    cache: cache.isAvailable() ? 'connected' : 'unavailable'
+  });
+});
+
+// Cache stats endpoint
+app.get('/api/cache-stats', async (req, res) => {
+  try {
+    const stats = await cache.stats();
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
-  console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
-  console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
-});
+async function startServer() {
+  try {
+    // Initialize Redis cache
+    await cache.initialize();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server is running on port ${PORT}`);
+      console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
+      console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
+      console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
+      console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

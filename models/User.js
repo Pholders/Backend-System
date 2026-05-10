@@ -1,4 +1,5 @@
 const { query } = require('../config/db');
+const cache = require('../services/cacheService');
 
 /**
  * User (Patient) Model
@@ -102,16 +103,48 @@ class User {
    * Find user by email
    */
   static async findByEmail(email) {
+    const cacheKey = `user:email:${email}`;
+    
+    // Check cache first
+    let user = await cache.get(cacheKey);
+    if (user) {
+      return user;
+    }
+
+    // Query database
     const result = await query('SELECT * FROM patients WHERE email = $1', [email]);
-    return result.rows[0];
+    user = result.rows[0];
+
+    // Cache the result (30 minutes)
+    if (user) {
+      await cache.set(cacheKey, user, 1800);
+    }
+
+    return user;
   }
 
   /**
    * Find user by ID
    */
   static async findById(id) {
+    const cacheKey = `user:id:${id}`;
+    
+    // Check cache first
+    let user = await cache.get(cacheKey);
+    if (user) {
+      return user;
+    }
+
+    // Query database
     const result = await query('SELECT * FROM patients WHERE id = $1', [id]);
-    return result.rows[0];
+    user = result.rows[0];
+
+    // Cache the result (30 minutes)
+    if (user) {
+      await cache.set(cacheKey, user, 1800);
+    }
+
+    return user;
   }
 
   /**
@@ -119,6 +152,70 @@ class User {
    */
   static async findByIdPassport(id_passport_number) {
     const result = await query('SELECT * FROM patients WHERE id_passport_number = $1', [id_passport_number]);
+    return result.rows[0];
+  }
+
+  /**
+   * Find user by OAuth provider
+   */
+  static async findByOAuthProvider(provider, providerId) {
+    const result = await query(
+      'SELECT * FROM patients WHERE oauth_provider = $1 AND oauth_provider_id = $2',
+      [provider, providerId]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Create a new OAuth user
+   * OAuth users may not have all required fields initially
+   */
+  static async createOAuthUser(userData) {
+    const {
+      first_name,
+      last_name,
+      email,
+      oauth_provider,
+      oauth_provider_id,
+      oauth_profile_picture,
+      phone,
+      id_passport_number,
+      nationality,
+      date_of_birth,
+      gender,
+      address,
+      city,
+      state,
+      zip_code,
+      blood_type,
+      allergies,
+      medical_history,
+      emergency_contact_name,
+      emergency_contact_phone
+    } = userData;
+
+    const insertQuery = `
+      INSERT INTO patients (
+        first_name, last_name, email, phone, id_passport_number, nationality,
+        date_of_birth, gender, address, city, state, zip_code,
+        blood_type, allergies, medical_history, 
+        emergency_contact_name, emergency_contact_phone,
+        oauth_provider, oauth_provider_id, oauth_profile_picture,
+        status, role
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient')
+      RETURNING *
+    `;
+
+    const values = [
+      first_name, last_name, email, phone, id_passport_number, nationality,
+      date_of_birth, gender, address, city, state, zip_code,
+      blood_type, allergies, medical_history,
+      emergency_contact_name, emergency_contact_phone,
+      oauth_provider, oauth_provider_id, oauth_profile_picture
+    ];
+
+    const result = await query(insertQuery, values);
     return result.rows[0];
   }
 
@@ -148,7 +245,15 @@ class User {
     `;
 
     const result = await query(updateQuery, values);
-    return result.rows[0];
+    const updatedUser = result.rows[0];
+
+    // Invalidate cache
+    if (updatedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${updatedUser.email}`);
+    }
+
+    return updatedUser;
   }
 
   /**

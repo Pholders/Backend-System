@@ -1,8 +1,19 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const Doctor = require('../models/Doctor');
 const OTP = require('../models/OTP');
+const Session = require('../models/Session');
+const AuditLog = require('../models/AuditLog');
+const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+const GeolocationService = require('../services/geolocationService');
+const GeocodingService = require('../services/geocodingService');
+
+/**
+ * Doctor Controller
+ * Handles doctor authentication and profile management
+ */
 
 class DoctorController {
   /**
@@ -21,11 +32,15 @@ class DoctorController {
         experience,
         clinic_name,
         city,
-        province
+        province,
+        latitude,
+        longitude,
+        clinic_address
       } = req.body;
 
       // Validate required fields
       if (!first_name || !last_name || !email || !phone || !password || !hpcsa_number || !specialization || !experience || !clinic_name || !city || !province) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'Missing required fields');
         return res.status(400).json({
           success: false,
           message: 'All fields are required: first_name, last_name, email, phone, password, hpcsa_number, specialization, experience, clinic_name, city, province'
@@ -35,6 +50,7 @@ class DoctorController {
       // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'Invalid email format');
         return res.status(400).json({
           success: false,
           message: 'Invalid email format'
@@ -42,16 +58,21 @@ class DoctorController {
       }
 
       // Validate password strength
-      if (password.length < 6) {
+      const passwordValidation = PasswordValidator.validate(password);
+      if (!passwordValidation.valid) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Weak password: ${passwordValidation.errors.join(', ')}`);
         return res.status(400).json({
           success: false,
-          message: 'Password must be at least 6 characters long'
+          message: 'Password does not meet security requirements',
+          errors: passwordValidation.errors,
+          strength: PasswordValidator.getStrengthDescription(PasswordValidator.getStrength(password))
         });
       }
 
       // Check if email already exists
       const existingDoctor = await Doctor.findByEmail(email);
       if (existingDoctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'Email already registered');
         return res.status(409).json({
           success: false,
           message: 'Email already registered'
@@ -61,10 +82,37 @@ class DoctorController {
       // Check if HPCSA number already exists
       const existingHpcsa = await Doctor.findByHpcsaNumber(hpcsa_number);
       if (existingHpcsa) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'HPCSA number already registered');
         return res.status(409).json({
           success: false,
           message: 'HPCSA number already registered'
         });
+      }
+
+      // Process location data
+      let finalLatitude = null;
+      let finalLongitude = null;
+      let finalClinicAddress = clinic_address;
+
+      if (latitude !== undefined || longitude !== undefined || clinic_address) {
+        const locationResult = await GeocodingService.processLocation({
+          latitude,
+          longitude,
+          clinic_address
+        });
+
+        if (!locationResult.success) {
+          await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding error: ${locationResult.error}`);
+          return res.status(400).json({
+            success: false,
+            message: locationResult.error,
+            hint: 'Provide either manual coordinates (latitude, longitude) or clinic_address for auto-geocoding'
+          });
+        }
+
+        finalLatitude = locationResult.latitude;
+        finalLongitude = locationResult.longitude;
+        finalClinicAddress = locationResult.formatted_address;
       }
 
       // Hash password
@@ -83,15 +131,28 @@ class DoctorController {
         clinic_name,
         city,
         province,
+        latitude: finalLatitude,
+        longitude: finalLongitude,
+        clinic_address: finalClinicAddress,
         password_hash
       });
+
+      // Log successful signup
+      await AuditLog.logSecurityEvent(req, newDoctor.id, 'doctor', email, 'signup', 'success');
 
       delete newDoctor.password_hash;
 
       res.status(201).json({
         success: true,
-        message: 'Doctor registered successfully',
-        data: { doctor: newDoctor }
+        message: 'Doctor registered successfully. Please log in.',
+        data: { 
+          doctor: newDoctor,
+          location_info: {
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+            clinic_address: finalClinicAddress
+          }
+        }
       });
 
     } catch (error) {
@@ -112,14 +173,26 @@ class DoctorController {
       const { email, password } = req.body;
 
       if (!email || !password) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'login', 'failed', 'Missing email or password');
         return res.status(400).json({
           success: false,
           message: 'Email and password are required'
         });
       }
 
+      // Check for suspicious activity
+      const failedAttempts = await AuditLog.getFailedLoginAttempts(email, 1);
+      if (failedAttempts >= 5) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'login_failed', 'failed', `Too many failed attempts: ${failedAttempts}`);
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed login attempts. Please try again later or contact support.'
+        });
+      }
+
       const doctor = await Doctor.findByEmail(email);
       if (!doctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'login', 'failed', 'Doctor not found');
         return res.status(403).json({
           success: false,
           message: 'No doctor account found with this email. Please use the correct login page.'
@@ -127,6 +200,7 @@ class DoctorController {
       }
 
       if (doctor.status !== 'active') {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'failed', 'Account inactive');
         return res.status(403).json({
           success: false,
           message: 'Account is inactive. Please contact support.'
@@ -135,6 +209,7 @@ class DoctorController {
 
       const isPasswordValid = await bcrypt.compare(password, doctor.password_hash);
       if (!isPasswordValid) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login_failed', 'failed', 'Invalid password');
         return res.status(401).json({
           success: false,
           message: 'Invalid email or password'
@@ -143,6 +218,9 @@ class DoctorController {
 
       // Generate and send OTP
       const otpRecord = await OTP.create(doctor.id, 'login', 'doctor');
+
+      // Log OTP generation
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'success');
 
       const isDevelopment = process.env.NODE_ENV === 'development';
       let emailSent = false;
@@ -155,6 +233,7 @@ class DoctorController {
         console.error('❌ Failed to send OTP email:', emailError.message);
 
         if (!isDevelopment) {
+          await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
           return res.status(500).json({
             success: false,
             message: 'Failed to send OTP email. Please try again.'
@@ -200,7 +279,11 @@ class DoctorController {
     try {
       const { email, otp_code } = req.body;
 
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+
       if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'otp_verified', 'failed', 'Missing email or OTP');
         return res.status(400).json({
           success: false,
           message: 'Email and OTP code are required'
@@ -209,6 +292,7 @@ class DoctorController {
 
       const doctor = await Doctor.findByEmail(email);
       if (!doctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'otp_verified', 'failed', 'Doctor not found');
         return res.status(403).json({
           success: false,
           message: 'No doctor account found with this email. Please use the correct login page.'
@@ -217,6 +301,7 @@ class DoctorController {
 
       const otpResult = await OTP.verify(doctor.id, otp_code, 'login', 'doctor');
       if (!otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_failed', 'failed', 'Invalid or expired OTP');
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired OTP code'
@@ -236,10 +321,37 @@ class DoctorController {
         { expiresIn: '7d' }
       );
 
+      // Create session
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
+      };
+      
+      const session = await Session.create(
+        doctor.id,
+        'doctor',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'success');
+
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        data: { doctor, token }
+        data: {
+          doctor,
+          token,
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
+          }
+        }
       });
 
     } catch (error) {
@@ -247,6 +359,89 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error verifying OTP',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Doctor Logout
+   */
+  static async logout(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const sessionId = req.session?.id;
+
+      if (sessionId) {
+        await Session.revoke(sessionId, 'User logout');
+        await AuditLog.logSecurityEvent(req, doctorId, 'doctor', req.user.email, 'logout', 'success');
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Logged out successfully'
+      });
+
+    } catch (error) {
+      console.error('Logout error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error logging out',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Active Sessions
+   */
+  static async getSessions(req, res) {
+    try {
+      const doctorId = req.user.id;
+
+      const sessions = await Session.getUserActiveSessions(doctorId);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          sessions,
+          count: sessions.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Get sessions error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching sessions',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Activity Log
+   */
+  static async getActivityLog(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const limit = parseInt(req.query.limit) || 50;
+
+      const activityLog = await AuditLog.getUserActivity(doctorId, limit);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          activities: activityLog,
+          count: activityLog.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Get activity log error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching activity log',
         error: error.message
       });
     }
@@ -292,7 +487,6 @@ class DoctorController {
       const doctorId = req.user.id;
       const updateData = req.body;
 
-      // Remove fields that shouldn't be updated directly
       delete updateData.id;
       delete updateData.password_hash;
       delete updateData.email;
@@ -309,6 +503,8 @@ class DoctorController {
 
       delete updatedDoctor.password_hash;
 
+      await AuditLog.logSecurityEvent(req, doctorId, 'doctor', updatedDoctor.email, 'profile_updated', 'success');
+
       res.status(200).json({
         success: true,
         message: 'Profile updated successfully',
@@ -320,6 +516,129 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error updating profile',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get nearby doctors by user location
+   * Filters doctors within specified radius
+   */
+  static async getNearbyDoctors(req, res) {
+    try {
+      const { latitude, longitude, radius = 15 } = req.body;
+      const userId = req.user ? req.user.id : null;
+
+      // Validate required location parameters
+      if (latitude === undefined || longitude === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude and longitude are required'
+        });
+      }
+
+      // Validate that coordinates are valid numbers
+      if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude and longitude must be valid numbers'
+        });
+      }
+
+      // Validate latitude range
+      if (latitude < -90 || latitude > 90) {
+        return res.status(400).json({
+          success: false,
+          message: 'Latitude must be between -90 and 90'
+        });
+      }
+
+      // Validate longitude range
+      if (longitude < -180 || longitude > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'Longitude must be between -180 and 180'
+        });
+      }
+
+      // Validate radius
+      if (radius < 1 || radius > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Radius must be between 1 and 100 km'
+        });
+      }
+
+      // Get all active doctors
+      const allDoctors = await Doctor.findAll(1000, 0);
+
+      // Filter and calculate distances
+      const nearbyDoctors = [];
+
+      for (const doctor of allDoctors) {
+        // Skip doctors without location data
+        if (!doctor.latitude || !doctor.longitude) {
+          continue;
+        }
+
+        // Calculate distance using Haversine formula
+        const distance = GeolocationService.calculateDistance(
+          latitude,
+          longitude,
+          doctor.latitude,
+          doctor.longitude
+        );
+
+        // Include if within radius
+        if (distance <= radius) {
+          nearbyDoctors.push({
+            ...doctor,
+            distance_km: parseFloat(distance.toFixed(2))
+          });
+        }
+      }
+
+      // Sort by distance (closest first)
+      nearbyDoctors.sort((a, b) => a.distance_km - b.distance_km);
+
+      // Remove password hashes
+      nearbyDoctors.forEach(doc => {
+        delete doc.password_hash;
+      });
+
+      // Log search for analytics
+      if (userId) {
+        await AuditLog.logSecurityEvent(
+          req,
+          userId,
+          'patient',
+          req.user.email,
+          'nearby_doctors_search',
+          'success',
+          `Found ${nearbyDoctors.length} doctors within ${radius}km`
+        );
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Found ${nearbyDoctors.length} doctors within ${radius}km`,
+        data: {
+          user_location: {
+            latitude,
+            longitude
+          },
+          radius_km: radius,
+          doctors_count: nearbyDoctors.length,
+          doctors: nearbyDoctors
+        }
+      });
+
+    } catch (error) {
+      console.error('Get nearby doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching nearby doctors',
         error: error.message
       });
     }
