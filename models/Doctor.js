@@ -69,23 +69,24 @@ class Doctor {
       province,
       latitude,
       longitude,
-      clinic_address
+      clinic_address,
+      bio
     } = doctorData;
 
     const insertQuery = `
       INSERT INTO doctors (
         first_name, last_name, email, password_hash, phone,
         hpcsa_number, specialization, experience,
-        clinic_name, city, province, latitude, longitude, clinic_address
+        clinic_name, city, province, latitude, longitude, clinic_address, bio
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `;
 
     const values = [
       first_name, last_name, email, password_hash, phone,
       hpcsa_number, specialization, experience,
-      clinic_name, city, province, latitude, longitude, clinic_address
+      clinic_name, city, province, latitude, longitude, clinic_address, bio || null
     ];
 
     const result = await query(insertQuery, values);

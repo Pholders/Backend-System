@@ -7,6 +7,9 @@ const PharmacyController = require('../controllers/pharmacyController');
 const AdminController = require('../controllers/adminController');
 const PatientProfileController = require('../controllers/patientProfileController');
 const EnhancedProfileController = require('../controllers/enhancedProfileController');
+const AppointmentController = require('../controllers/appointmentController');
+const ReviewController = require('../controllers/reviewController');
+const PaymentController = require('../controllers/paymentController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
 const RefreshController = require('../controllers/refreshController');
@@ -186,6 +189,84 @@ router.post('/profile/files/:fileId/verify-integrity', authMiddleware, requireRo
 // Category Management Routes
 router.put('/profile/categories/:categoryId/rename', authMiddleware, requireRole('patient'), EnhancedProfileController.renameCategory);
 router.post('/profile/categories/reorder', authMiddleware, requireRole('patient'), EnhancedProfileController.reorderCategories);
+
+/**
+ * Appointment Booking Routes
+ */
+// Get booking information (time periods, date ranges)
+router.get('/appointments/booking-info', AppointmentController.getBookingInfo);
+
+// Get available doctors for appointment booking
+router.get('/appointments/doctors', AppointmentController.getAvailableDoctors);
+
+// Get available time slots for a specific doctor, date, and time period
+router.get('/appointments/available-slots', authMiddleware, requireRole('patient'), AppointmentController.getAvailableTimeSlots);
+
+// Book a new appointment
+router.post('/appointments/book', authMiddleware, requireRole('patient'), AppointmentController.bookAppointment);
+
+// Get all appointments for the patient
+router.get('/appointments', authMiddleware, requireRole('patient'), AppointmentController.getPatientAppointments);
+
+// Get patient's upcoming appointments
+router.get('/appointments/upcoming', authMiddleware, requireRole('patient'), AppointmentController.getUpcomingAppointments);
+
+// Get specific appointment details
+router.get('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentDetails);
+
+// Cancel an appointment
+router.delete('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.cancelAppointment);
+
+// Reschedule an appointment
+router.put('/appointments/:appointmentId/reschedule', authMiddleware, requireRole('patient'), AppointmentController.rescheduleAppointment);
+
+/**
+ * Doctor Reviews & Ratings Routes
+ */
+// Submit or update a review for a doctor
+router.post('/appointments/doctors/:doctorId/reviews', authMiddleware, requireRole('patient'), ReviewController.submitReview);
+
+// Get all reviews for a doctor
+router.get('/appointments/doctors/:doctorId/reviews', ReviewController.getDoctorReviews);
+
+// Get rating summary for a doctor
+router.get('/appointments/doctors/:doctorId/reviews/summary', ReviewController.getRatingSummary);
+
+// Check if patient has already reviewed a doctor
+router.get('/appointments/doctors/:doctorId/reviews/check-review', authMiddleware, requireRole('patient'), ReviewController.checkExistingReview);
+
+// Get patient's reviews
+router.get('/reviews', authMiddleware, requireRole('patient'), ReviewController.getPatientReviews);
+
+// Update a review
+router.put('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.updateReview);
+
+// Delete a review
+router.delete('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.deleteReview);
+
+/**
+ * Payment Routes
+ */
+// Get available payment methods
+router.get('/payments/methods', authMiddleware, requireRole('patient'), PaymentController.getAvailablePaymentMethods);
+
+// Initialize payment for appointment
+router.post('/payments/initialize', authMiddleware, requireRole('patient'), PaymentController.initializePayment);
+
+// Confirm Stripe payment
+router.post('/payments/confirm-stripe', authMiddleware, requireRole('patient'), PaymentController.confirmStripePayment);
+
+// Complete cash on arrival payment
+router.post('/payments/cash-on-arrival', authMiddleware, requireRole('patient'), PaymentController.completeCashPayment);
+
+// Complete medical aid payment
+router.post('/payments/medical-aid', authMiddleware, requireRole('patient'), PaymentController.completeMedicalAidPayment);
+
+// Get payment status for appointment
+router.get('/payments/appointment/:appointmentId', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
+
+// Get payment history
+router.get('/payments', authMiddleware, requireRole('patient'), PaymentController.getPaymentHistory);
 
 /**
  * Token Management Routes (for access/refresh token system)

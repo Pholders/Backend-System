@@ -33,17 +33,16 @@ class DoctorController {
         clinic_name,
         city,
         province,
-        latitude,
-        longitude,
-        clinic_address
+        clinic_address,
+        bio
       } = req.body;
 
       // Validate required fields
-      if (!first_name || !last_name || !email || !phone || !password || !hpcsa_number || !specialization || !experience || !clinic_name || !city || !province) {
+      if (!first_name || !last_name || !email || !phone || !password || !hpcsa_number || !specialization || !experience || !clinic_name || !city || !province || !clinic_address) {
         await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'Missing required fields');
         return res.status(400).json({
           success: false,
-          message: 'All fields are required: first_name, last_name, email, phone, password, hpcsa_number, specialization, experience, clinic_name, city, province'
+          message: 'All fields are required: first_name, last_name, email, phone, password, hpcsa_number, specialization, experience, clinic_name, city, province, clinic_address'
         });
       }
 
@@ -89,15 +88,13 @@ class DoctorController {
         });
       }
 
-      // Process location data
+      // Process location data - convert address to coordinates
       let finalLatitude = null;
       let finalLongitude = null;
       let finalClinicAddress = clinic_address;
 
-      if (latitude !== undefined || longitude !== undefined || clinic_address) {
+      try {
         const locationResult = await GeocodingService.processLocation({
-          latitude,
-          longitude,
           clinic_address
         });
 
@@ -105,14 +102,22 @@ class DoctorController {
           await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding error: ${locationResult.error}`);
           return res.status(400).json({
             success: false,
-            message: locationResult.error,
-            hint: 'Provide either manual coordinates (latitude, longitude) or clinic_address for auto-geocoding'
+            message: `Unable to geocode clinic address: ${locationResult.error}`,
+            hint: 'Please provide a valid clinic address (e.g., "123 Medical Street, Johannesburg, South Africa")'
           });
         }
 
         finalLatitude = locationResult.latitude;
         finalLongitude = locationResult.longitude;
         finalClinicAddress = locationResult.formatted_address;
+      } catch (geoError) {
+        console.error('Geocoding error:', geoError);
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding service error: ${geoError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Error processing clinic address location',
+          hint: 'Please ensure your clinic address is complete and valid'
+        });
       }
 
       // Hash password
@@ -134,7 +139,8 @@ class DoctorController {
         latitude: finalLatitude,
         longitude: finalLongitude,
         clinic_address: finalClinicAddress,
-        password_hash
+        password_hash,
+        bio
       });
 
       // Log successful signup

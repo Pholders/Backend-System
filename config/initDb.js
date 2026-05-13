@@ -2,6 +2,9 @@ const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
+const Appointment = require('../models/Appointment');
+const DoctorReview = require('../models/DoctorReview');
+const Payment = require('../models/Payment');
 
 /**
  * Initialize Database Tables
@@ -23,6 +26,15 @@ const initializeDatabase = async () => {
 
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
+
+    // Create Appointments table
+    await Appointment.createTable();
+
+    // Create Doctor Reviews table
+    await DoctorReview.createTable();
+
+    // Create Payments table
+    await Payment.createTable();
     
     console.log('✅ Database initialization completed successfully');
     return true;
