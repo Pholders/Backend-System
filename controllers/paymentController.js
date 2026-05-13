@@ -208,8 +208,8 @@ class PaymentController {
             receipt_url: intent.charges.data[0].receipt_url
           });
 
-          // Update appointment status
-          await Appointment.updateStatus(payment.appointment_id, 'scheduled');
+          // Confirm payment and change appointment status from pending_payment to scheduled
+          await Appointment.confirmPaymentAndSchedule(payment.appointment_id);
 
           await AuditLog.logSecurityEvent(
             req,
@@ -316,6 +316,9 @@ class PaymentController {
       // Update payment status to completed
       const updatedPayment = await Payment.updatePaymentStatus(paymentId, 'completed');
 
+      // Confirm payment and change appointment status from pending_payment to scheduled
+      await Appointment.confirmPaymentAndSchedule(payment.appointment_id);
+
       await AuditLog.logSecurityEvent(
         req,
         patientId,
@@ -410,6 +413,9 @@ class PaymentController {
       const { query: dbQuery } = require('../config/db');
       const result = await dbQuery(query, [paymentId, medicalAidNumber, medicalAidProvider]);
       const updatedPayment = result.rows[0];
+
+      // Confirm payment and change appointment status from pending_payment to scheduled
+      await Appointment.confirmPaymentAndSchedule(payment.appointment_id);
 
       await AuditLog.logSecurityEvent(
         req,

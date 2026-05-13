@@ -5,6 +5,7 @@ const AccountDeletionToken = require('../models/AccountDeletionToken');
 const Appointment = require('../models/Appointment');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
+const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 
 /**
  * Initialize Database Tables
@@ -35,6 +36,9 @@ const initializeDatabase = async () => {
 
     // Create Payments table
     await Payment.createTable();
+
+    // Add pending_payment status to appointments
+    await addPendingPaymentStatus();
     
     console.log('✅ Database initialization completed successfully');
     return true;

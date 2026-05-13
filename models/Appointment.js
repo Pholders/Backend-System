@@ -20,7 +20,7 @@ class Appointment {
         time_slot VARCHAR(10) NOT NULL,
         consultation_fee DECIMAL(10, 2) NOT NULL,
         reason_for_visit TEXT,
-        status VARCHAR(20) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'cancelled', 'no-show', 'rescheduled')),
+        status VARCHAR(20) DEFAULT 'pending_payment' CHECK (status IN ('pending_payment', 'scheduled', 'completed', 'cancelled', 'no-show', 'rescheduled')),
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -60,7 +60,7 @@ class Appointment {
         doctor_id, patient_id, appointment_date, time_period, 
         time_slot, consultation_fee, reason_for_visit, status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'scheduled')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_payment')
       RETURNING *
     `;
 
@@ -187,6 +187,20 @@ class Appointment {
   }
 
   /**
+   * Confirm payment and change status from pending_payment to scheduled
+   */
+  static async confirmPaymentAndSchedule(appointment_id) {
+    const result = await query(
+      `UPDATE appointments 
+       SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND status = 'pending_payment'
+       RETURNING *`,
+      [appointment_id]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * Get patient's upcoming appointments
    */
   static async getUpcomingAppointments(patient_id, limit = 10) {
@@ -228,6 +242,7 @@ class Appointment {
 
   /**
    * Check if time slot is available for a doctor on a specific date
+   * Reserves slot during pending_payment to prevent double-booking
    */
   static async isTimeSlotAvailable(doctor_id, appointment_date, time_period, time_slot) {
     const result = await query(
@@ -236,7 +251,7 @@ class Appointment {
        AND appointment_date = $2 
        AND time_period = $3 
        AND time_slot = $4
-       AND status IN ('scheduled', 'rescheduled')`,
+       AND status IN ('pending_payment', 'scheduled', 'rescheduled')`,
       [doctor_id, appointment_date, time_period, time_slot]
     );
     return result.rows[0].count === '0';
@@ -244,6 +259,7 @@ class Appointment {
 
   /**
    * Get available time slots for a doctor on a specific date and time period
+   * Reserves slots during pending_payment to prevent double-booking
    */
   static async getAvailableSlots(doctor_id, appointment_date, time_period) {
     const bookedSlots = await query(
@@ -251,7 +267,7 @@ class Appointment {
        WHERE doctor_id = $1 
        AND appointment_date = $2 
        AND time_period = $3
-       AND status IN ('scheduled', 'rescheduled')`,
+       AND status IN ('pending_payment', 'scheduled', 'rescheduled')`,
       [doctor_id, appointment_date, time_period]
     );
 
@@ -327,6 +343,64 @@ class Appointment {
     } catch (error) {
       console.error('Error fetching appointments by status:', error);
       return [];
+    }
+  }
+
+  /**
+   * Get all time periods availability for a doctor on a specific date
+   * Shows which periods are fully booked
+   */
+  static async getDayAvailability(doctor_id, appointment_date) {
+    try {
+      const timePeriods = ['morning', 'afternoon', 'evening', 'night'];
+      const availability = {};
+
+      for (const period of timePeriods) {
+        const allSlots = this.getTimeSlots(period);
+        const availableSlots = await this.getAvailableSlots(doctor_id, appointment_date, period);
+        
+        availability[period] = {
+          totalSlots: allSlots.length,
+          availableSlots: availableSlots.length,
+          bookedSlots: allSlots.length - availableSlots.length,
+          isFullyBooked: availableSlots.length === 0,
+          slots: allSlots.map(slot => ({
+            time: slot,
+            available: availableSlots.includes(slot)
+          }))
+        };
+      }
+
+      return availability;
+    } catch (error) {
+      console.error('Error getting day availability:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Auto-cancel pending payments that have expired (default: 30 minutes)
+   * Returns count of cancelled appointments
+   */
+  static async autoCancelExpiredPendingPayments(timeoutMinutes = 30) {
+    try {
+      const result = await query(
+        `UPDATE appointments 
+         SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+         WHERE status = 'pending_payment'
+         AND created_at < NOW() - INTERVAL '${timeoutMinutes} minutes'
+         RETURNING id`,
+        []
+      );
+      
+      const count = result.rows.length;
+      if (count > 0) {
+        console.log(`✅ Auto-cancelled ${count} expired pending payment appointments`);
+      }
+      return count;
+    } catch (error) {
+      console.error('Error auto-cancelling expired pending payments:', error);
+      return 0;
     }
   }
 }

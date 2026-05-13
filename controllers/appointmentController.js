@@ -666,6 +666,121 @@ class AppointmentController {
       });
     }
   }
+
+  /**
+   * Get all time periods availability for a doctor on a specific date
+   * Shows which periods are fully booked
+   */
+  static async getDayAvailability(req, res) {
+    try {
+      const { doctorId, date } = req.query;
+
+      // Validate required parameters
+      if (!doctorId || !date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required parameters: doctorId, date'
+        });
+      }
+
+      // Validate date is today or in the future
+      const selectedDate = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot check appointments for past dates'
+        });
+      }
+
+      // Verify doctor exists
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      if (doctor.status !== 'active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Doctor is not available'
+        });
+      }
+
+      // Get availability for all time periods
+      const availability = await Appointment.getDayAvailability(doctorId, date);
+
+      res.json({
+        success: true,
+        message: 'Daily availability retrieved successfully',
+        data: {
+          doctorId: parseInt(doctorId),
+          doctorName: `${doctor.first_name} ${doctor.last_name}`,
+          date,
+          availability,
+          summary: {
+            periodStatus: Object.entries(availability).map(([period, data]) => ({
+              period: period.charAt(0).toUpperCase() + period.slice(1),
+              available: !data.isFullyBooked,
+              availableSlots: data.availableSlots,
+              totalSlots: data.totalSlots,
+              bookedSlots: data.bookedSlots,
+              fullyBooked: data.isFullyBooked
+            }))
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error getting day availability:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch day availability',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Auto-cancel pending payments that have expired
+   * Admin endpoint - triggers automatic cancellation of unpaid appointments
+   */
+  static async autoCancelExpiredPayments(req, res) {
+    try {
+      const { timeoutMinutes = 30 } = req.body;
+
+      // Validate timeout is reasonable (between 5 and 1440 minutes / 1 day)
+      if (timeoutMinutes < 5 || timeoutMinutes > 1440) {
+        return res.status(400).json({
+          success: false,
+          message: 'Timeout must be between 5 and 1440 minutes'
+        });
+      }
+
+      // Auto-cancel expired pending payments
+      const cancelledCount = await Appointment.autoCancelExpiredPendingPayments(timeoutMinutes);
+
+      res.json({
+        success: true,
+        message: `Successfully auto-cancelled ${cancelledCount} expired pending payment appointments`,
+        data: {
+          cancelledCount,
+          timeoutMinutes,
+          timestamp: new Date()
+        }
+      });
+    } catch (error) {
+      console.error('Error auto-cancelling expired payments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to auto-cancel expired payments',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = AppointmentController;

@@ -180,6 +180,133 @@ GET /appointments/available-slots?doctorId={id}&date={YYYY-MM-DD}&timePeriod={pe
 }
 ```
 
+### Get Daily Availability (All Time Periods)
+```http
+GET /appointments/day-availability?doctorId={id}&date={YYYY-MM-DD}
+```
+**Description:** Get availability overview for ALL time periods on a specific date. Shows which periods are fully booked.
+
+**Query Parameters:**
+- `doctorId` (required): Doctor ID
+- `date` (required): Appointment date in YYYY-MM-DD format (from today onwards)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Daily availability retrieved successfully",
+  "data": {
+    "doctorId": 1,
+    "doctorName": "Dr. John Doe",
+    "date": "2026-05-20",
+    "availability": {
+      "morning": {
+        "totalSlots": 8,
+        "availableSlots": 2,
+        "bookedSlots": 6,
+        "isFullyBooked": false,
+        "slots": [
+          { "time": "08:00", "available": false },
+          { "time": "08:30", "available": false },
+          { "time": "09:00", "available": false },
+          { "time": "09:30", "available": true },
+          { "time": "10:00", "available": false },
+          { "time": "10:30", "available": true },
+          { "time": "11:00", "available": false },
+          { "time": "11:30", "available": false }
+        ]
+      },
+      "afternoon": {
+        "totalSlots": 8,
+        "availableSlots": 0,
+        "bookedSlots": 8,
+        "isFullyBooked": true,
+        "slots": [
+          { "time": "12:00", "available": false },
+          { "time": "12:30", "available": false },
+          { "time": "13:00", "available": false },
+          { "time": "13:30", "available": false },
+          { "time": "14:00", "available": false },
+          { "time": "14:30", "available": false },
+          { "time": "15:00", "available": false },
+          { "time": "15:30", "available": false }
+        ]
+      },
+      "evening": {
+        "totalSlots": 6,
+        "availableSlots": 5,
+        "bookedSlots": 1,
+        "isFullyBooked": false,
+        "slots": [
+          { "time": "16:00", "available": true },
+          { "time": "16:30", "available": true },
+          { "time": "17:00", "available": true },
+          { "time": "17:30", "available": false },
+          { "time": "18:00", "available": true },
+          { "time": "18:30", "available": true }
+        ]
+      },
+      "night": {
+        "totalSlots": 5,
+        "availableSlots": 5,
+        "bookedSlots": 0,
+        "isFullyBooked": false,
+        "slots": [
+          { "time": "19:00", "available": true },
+          { "time": "19:30", "available": true },
+          { "time": "20:00", "available": true },
+          { "time": "20:30", "available": true },
+          { "time": "21:00", "available": true }
+        ]
+      }
+    },
+    "summary": {
+      "periodStatus": [
+        {
+          "period": "Morning",
+          "available": true,
+          "availableSlots": 2,
+          "totalSlots": 8,
+          "bookedSlots": 6,
+          "fullyBooked": false
+        },
+        {
+          "period": "Afternoon",
+          "available": false,
+          "availableSlots": 0,
+          "totalSlots": 8,
+          "bookedSlots": 8,
+          "fullyBooked": true
+        },
+        {
+          "period": "Evening",
+          "available": true,
+          "availableSlots": 5,
+          "totalSlots": 6,
+          "bookedSlots": 1,
+          "fullyBooked": false
+        },
+        {
+          "period": "Night",
+          "available": true,
+          "availableSlots": 5,
+          "totalSlots": 5,
+          "bookedSlots": 0,
+          "fullyBooked": false
+        }
+      ]
+    }
+  }
+}
+```
+
+**Use Cases:**
+- Show patient which periods are fully booked (avoid showing grayed-out periods)
+- Display "Fully Booked" badge on periods where `fullyBooked` is true
+- Highlight available periods to guide patient selection
+- Show "2/8 slots available" under Morning period
+- Show "FULLY BOOKED" under Afternoon period
+
 ### Book Appointment
 ```http
 POST /appointments/book
@@ -345,6 +472,102 @@ PUT /appointments/{appointmentId}/reschedule
 }
 ```
 
+## Appointment Payment & Status Management
+
+### Payment Workflow
+
+Appointments follow a two-step payment confirmation flow:
+
+1. **Booking Stage** → Appointment created with `pending_payment` status
+   - Time slot is RESERVED immediately
+   - Patient proceeds to payment
+
+2. **Payment Confirmation** → Status transitions to `scheduled`
+   - Stripe payment: `POST /payments/confirm-stripe`
+   - Cash on arrival: `POST /payments/cash-on-arrival`
+   - Medical aid: `POST /payments/medical-aid`
+
+### Appointment Statuses
+
+| Status | Description | Slot Reserved? |
+|--------|-------------|-----------------|
+| `pending_payment` | Appointment booked, awaiting payment | ✅ Yes |
+| `scheduled` | Payment confirmed, appointment confirmed | ✅ Yes |
+| `completed` | Appointment completed | ❌ No |
+| `cancelled` | Appointment cancelled | ❌ No |
+| `no-show` | Patient did not attend | ❌ No |
+| `rescheduled` | Appointment rescheduled | ❌ No |
+
+**Important:** Slots are reserved during `pending_payment` status to prevent double-booking. Only when payment expires (without confirmation) does the slot become available again.
+
+### Auto-Cancel Expired Pending Payments
+
+The system automatically cancels unpaid appointments after a timeout period, freeing up the reserved time slots.
+
+#### Automatic Background Process
+- **Frequency:** Runs every 15 minutes automatically
+- **Timeout:** Cancels appointments pending payment for more than 30 minutes
+- **No Admin Action Required:** Fully automated
+
+#### Manual Trigger (Admin Only)
+```http
+POST /appointments/auto-cancel-expired
+```
+**Authentication:** Required (Admin only)
+
+**Request Body:**
+```json
+{
+  "timeoutMinutes": 30
+}
+```
+
+**Parameters:**
+- `timeoutMinutes` (optional): Time in minutes after which to cancel pending payments
+  - Minimum: 5 minutes
+  - Maximum: 1440 minutes (1 day)
+  - Default: 30 minutes
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Successfully auto-cancelled 2 expired pending payment appointments",
+  "data": {
+    "cancelledCount": 2,
+    "timeoutMinutes": 30,
+    "timestamp": "2026-05-13T10:45:00Z"
+  }
+}
+```
+
+#### What Happens When Auto-Cancelled
+
+When an appointment with `pending_payment` status expires:
+
+1. **Status Changes** → From `pending_payment` to `cancelled`
+2. **Slot Freed** → Time slot becomes available for other patients to book
+3. **Logged** → Event recorded in audit logs
+4. **Patient Notified** → (Optional via email service)
+
+#### Example Timeline
+
+```
+10:00 - Patient books appointment with Doctor A at 14:00
+        Status: pending_payment
+        Slot locked ❌ Others cannot book this slot
+
+10:30 - System auto-check runs, appointment is only 30 mins old → No action
+
+10:45 - System auto-check runs again, appointment still within 30-min window → No action
+
+10:31 - Appointment reaches 31 minutes → Auto-cancelled
+        Status: cancelled
+        Slot freed ✅ Other patients can now book 14:00
+
+10:32 - Another patient books the same 14:00 slot successfully
+```
+
 ## Database Schema
 
 ### Appointments Table
@@ -352,18 +575,23 @@ PUT /appointments/{appointmentId}/reschedule
 CREATE TABLE appointments (
   id SERIAL PRIMARY KEY,
   doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
-  patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   appointment_date DATE NOT NULL,
-  time_period VARCHAR(20) NOT NULL,
+  time_period VARCHAR(20) NOT NULL CHECK (time_period IN ('morning', 'afternoon', 'evening', 'night')),
   time_slot VARCHAR(10) NOT NULL,
   consultation_fee DECIMAL(10, 2) NOT NULL,
   reason_for_visit TEXT,
-  status VARCHAR(20) DEFAULT 'scheduled',
+  status VARCHAR(20) DEFAULT 'pending_payment' CHECK (status IN ('pending_payment', 'scheduled', 'completed', 'cancelled', 'no-show', 'rescheduled')),
   notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+**Key Notes:**
+- `patient_id` references the `patients` table (not `users`)
+- `status` defaults to `pending_payment` for two-step payment confirmation
+- `time_period` is constrained to valid periods only
 
 **Indexes:**
 - `idx_appointments_doctor_date`: On (doctor_id, appointment_date)
@@ -373,13 +601,14 @@ CREATE TABLE appointments (
 
 ## Appointment Statuses
 
-| Status | Description |
-|--------|-------------|
-| `scheduled` | Appointment is booked and waiting |
-| `completed` | Appointment has been completed |
-| `cancelled` | Appointment was cancelled by patient |
-| `no-show` | Patient did not show up for appointment |
-| `rescheduled` | Appointment was rescheduled to a new date/time |
+| Status | Description | Slot Reserved | Transition |
+|--------|-------------|---------------|------------|
+| `pending_payment` | Appointment booked, awaiting payment | ✅ Yes | → `scheduled` (after payment) or → `cancelled` (if payment expired) |
+| `scheduled` | Payment confirmed, appointment confirmed | ✅ Yes | → `completed` (after visit) or → `cancelled` (if patient cancels) or → `rescheduled` |
+| `completed` | Appointment has been completed | ❌ No | Final state (patient can leave review) |
+| `cancelled` | Appointment was cancelled | ❌ No | Final state (slot becomes available) |
+| `no-show` | Patient did not show up | ❌ No | Final state |
+| `rescheduled` | Appointment was moved to new date/time | ❌ No | Intermediate state (creates new appointment) |
 
 ## Appointment Booking Flow (Frontend)
 

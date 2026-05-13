@@ -220,6 +220,12 @@ router.delete('/appointments/:appointmentId', authMiddleware, requireRole('patie
 // Reschedule an appointment
 router.put('/appointments/:appointmentId/reschedule', authMiddleware, requireRole('patient'), AppointmentController.rescheduleAppointment);
 
+// Get daily availability (all time periods) for a doctor
+router.get('/appointments/day-availability', AppointmentController.getDayAvailability);
+
+// Auto-cancel expired pending payments (admin endpoint)
+router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('admin'), AppointmentController.autoCancelExpiredPayments);
+
 /**
  * Doctor Reviews & Ratings Routes
  */

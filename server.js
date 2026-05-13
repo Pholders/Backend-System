@@ -5,6 +5,7 @@ const passport = require('passport');
 require('dotenv').config();
 const { pool } = require('./config/db');
 const cache = require('./services/cacheService');
+const AppointmentCleanupService = require('./services/appointmentCleanupService');
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
@@ -91,6 +92,10 @@ async function startServer() {
   try {
     // Initialize Redis cache
     await cache.initialize();
+    
+    // Start appointment cleanup service (auto-cancel expired pending payments)
+    // Runs every 15 minutes, cancels payments pending for more than 30 minutes
+    AppointmentCleanupService.start(15, 30);
     
     app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
