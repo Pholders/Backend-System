@@ -75,12 +75,17 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         user = await User.findByEmail(profile.emails[0].value);
 
         if (user) {
-          // Link OAuth to existing account
+          // Link OAuth to existing account (Google has verified the email,
+          // so we can auto-mark the account as verified if it wasn't already)
           await User.update(user.id, {
             oauth_provider: 'google',
             oauth_provider_id: profile.id,
             oauth_profile_picture: profile.photos && profile.photos[0] ? profile.photos[0].value : null
           });
+          if (user.email_verified === false) {
+            const verified = await User.markEmailVerified(user.id);
+            if (verified) user = verified;
+          }
           return done(null, user);
         }
 

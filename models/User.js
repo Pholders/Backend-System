@@ -201,9 +201,9 @@ class User {
         blood_type, allergies, medical_history, 
         emergency_contact_name, emergency_contact_phone,
         oauth_provider, oauth_provider_id, oauth_profile_picture,
-        status, role
+        status, role, email_verified, email_verified_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient', true, CURRENT_TIMESTAMP)
       RETURNING *
     `;
 
@@ -265,6 +265,32 @@ class User {
       [limit, offset]
     );
     return result.rows;
+  }
+
+  /**
+   * Mark a patient's email as verified.
+   * Sets email_verified = true and stamps email_verified_at = NOW().
+   * Invalidates the user cache so subsequent reads see the updated flag.
+   */
+  static async markEmailVerified(id) {
+    const result = await query(
+      `UPDATE patients
+       SET email_verified = true,
+           email_verified_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    const updatedUser = result.rows[0];
+
+    if (updatedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${updatedUser.email}`);
+    }
+
+    return updatedUser;
   }
 
   /**

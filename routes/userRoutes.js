@@ -33,6 +33,10 @@ router.post('/signup', preventAuthenticated, UserController.signup);
 router.post('/login', preventAuthenticated, UserController.login);
 router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 
+// Email Verification (account activation)
+router.post('/verify-email', preventAuthenticated, UserController.verifyEmail);
+router.post('/resend-verification', preventAuthenticated, UserController.resendVerificationEmail);
+
 /**
  * Google OAuth Routes
  */

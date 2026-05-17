@@ -102,7 +102,7 @@ class UserController {
       const saltRounds = 10;
       const password_hash = await bcrypt.hash(password, saltRounds);
 
-      // Create new user
+      // Create new user (email_verified defaults to false via DB default)
       const newUser = await User.create({
         first_name,
         last_name,
@@ -116,16 +116,54 @@ class UserController {
       // Log successful signup
       await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'signup', 'success');
 
+      // Generate email verification OTP (15-min expiry) and send it
+      let verificationEmailSent = false;
+      let devVerificationCode = null;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      try {
+        const otpRecord = await OTP.create(newUser.id, 'email_verification', 'patient', 15);
+        await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'email_verification_sent', 'success');
+
+        try {
+          await emailService.sendVerificationOTP(email, otpRecord.otp_code, first_name);
+          verificationEmailSent = true;
+          console.log('✅ Email verification code sent');
+        } catch (emailError) {
+          console.error('❌ Failed to send verification email:', emailError.message);
+          await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'email_verification_sent', 'failed', `Email error: ${emailError.message}`);
+
+          if (isDevelopment) {
+            devVerificationCode = otpRecord.otp_code;
+            console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+          }
+        }
+      } catch (otpError) {
+        console.error('❌ Failed to create verification OTP:', otpError.message);
+      }
+
       // Remove password_hash from response
       delete newUser.password_hash;
 
-      res.status(201).json({
+      const response = {
         success: true,
-        message: 'User registered successfully. Please log in.',
+        message: verificationEmailSent
+          ? 'Account created. Please check your email for a verification code to activate your account.'
+          : 'Account created, but we could not send the verification email. Please request a new code.',
         data: {
-          user: newUser
+          user: newUser,
+          requiresEmailVerification: true,
+          email: newUser.email,
+          expiresIn: '15 minutes'
         }
-      });
+      };
+
+      if (isDevelopment && devVerificationCode) {
+        response.data.verification_code = devVerificationCode;
+        response.data.dev_note = 'Verification code included in response (development mode only)';
+      }
+
+      res.status(201).json(response);
 
     } catch (error) {
       console.error('Signup error:', error);
@@ -191,6 +229,17 @@ class UserController {
         return res.status(401).json({
           success: false,
           message: 'Invalid email or password'
+        });
+      }
+
+      // 🛡️  Email verification gate: block login until ownership is proven
+      if (user.email_verified === false) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'failed', 'Email not verified');
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email before logging in. Use the resend endpoint to get a new verification code.',
+          data: { email: user.email }
         });
       }
 
@@ -277,6 +326,16 @@ class UserController {
         return res.status(403).json({
           success: false,
           message: 'No patient account found with this email. Please use the correct login page.'
+        });
+      }
+
+      // 🛡️  Email verification gate (defense in depth)
+      if (user.email_verified === false) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_verified', 'failed', 'Email not verified');
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email before logging in.'
         });
       }
 
@@ -1167,6 +1226,148 @@ class UserController {
       res.status(500).json({
         success: false,
         message: 'Error cancelling account deletion',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Verify Email (Account Activation)
+   * Confirms the user owns the email address provided at signup.
+   * On success, flips email_verified = true so login is permitted.
+   */
+  static async verifyEmail(req, res) {
+    try {
+      const { email, otp_code } = req.body;
+
+      if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'email_verification', 'failed', 'Missing email or code');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and verification code are required'
+        });
+      }
+
+      const user = await User.findByEmail(email);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'email_verification', 'failed', 'User not found');
+        // Generic response to prevent account enumeration
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      // Idempotent: already verified
+      if (user.email_verified === true) {
+        return res.status(200).json({
+          success: true,
+          message: 'Email is already verified. You can log in.',
+          data: { email: user.email, alreadyVerified: true }
+        });
+      }
+
+      const otpResult = await OTP.verify(user.id, otp_code, 'email_verification', 'patient');
+      if (!otpResult || !otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification', 'failed', 'Invalid or expired code');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      await User.markEmailVerified(user.id);
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. You can now log in.',
+        data: {
+          email: user.email,
+          email_verified: true
+        }
+      });
+    } catch (error) {
+      console.error('Verify email error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error verifying email',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Resend Email Verification Code
+   * Generates a fresh OTP and emails it. Rate-limited to one request per 60 seconds
+   * per account to prevent abuse. Returns generic responses to avoid account enumeration.
+   */
+  static async resendVerificationEmail(req, res) {
+    try {
+      const { email } = req.body;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required'
+        });
+      }
+
+      const genericResponse = {
+        success: true,
+        message: 'If an unverified account exists for this email, a new verification code has been sent.'
+      };
+
+      const user = await User.findByEmail(email);
+
+      // Don't reveal whether the account exists or its verification state
+      if (!user || user.email_verified === true) {
+        return res.status(200).json(genericResponse);
+      }
+
+      // Rate-limit: reject if a code was issued in the last 60 seconds
+      const latest = await OTP.getLatest(user.id, 'email_verification', 'patient');
+      if (latest) {
+        const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
+        if (ageSeconds < 60) {
+          await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification_resend', 'failed', 'Rate limited');
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${Math.ceil(60 - ageSeconds)} seconds before requesting another code.`
+          });
+        }
+      }
+
+      const otpRecord = await OTP.create(user.id, 'email_verification', 'patient', 15);
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification_resend', 'success');
+
+      try {
+        await emailService.sendVerificationOTP(user.email, otpRecord.otp_code, user.first_name);
+      } catch (emailError) {
+        console.error('❌ Failed to resend verification email:', emailError.message);
+        if (!isDevelopment) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send verification email. Please try again.'
+          });
+        }
+        console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+      }
+
+      const response = { ...genericResponse };
+      if (isDevelopment) {
+        response.data = {
+          verification_code: otpRecord.otp_code,
+          dev_note: 'Verification code included in response (development mode only)'
+        };
+      }
+      return res.status(200).json(response);
+    } catch (error) {
+      console.error('Resend verification error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error resending verification code',
         error: error.message
       });
     }
