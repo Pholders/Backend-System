@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { query } = require('./config/db');
+const { query } = require('../config/db');
 
 async function getLatestOTP() {
   console.log('\n=== Latest OTP Codes ===\n');
@@ -16,7 +16,8 @@ async function getLatestOTP() {
         o.is_used,
         o.created_at
       FROM otps o
-      JOIN users u ON o.user_id = u.id
+      JOIN patients u ON o.user_id = u.id
+      WHERE o.user_type = 'patient'
       ORDER BY o.created_at DESC
       LIMIT 5
     `);

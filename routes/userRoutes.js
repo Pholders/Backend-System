@@ -126,6 +126,12 @@ router.get('/doctor/activity-log', authMiddleware, requireRole('doctor'), Doctor
 // Find nearby doctors by user location (available to authenticated patients)
 router.post('/doctors/nearby', authMiddleware, requireRole('patient'), DoctorController.getNearbyDoctors);
 
+// Patient "Find doctors near you" listing + details (Sprint: patient app)
+// GET /doctors?lat=&lng=&radius_km=&specialty=&max_fee=&page=&limit=
+router.get('/doctors', authMiddleware, requireRole('patient'), DoctorController.listDoctors);
+// GET /doctors/:id
+router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorController.getDoctorById);
+
 /**
  * Pharmacy Routes
  */
