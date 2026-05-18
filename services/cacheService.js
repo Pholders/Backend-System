@@ -15,29 +15,49 @@ class CacheService {
    * Initialize Redis connection
    */
   async initialize() {
+    // Track whether we've already logged a connection error so we don't
+    // spam the console on every reconnection attempt.
+    let errorLogged = false;
+    const MAX_RETRIES = 5;
+
     try {
       this.client = redis.createClient({
         host: process.env.REDIS_HOST || 'localhost',
         port: process.env.REDIS_PORT || 6379,
         socket: {
-          reconnectStrategy: (retries) => Math.min(retries * 50, 500)
+          // Stop reconnecting after MAX_RETRIES attempts so the app doesn't
+          // retry forever when Redis isn't available locally.
+          reconnectStrategy: (retries) => {
+            if (retries >= MAX_RETRIES) {
+              if (!errorLogged) {
+                console.warn(`⚠️  Redis unavailable after ${MAX_RETRIES} retries. Continuing without cache.`);
+                errorLogged = true;
+              }
+              return false; // stop retrying
+            }
+            return Math.min(retries * 50, 500);
+          }
         }
       });
 
       this.client.on('error', (err) => {
-        console.error('❌ Redis Client Error:', err);
+        // Log only the first error to avoid console spam during reconnect loops.
+        if (!errorLogged) {
+          console.error('❌ Redis Client Error:', err.message || err);
+          errorLogged = true;
+        }
         this.isConnected = false;
       });
 
       this.client.on('connect', () => {
         console.log('✅ Redis connected successfully');
         this.isConnected = true;
+        errorLogged = false; // reset for future disconnects
       });
 
       await this.client.connect();
     } catch (error) {
-      console.error('❌ Failed to initialize Redis:', error);
-      console.log('⚠️  Continuing without Redis cache');
+      console.warn('⚠️  Redis not available — continuing without cache:', error.message || error);
     }
   }
 

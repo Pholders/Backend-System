@@ -21,7 +21,8 @@ class AuditLog {
           'signup', 'login', 'logout', 'login_failed', 'password_change', 
           'password_reset', 'otp_generated', 'otp_verified', 'otp_failed',
           'session_created', 'session_revoked', 'profile_updated', 
-          'unauthorized_access', 'account_locked', 'account_unlocked'
+          'unauthorized_access', 'account_locked', 'account_unlocked',
+          'email_verification_sent', 'email_verification', 'email_verification_resend'
         )),
         status VARCHAR(50) NOT NULL CHECK (status IN ('success', 'failed', 'warning')),
         ip_address VARCHAR(50),

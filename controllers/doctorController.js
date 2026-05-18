@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { query } = require('../config/db');
 const Doctor = require('../models/Doctor');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
@@ -9,6 +10,18 @@ const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
+
+/**
+ * Build a display-ready doctor name with the "Dr" title prefix.
+ * Every row in the doctors table is a doctor, so the prefix is implicit
+ * and we don't store it in the database.
+ */
+function buildDisplayName(doctor) {
+  const first = (doctor.first_name || '').trim();
+  const last = (doctor.last_name || '').trim();
+  const full = `${first} ${last}`.trim();
+  return full ? `Dr ${full}` : null;
+}
 
 /**
  * Doctor Controller
@@ -376,7 +389,7 @@ class DoctorController {
   static async logout(req, res) {
     try {
       const doctorId = req.user.id;
-      const sessionId = req.session?.id;
+      const sessionId = req.authSession?.id;
 
       if (sessionId) {
         await Session.revoke(sessionId, 'User logout');
@@ -645,6 +658,191 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error fetching nearby doctors',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /doctors
+   *
+   * Public doctor listing for the patient "Find doctors near you" screen.
+   * Patient sends their current GPS coordinates as query params and we
+   * return active doctors sorted by distance, with optional specialty,
+   * max-fee and radius filters plus pagination.
+   *
+   * Query params:
+   *   lat         (required, number)  - patient latitude
+   *   lng         (required, number)  - patient longitude
+   *   radius_km   (optional, number)  - default 5, max 100
+   *   specialty   (optional, string)  - matches doctors.specialization
+   *   max_fee     (optional, number)  - max consultation_fee (inclusive)
+   *   page        (optional, int)     - default 1
+   *   limit       (optional, int)     - default 20, max 100
+   */
+  static async listDoctors(req, res) {
+    try {
+      const lat = parseFloat(req.query.lat);
+      const lng = parseFloat(req.query.lng);
+      const radiusKm = req.query.radius_km !== undefined ? parseFloat(req.query.radius_km) : 5;
+      const specialty = req.query.specialty ? String(req.query.specialty).trim() : null;
+      const maxFee = req.query.max_fee !== undefined ? parseFloat(req.query.max_fee) : null;
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+      // Validate coordinates
+      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+        return res.status(400).json({
+          success: false,
+          message: 'lat and lng query parameters are required and must be numbers'
+        });
+      }
+      if (lat < -90 || lat > 90) {
+        return res.status(400).json({
+          success: false,
+          message: 'lat must be between -90 and 90'
+        });
+      }
+      if (lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          message: 'lng must be between -180 and 180'
+        });
+      }
+      if (Number.isNaN(radiusKm) || radiusKm < 1 || radiusKm > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'radius_km must be a number between 1 and 100'
+        });
+      }
+      if (maxFee !== null && (Number.isNaN(maxFee) || maxFee < 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'max_fee must be a non-negative number'
+        });
+      }
+
+      // Fetch a generous batch of active doctors with location data and
+      // filter/sort in memory. We do not enable PostGIS so distance must be
+      // computed in app code via the Haversine formula. The DB-side
+      // specialty/fee filter keeps the working set small.
+      const params = ['active'];
+      let whereSql = `WHERE status = $1
+        AND latitude IS NOT NULL
+        AND longitude IS NOT NULL`;
+
+      if (specialty) {
+        params.push(specialty);
+        whereSql += ` AND specialization ILIKE $${params.length}`;
+      }
+      if (maxFee !== null) {
+        params.push(maxFee);
+        whereSql += ` AND consultation_fee IS NOT NULL AND consultation_fee <= $${params.length}`;
+      }
+
+      const result = await query(
+        `SELECT * FROM doctors ${whereSql} ORDER BY created_at DESC`,
+        params
+      );
+
+      // Compute distance and apply radius filter
+      const withinRadius = [];
+      for (const doctor of result.rows) {
+        const distance = GeolocationService.calculateDistance(
+          lat,
+          lng,
+          parseFloat(doctor.latitude),
+          parseFloat(doctor.longitude)
+        );
+        if (distance <= radiusKm) {
+          delete doctor.password_hash;
+          withinRadius.push({
+            ...doctor,
+            display_name: buildDisplayName(doctor),
+            distance_km: parseFloat(distance.toFixed(2))
+          });
+        }
+      }
+
+      // Sort by distance (closest first)
+      withinRadius.sort((a, b) => a.distance_km - b.distance_km);
+
+      // Paginate
+      const total = withinRadius.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const offset = (page - 1) * limit;
+      const pageItems = withinRadius.slice(offset, offset + limit);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          doctors: pageItems,
+          pagination: {
+            page,
+            limit,
+            total,
+            total_pages: totalPages,
+            has_next: page < totalPages,
+            has_prev: page > 1
+          },
+          filters: {
+            lat,
+            lng,
+            radius_km: radiusKm,
+            specialty: specialty || null,
+            max_fee: maxFee
+          }
+        }
+      });
+    } catch (error) {
+      console.error('List doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching doctors',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /doctors/:id
+   *
+   * Returns the full public profile for a single doctor, used by the
+   * Doctor Details screen. No location math; the patient already picked
+   * this doctor from the list.
+   */
+  static async getDoctorById(req, res) {
+    try {
+      const { id } = req.params;
+      const doctorId = parseInt(id, 10);
+
+      if (!doctorId || Number.isNaN(doctorId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid doctor id is required'
+        });
+      }
+
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor || doctor.status !== 'active') {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      delete doctor.password_hash;
+      doctor.display_name = buildDisplayName(doctor);
+
+      res.status(200).json({
+        success: true,
+        data: doctor
+      });
+    } catch (error) {
+      console.error('Get doctor by id error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching doctor',
         error: error.message
       });
     }

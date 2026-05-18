@@ -37,9 +37,12 @@ const authMiddleware = async (req, res, next) => {
     // Update last activity
     await Session.updateLastActivity(session.id);
     
-    // Attach user info and session to request
+    // Attach user info and session to request.
+    // NOTE: use req.authSession (not req.session) to avoid colliding with
+    // express-session middleware, which owns req.session and calls
+    // req.session.touch() when the response is sent.
     req.user = decoded;
-    req.session = session;
+    req.authSession = session;
     
     next();
     

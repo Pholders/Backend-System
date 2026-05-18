@@ -145,6 +145,80 @@ Thank you for trusting Pholders Healthcare for your medical needs!
   }
 
   /**
+   * Send email verification OTP (for signup activation)
+   * Visually identical to the login OTP, but with a distinct subject and copy
+   * so users understand they're verifying ownership of the email address.
+   */
+  async sendVerificationOTP(email, otpCode, firstName) {
+    const mailOptions = {
+      from: `"Pholders Healthcare" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify Your Email - Pholders Healthcare',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; color: #333; }
+            .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+            .header { background-color: #6DD0D8; color: #ffffff; text-align: center; padding: 30px 20px; border-bottom: 5px solid #4bb7c0; }
+            .header img { max-width: 80px; margin-bottom: 10px; }
+            .header h1 { font-size: 24px; margin: 0; }
+            .content { padding: 20px; }
+            .otp-code { font-size: 24px; font-weight: bold; color: #6DD0D8; text-align: center; padding: 15px; background-color: #e6f7f9; border-radius: 5px; margin: 20px 0; letter-spacing: 4px; }
+            .footer { text-align: center; padding: 15px; font-size: 12px; color: #888; background-color: #f9f9f9; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <img src="cid:logo" alt="Pholders Healthcare">
+              <h1>Verify Your Email</h1>
+            </div>
+            <div class="content">
+              <h2>Hello ${firstName},</h2>
+              <p>Welcome to Pholders Healthcare! To activate your account, please confirm your email address using the verification code below:</p>
+              <div class="otp-code">${otpCode}</div>
+              <p><strong>This code expires in 15 minutes.</strong></p>
+              <p>You will not be able to log in until your email is verified. If you did not create an account with us, please ignore this email.</p>
+            </div>
+            <div class="footer">
+              <p>&copy; 2026 Pholders Healthcare. All rights reserved.</p>
+              <p>This is an automated email. Please do not reply.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Hello ${firstName},
+
+Welcome to Pholders Healthcare!
+
+Your email verification code: ${otpCode}
+
+This code expires in 15 minutes. You will not be able to log in until your email is verified.
+
+If you did not create an account, please ignore this email.`,
+      attachments: [
+        {
+          filename: 'logo.png',
+          path: path.join(__dirname, '..', 'images', 'PHolders 2.png'),
+          cid: 'logo'
+        }
+      ]
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Verification email sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Verification email sending failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Send welcome email
    */
   async sendWelcome(email, userName) {

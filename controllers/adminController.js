@@ -218,7 +218,7 @@ class AdminController {
   static async logout(req, res) {
     try {
       const adminId = req.user.id;
-      const sessionId = req.session?.id;
+      const sessionId = req.authSession?.id;
 
       if (sessionId) {
         await Session.revoke(sessionId, 'User logout');
