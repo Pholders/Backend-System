@@ -293,6 +293,171 @@ class Payment {
       throw error;
     }
   }
+
+  /**
+   * Update payment by Stripe Payment Intent ID
+   * Called from webhook when Stripe payment succeeds/fails
+   */
+  static async updateByStripeIntent(stripePaymentIntentId, paymentStatus, stripeTransactionId = null) {
+    const query = `
+      UPDATE payments
+      SET 
+        payment_status = $2,
+        stripe_transaction_id = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE stripe_payment_intent_id = $1
+      RETURNING *;
+    `;
+
+    try {
+      const result = await pool.query(query, [
+        stripePaymentIntentId,
+        paymentStatus,
+        stripeTransactionId
+      ]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error updating payment by Stripe intent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get payment by Stripe Payment Intent ID
+   */
+  static async getByStripeIntent(stripePaymentIntentId) {
+    const query = `
+      SELECT * FROM payments WHERE stripe_payment_intent_id = $1;
+    `;
+
+    try {
+      const result = await pool.query(query, [stripePaymentIntentId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error fetching payment by Stripe intent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get refund statistics for a doctor
+   * Shows total refunds and retained fees
+   */
+  static async getRefundStatistics(doctorId, startDate = null, endDate = null) {
+    let query = `
+      SELECT 
+        COUNT(*) as total_refunds,
+        SUM(CAST(amount AS NUMERIC)) as total_refunded,
+        AVG(CAST(amount AS NUMERIC)) as avg_refund,
+        COUNT(CASE WHEN payment_status = 'completed' THEN 1 END) as completed_payments,
+        COUNT(CASE WHEN payment_status = 'cancelled' THEN 1 END) as cancelled_payments
+      FROM payments
+      WHERE doctor_id = $1
+    `;
+
+    const params = [doctorId];
+
+    if (startDate && endDate) {
+      query += ` AND created_at BETWEEN $2 AND $3`;
+      params.push(startDate, endDate);
+    }
+
+    try {
+      const result = await pool.query(query, params);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error fetching refund statistics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get payment history with filters
+   */
+  static async getPaymentHistory(filters = {}) {
+    const { patientId, doctorId, status, paymentMethod, startDate, endDate, limit = 50, offset = 0 } = filters;
+
+    let query = `
+      SELECT 
+        p.*,
+        a.appointment_date,
+        a.time_period,
+        d.first_name as doctor_first_name,
+        d.last_name as doctor_last_name,
+        u.first_name as patient_first_name,
+        u.last_name as patient_last_name
+      FROM payments p
+      LEFT JOIN appointments a ON p.appointment_id = a.id
+      LEFT JOIN doctors d ON p.doctor_id = d.id
+      LEFT JOIN patients u ON p.patient_id = u.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    if (patientId) {
+      query += ` AND p.patient_id = $${paramIndex++}`;
+      params.push(patientId);
+    }
+    if (doctorId) {
+      query += ` AND p.doctor_id = $${paramIndex++}`;
+      params.push(doctorId);
+    }
+    if (status) {
+      query += ` AND p.payment_status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (paymentMethod) {
+      query += ` AND p.payment_method = $${paramIndex++}`;
+      params.push(paymentMethod);
+    }
+    if (startDate) {
+      query += ` AND p.created_at >= $${paramIndex++}`;
+      params.push(startDate);
+    }
+    if (endDate) {
+      query += ` AND p.created_at <= $${paramIndex++}`;
+      params.push(endDate);
+    }
+
+    query += ` ORDER BY p.created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, offset);
+
+    try {
+      const result = await pool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Record refund in database
+   * Tracks partial refunds and fees retained
+   */
+  static async recordRefund(paymentId, refundAmount, platformFeeRetained, refundReason) {
+    const query = `
+      UPDATE payments
+      SET 
+        payment_status = 'refunded',
+        notes = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *;
+    `;
+
+    const refundNote = `Refund: ${refundAmount}, Platform Fee Retained: ${platformFeeRetained}, Reason: ${refundReason}`;
+
+    try {
+      const result = await pool.query(query, [paymentId, refundNote]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error recording refund:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Payment;

@@ -4,6 +4,8 @@ const Pharmacy = require('./Pharmacy');
 const Appointment = require('./Appointment');
 const DoctorReview = require('./DoctorReview');
 const Payment = require('./Payment');
+const Prescription = require('./Prescription');
+const PrescriptionItem = require('./PrescriptionItem');
 
 module.exports = {
   User,
@@ -12,4 +14,6 @@ module.exports = {
   Appointment,
   DoctorReview,
   Payment,
+  Prescription,
+  PrescriptionItem,
 };

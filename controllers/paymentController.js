@@ -596,6 +596,452 @@ class PaymentController {
       });
     }
   }
+
+  /**
+   * Create Stripe Payment Intent
+   * Initialize a payment for a specific appointment
+   */
+  static async createStripePaymentIntent(req, res) {
+    try {
+      const { appointmentId } = req.body;
+      const patientId = req.user.id;
+
+      if (!appointmentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Appointment ID is required'
+        });
+      }
+
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      // Verify appointment belongs to patient
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'This appointment does not belong to you'
+        });
+      }
+
+      const doctor = await Doctor.getById(appointment.doctor_id);
+      const consultationFee = doctor.consultation_fee || 0;
+
+      const StripeService = require('../services/stripeService');
+
+      // Create payment intent
+      const intentResult = await StripeService.createPaymentIntent(
+        appointmentId,
+        patientId,
+        consultationFee,
+        ['card', 'alipay', 'bancontact'] // Supported methods
+      );
+
+      // Create payment record
+      const payment = await Payment.create({
+        appointment_id: appointmentId,
+        patient_id: patientId,
+        doctor_id: appointment.doctor_id,
+        amount: consultationFee,
+        payment_method: 'stripe',
+        stripe_payment_intent_id: intentResult.paymentIntentId
+      });
+
+      // Calculate breakdown
+      const breakdown = StripeService.calculatePaymentBreakdown(consultationFee);
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment intent created successfully',
+        data: {
+          paymentId: payment.id,
+          appointmentId,
+          clientSecret: intentResult.clientSecret,
+          amount: consultationFee,
+          currency: 'ZAR',
+          breakdown: breakdown.breakdown,
+          supportedMethods: ['card', 'alipay', 'bancontact', 'apple_pay', 'google_pay'],
+          paymentIntentId: intentResult.paymentIntentId
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error creating payment intent:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error creating payment intent',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Payment Methods for Customer
+   * Retrieve saved payment methods
+   */
+  static async getStripePaymentMethods(req, res) {
+    try {
+      const patientId = req.user.id;
+      
+      // Get patient info to find Stripe customer ID
+      const patient = await Appointment.findPatient(patientId);
+      if (!patient || !patient.stripe_customer_id) {
+        return res.status(200).json({
+          success: true,
+          message: 'No saved payment methods',
+          data: {
+            paymentMethods: [],
+            message: 'No saved payment methods. Add one during checkout.'
+          }
+        });
+      }
+
+      const StripeService = require('../services/stripeService');
+      const paymentMethods = await StripeService.getPaymentMethods(patient.stripe_customer_id);
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment methods retrieved',
+        data: {
+          count: paymentMethods.length,
+          paymentMethods
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching payment methods:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching payment methods',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Process Stripe Webhook
+   * Handle payment status updates from Stripe
+   */
+  static async handleStripeWebhook(req, res) {
+    try {
+      const sig = req.headers['stripe-signature'];
+
+      if (!sig) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing Stripe signature'
+        });
+      }
+
+      const StripeService = require('../services/stripeService');
+      const verification = StripeService.verifyWebhookSignature(req.rawBody, sig);
+
+      if (!verification.valid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid webhook signature'
+        });
+      }
+
+      const event = verification.event;
+
+      // Handle different event types
+      switch (event.type) {
+        case 'payment_intent.succeeded':
+          console.log('✅ Payment succeeded');
+          const successResult = await StripeService.handlePaymentIntentWebhook(event.data.object);
+          break;
+
+        case 'payment_intent.payment_failed':
+          console.log('❌ Payment failed');
+          const failResult = await StripeService.handlePaymentIntentWebhook(event.data.object);
+          break;
+
+        case 'payment_intent.canceled':
+          console.log('🚫 Payment canceled');
+          await Payment.updateByStripeIntent(event.data.object.id, 'cancelled');
+          break;
+
+        case 'charge.dispute.created':
+          console.log('⚠️ Charge dispute created');
+          await StripeService.handleChargeDispute(event.data.object);
+          break;
+
+        case 'charge.refunded':
+          console.log('💰 Charge refunded');
+          const refundedCharge = event.data.object;
+          // Update payment record
+          break;
+
+        default:
+          console.log(`⚠️ Unhandled event type: ${event.type}`);
+      }
+
+      // Acknowledge receipt of event
+      res.status(200).json({
+        success: true,
+        message: 'Webhook received and processed',
+        eventType: event.type
+      });
+    } catch (error) {
+      console.error('❌ Error processing webhook:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error processing webhook',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Payment Status
+   * Check the current status of a payment
+   */
+  static async getPaymentStatus(req, res) {
+    try {
+      const { paymentId } = req.params;
+      const patientId = req.user.id;
+
+      const payment = await Payment.getById(paymentId);
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Payment not found'
+        });
+      }
+
+      // Verify payment belongs to patient
+      if (payment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'This payment does not belong to you'
+        });
+      }
+
+      // If Stripe payment, verify with Stripe
+      if (payment.payment_method === 'stripe' && payment.stripe_payment_intent_id) {
+        const StripeService = require('../services/stripeService');
+        const stripeStatus = await StripeService.getPaymentIntentStatus(payment.stripe_payment_intent_id);
+
+        return res.status(200).json({
+          success: true,
+          message: 'Payment status retrieved',
+          data: {
+            paymentId: payment.id,
+            status: payment.payment_status,
+            stripeStatus: stripeStatus.status,
+            amount: payment.amount,
+            method: payment.payment_method,
+            createdAt: payment.created_at,
+            updatedAt: payment.updated_at
+          }
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment status retrieved',
+        data: {
+          paymentId: payment.id,
+          status: payment.payment_status,
+          amount: payment.amount,
+          method: payment.payment_method,
+          createdAt: payment.created_at,
+          updatedAt: payment.updated_at
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching payment status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching payment status',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Request Refund
+   * Patient can request refund within cancellation policy
+   */
+  static async requestRefund(req, res) {
+    try {
+      const { paymentId, reason } = req.body;
+      const patientId = req.user.id;
+
+      if (!paymentId || !reason) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment ID and refund reason are required'
+        });
+      }
+
+      const payment = await Payment.getById(paymentId);
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Payment not found'
+        });
+      }
+
+      // Verify payment belongs to patient
+      if (payment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'This payment does not belong to you'
+        });
+      }
+
+      // Check if payment is completed
+      if (payment.payment_status !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          message: 'Only completed payments can be refunded'
+        });
+      }
+
+      // Check appointment timing (must be 24 hours before)
+      const appointment = await Appointment.findById(payment.appointment_id);
+      const appointmentTime = new Date(appointment.appointment_date + ' ' + appointment.time_slot);
+      const hoursUntilAppointment = (appointmentTime - new Date()) / (1000 * 60 * 60);
+
+      if (hoursUntilAppointment < 24) {
+        return res.status(400).json({
+          success: false,
+          message: 'Refunds must be requested at least 24 hours before the appointment'
+        });
+      }
+
+      // Process refund
+      if (payment.payment_method === 'stripe') {
+        const StripeService = require('../services/stripeService');
+        const refundResult = await StripeService.createRefund(
+          payment.stripe_payment_intent_id,
+          reason
+        );
+
+        if (refundResult.success) {
+          // Record refund in database
+          await Payment.recordRefund(
+            paymentId,
+            refundResult.amount,
+            refundResult.platformFeeRetained,
+            reason
+          );
+
+          // Cancel appointment
+          await Appointment.updateStatus(payment.appointment_id, 'cancelled');
+
+          return res.status(200).json({
+            success: true,
+            message: 'Refund processed successfully',
+            data: {
+              refundAmount: refundResult.amount,
+              platformFeeRetained: refundResult.platformFeeRetained,
+              refundId: refundResult.refundId,
+              status: refundResult.status
+            }
+          });
+        }
+      } else if (payment.payment_method === 'cash_on_arrival') {
+        // Mark as refunded
+        await Payment.recordRefund(paymentId, payment.amount, payment.amount * 0.1, reason);
+        await Appointment.updateStatus(payment.appointment_id, 'cancelled');
+
+        return res.status(200).json({
+          success: true,
+          message: 'Refund recorded. Cash will not be collected.',
+          data: {
+            refundAmount: payment.amount * 0.9,
+            platformFeeRetained: payment.amount * 0.1
+          }
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: 'Refund processing not available for this payment method'
+      });
+    } catch (error) {
+      console.error('❌ Error processing refund:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error processing refund',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get Payment Breakdown
+   * Show fee breakdown before payment
+   */
+  static async getPaymentBreakdown(req, res) {
+    try {
+      const { appointmentId } = req.params;
+
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      const doctor = await Doctor.getById(appointment.doctor_id);
+      const consultationFee = doctor.consultation_fee || 0;
+
+      const StripeService = require('../services/stripeService');
+      const breakdown = StripeService.calculatePaymentBreakdown(consultationFee);
+
+      res.status(200).json({
+        success: true,
+        message: 'Payment breakdown calculated',
+        data: breakdown
+      });
+    } catch (error) {
+      console.error('❌ Error calculating breakdown:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error calculating payment breakdown',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Test Stripe Connection
+   * Verify Stripe API keys are configured
+   */
+  static async testStripeConnection(req, res) {
+    try {
+      const StripeService = require('../services/stripeService');
+      const result = await StripeService.testConnection();
+
+      if (result.success) {
+        res.status(200).json({
+          success: true,
+          message: result.message,
+          stripeConfigured: true
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: 'Stripe API connection failed',
+          error: result.error
+        });
+      }
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Error testing Stripe connection',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = PaymentController;

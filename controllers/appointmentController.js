@@ -781,6 +781,135 @@ class AppointmentController {
       });
     }
   }
+
+  /**
+   * Doctor: Accept appointment (acknowledge and prepare for consultation)
+   * Must be called before creating prescription
+   */
+  static async acceptAppointment(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { appointmentId } = req.params;
+      const { doctorNotes = '' } = req.body;
+
+      // Get appointment
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      // Verify doctor owns this appointment
+      if (appointment.doctor_id !== doctorId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to accept this appointment'
+        });
+      }
+
+      // Verify appointment is in correct status (scheduled or completed)
+      if (appointment.status !== 'scheduled' && appointment.status !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot accept appointment with status: ${appointment.status}`
+        });
+      }
+
+      // Update appointment to mark as accepted by doctor
+      const updateQuery = `
+        UPDATE appointments
+        SET doctor_accepted = TRUE,
+            doctor_accepted_at = CURRENT_TIMESTAMP,
+            doctor_notes = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING *;
+      `;
+
+      const { query } = require('../config/db');
+      const result = await query(updateQuery, [doctorNotes, appointmentId]);
+      const updatedAppointment = result.rows[0];
+
+      res.status(200).json({
+        success: true,
+        message: 'Appointment accepted successfully',
+        data: {
+          appointmentId: updatedAppointment.id,
+          patientName: `${updatedAppointment.patient_first_name} ${updatedAppointment.patient_last_name}`,
+          appointmentDate: updatedAppointment.appointment_date,
+          timePeriod: updatedAppointment.time_period,
+          timeSlot: updatedAppointment.time_slot,
+          doctorAccepted: true,
+          doctorAcceptedAt: updatedAppointment.doctor_accepted_at,
+          readyForPrescription: true
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error accepting appointment:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error accepting appointment',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Doctor: Get appointments awaiting acceptance
+   */
+  static async getDoctorAppointments(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { status = 'scheduled', limit = 50, offset = 0 } = req.query;
+
+      const query_string = `
+        SELECT a.*, 
+               u.first_name as patient_first_name, u.last_name as patient_last_name,
+               u.email as patient_email, u.phone as patient_phone
+        FROM appointments a
+        LEFT JOIN patients u ON a.patient_id = u.id
+        WHERE a.doctor_id = $1 
+          AND a.status = $2
+          AND a.doctor_accepted = FALSE
+        ORDER BY a.appointment_date ASC, a.time_slot ASC
+        LIMIT $3 OFFSET $4;
+      `;
+
+      const { query } = require('../config/db');
+      const result = await query(query_string, [doctorId, status, parseInt(limit), parseInt(offset)]);
+
+      res.status(200).json({
+        success: true,
+        message: 'Doctor appointments retrieved',
+        data: {
+          total: result.rows.length,
+          appointments: result.rows.map(apt => ({
+            id: apt.id,
+            patientName: `${apt.patient_first_name} ${apt.patient_last_name}`,
+            patientEmail: apt.patient_email,
+            patientPhone: apt.patient_phone,
+            appointmentDate: apt.appointment_date,
+            timePeriod: apt.time_period,
+            timeSlot: apt.time_slot,
+            reason: apt.reason_for_visit,
+            consultationFee: apt.consultation_fee,
+            status: apt.status,
+            doctorAccepted: apt.doctor_accepted,
+            action: 'Ready to create prescription'
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching doctor appointments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching appointments',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = AppointmentController;

@@ -10,6 +10,7 @@ const EnhancedProfileController = require('../controllers/enhancedProfileControl
 const AppointmentController = require('../controllers/appointmentController');
 const ReviewController = require('../controllers/reviewController');
 const PaymentController = require('../controllers/paymentController');
+const PrescriptionController = require('../controllers/prescriptionController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
 const RefreshController = require('../controllers/refreshController');
@@ -236,6 +237,12 @@ router.get('/appointments/day-availability', AppointmentController.getDayAvailab
 // Auto-cancel expired pending payments (admin endpoint)
 router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('admin'), AppointmentController.autoCancelExpiredPayments);
 
+// Doctor: Get appointments for doctor
+router.get('/doctor/appointments', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorAppointments);
+
+// Doctor: Accept appointment (acknowledge before consultation)
+router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
+
 /**
  * Doctor Reviews & Ratings Routes
  */
@@ -285,10 +292,106 @@ router.get('/payments/appointment/:appointmentId', authMiddleware, requireRole('
 router.get('/payments', authMiddleware, requireRole('patient'), PaymentController.getPaymentHistory);
 
 /**
+ * Stripe Payment Routes (Enhanced Stripe Integration)
+ */
+// Create Stripe Payment Intent
+router.post('/payments/stripe/create-intent', authMiddleware, requireRole('patient'), PaymentController.createStripePaymentIntent);
+
+// Get saved payment methods
+router.get('/payments/stripe/methods', authMiddleware, requireRole('patient'), PaymentController.getStripePaymentMethods);
+
+// Get payment status
+router.get('/payments/:paymentId/status', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
+
+// Request refund
+router.post('/payments/:paymentId/refund', authMiddleware, requireRole('patient'), PaymentController.requestRefund);
+
+// Get payment breakdown
+router.get('/payments/appointment/:appointmentId/breakdown', authMiddleware, requireRole('patient'), PaymentController.getPaymentBreakdown);
+
+// Stripe Webhook (no auth required - for Stripe)
+router.post('/payments/webhook/stripe', PaymentController.handleStripeWebhook);
+
+// Test Stripe connection (admin only)
+router.get('/payments/stripe/test', authMiddleware, requireRole('admin'), PaymentController.testStripeConnection);
+
+/**
  * Token Management Routes (for access/refresh token system)
  */
 // Refresh Token Routes
 router.post('/refresh-token', RefreshController.refreshToken);
 router.post('/logout', authMiddleware, RefreshController.logout);
+
+/**
+ * e-Prescribing Routes
+ */
+// Doctor: Create new prescription (after appointment acceptance)
+router.post('/prescriptions', authMiddleware, requireRole('doctor'), PrescriptionController.createPrescription);
+
+// Doctor: Add medicine to prescription
+router.post('/prescriptions/:prescriptionId/medicines', authMiddleware, requireRole('doctor'), PrescriptionController.addMedicine);
+
+// Doctor: Check drug interactions before signing
+router.post('/prescriptions/:prescriptionId/check-interactions', authMiddleware, requireRole('doctor'), PrescriptionController.checkDrugInteractions);
+
+// Doctor: Request OTP for prescription signature
+router.post('/prescriptions/:prescriptionId/request-otp', authMiddleware, requireRole('doctor'), PrescriptionController.requestSignatureOTP);
+
+// Doctor: Sign prescription with OTP
+router.post('/prescriptions/:prescriptionId/sign', authMiddleware, requireRole('doctor'), PrescriptionController.signPrescription);
+
+// Doctor: Revoke prescription
+router.post('/prescriptions/:prescriptionId/revoke', authMiddleware, requireRole('doctor'), PrescriptionController.revokePrescription);
+
+// Doctor: Get all prescriptions issued by doctor
+router.get('/doctor/prescriptions', authMiddleware, requireRole('doctor'), PrescriptionController.getDoctorPrescriptions);
+
+// Patient: Get all prescriptions
+router.get('/prescriptions', authMiddleware, requireRole('patient'), PrescriptionController.getPatientPrescriptions);
+
+// Patient: View prescription details
+router.get('/prescriptions/:prescriptionId', authMiddleware, requireRole('patient'), PrescriptionController.viewPrescription);
+
+// Patient: Download prescription as PDF
+router.get('/prescriptions/:prescriptionId/download', authMiddleware, requireRole('patient'), PrescriptionController.downloadPrescription);
+
+// Patient: Print prescription
+router.get('/prescriptions/:prescriptionId/print', authMiddleware, requireRole('patient'), PrescriptionController.printPrescription);
+
+// Patient: Share prescription via email
+router.post('/prescriptions/:prescriptionId/share-email', authMiddleware, requireRole('patient'), PrescriptionController.sharePrescriptionEmail);
+
+// Patient: Generate QR code for prescription
+router.get('/prescriptions/:prescriptionId/qrcode', authMiddleware, requireRole('patient'), PrescriptionController.generateQRCode);
+
+// Patient: Get prescription share history
+router.get('/prescriptions/:prescriptionId/share-history', authMiddleware, requireRole('patient'), PrescriptionController.getShareHistory);
+
+// Patient: Get QR code access history
+router.get('/prescriptions/:prescriptionId/qrcode-history', authMiddleware, requireRole('patient'), PrescriptionController.getQRCodeAccessHistory);
+
+// Public: Access prescription via one-time use QR code (no auth required)
+// This endpoint verifies the QR code and marks it as used
+router.get('/qr/:qrToken', PrescriptionController.accessQRCodePrescription);
+
+// Public: Check QR code status before accessing (optional - no auth required)
+router.get('/qr/:qrToken/status', PrescriptionController.checkQRCodeStatus);
+
+/**
+ * Prescription Claim Routes (One-time use at pharmacy)
+ * Patient claims prescription at pharmacy - cannot be used again after claiming
+ */
+
+// Patient: Claim prescription at pharmacy (one-time use)
+router.post('/prescriptions/:prescriptionId/claim', authMiddleware, requireRole('patient'), PrescriptionController.claimPrescription);
+
+// Patient: Check prescription claim status
+router.get('/prescriptions/:prescriptionId/claim-status', authMiddleware, requireRole('patient'), PrescriptionController.checkClaimStatus);
+
+// Patient: Get prescription claim information
+router.get('/prescriptions/:prescriptionId/claim-info', authMiddleware, requireRole('patient'), PrescriptionController.getClaimInfo);
+
+// Admin: Revert prescription claim (for errors or fraud)
+router.post('/prescriptions/:prescriptionId/revert-claim', authMiddleware, requireRole('admin'), PrescriptionController.revertClaim);
 
 module.exports = router;
