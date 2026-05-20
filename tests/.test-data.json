@@ -1,0 +1,8 @@
+{
+  "email": "princengwakomashumu@gmail.com",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJwcmluY2VuZ3dha29tYXNodW11QGdtYWlsLmNvbSIsInR5cGUiOiJwYXRpZW50IiwiaWF0IjoxNzc5MjE3MjY1LCJleHAiOjE3NzkyMTgxNjV9.Ak58ztLlZEWPC8F6TOMCrHgt3QjN6nSgMgXRFQ2cNu8",
+  "refreshToken": "1ec3d94da7887af4df640d126863e543880018d638295c50510a4a2aa29f2554f4983deaa8e5411504ed44a737a99be26020dd31b9241dc164afb84fd27e683c",
+  "tokenTimestamp": "2026-05-19T18:50:50.826Z",
+  "tokenExpiresIn": 900,
+  "tokenRefreshedAt": "2026-05-19T19:01:06.085Z"
+}
