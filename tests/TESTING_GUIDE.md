@@ -1,7 +1,10 @@
 ═════════════════════════════════════════════════════════════════════════════════
-                     🏥 COMPLETE TESTING GUIDE
-                         APPOINTMENT + PRESCRIPTION
+                     🏥 COMPLETE COMPREHENSIVE TESTING GUIDE
+              APPOINTMENTS | PRESCRIPTIONS | ADMIN | PHARMACY | ERROR HANDLING
 ═════════════════════════════════════════════════════════════════════════════════
+
+**Last Updated:** May 26, 2026
+**Test Coverage:** 25+ comprehensive test scenarios
 
 ## 📋 SETUP: Seed Test Data
 
@@ -120,23 +123,51 @@ node tests/test-apt-06-view-appointments.js
 ```
 ✅ Shows: all your booked appointments
 
+---
+
+### 7️⃣ STEP 7: Cancel Appointment
+```bash
+node tests/test-apt-07-cancel-appointment.js
+```
+✅ Cancels: the booked appointment
+✅ Saves: cancellation confirmation
+
+---
+
+### 8️⃣ STEP 8: Reschedule Appointment
+Optional parameters: [DATE] [TIME_PERIOD]
+```bash
+# Default: 3 days from now, afternoon
+node tests/test-apt-08-reschedule-appointment.js
+
+# With specific date and time
+node tests/test-apt-08-reschedule-appointment.js 2026-05-28 evening
+```
+✅ Reschedules: appointment to new date/time
+✅ Saves: updated appointment details
+
 ═════════════════════════════════════════════════════════════════════════════════
 
 ## 👨‍⚕️ DOCTOR PRESCRIPTION CREATION FLOW
 
 ### 1️⃣ STEP 1: Doctor Login
 ```bash
-node tests/test-doc-01-login.js
+node tests/test-pres-01-doctor-login.js [EMAIL]
 ```
 ✅ Saves: email to .test-data-doctor.json
 📧 Action: Check email for OTP code
+
+Example:
+```bash
+node tests/test-pres-01-doctor-login.js sam.smith@example.com
+```
 
 ---
 
 ### 2️⃣ STEP 2: Verify OTP
 ⚠️  **Replace 123456 with your OTP from email**
 ```bash
-node tests/test-doc-02-verify-otp.js 123456
+node tests/test-pres-02-verify-otp.js 123456
 ```
 ✅ Saves: authentication token to .test-data-doctor.json
 
@@ -144,110 +175,257 @@ node tests/test-doc-02-verify-otp.js 123456
 
 ### 3️⃣ STEP 3: View Pending Appointments
 ```bash
-node tests/test-doc-03-pending-appointments.js
+node tests/test-pres-03-pending-appointments.js
 ```
 ✅ Saves: first pending appointment to .test-data-doctor.json
 ✅ Shows: list of patients waiting
 
 ---
 
-### 4️⃣ STEP 4: Accept Appointment
+### 4️⃣ STEP 4: Create Prescription
 ```bash
-node tests/test-doc-04-accept-appointment.js
-```
-✅ Accepts: the appointment
-✅ Ready: for prescription
-
----
-
-### 5️⃣ STEP 5: Create Prescription
-Optional: [DIAGNOSIS] [NOTES]
-```bash
-# Default values
-node tests/test-doc-05-create-prescription.js
-
-# With custom diagnosis and notes
-node tests/test-doc-05-create-prescription.js "Bronchitis" "Patient has cough for 3 days"
+node tests/test-pres-04-create-prescription.js
 ```
 ✅ Saves: prescription ID to .test-data-doctor.json
 ✅ Shows: prescription number and status
 
 ---
 
-### 6️⃣ STEP 6: Add Medicine
-Optional: [NAME] [DOSAGE] [FREQUENCY] [DURATION] [QUANTITY]
+### 5️⃣ STEP 5: Add Medicines
+Optional: [NUMBER_OF_MEDICINES]
 ```bash
-# Default: Amoxicillin 500mg 3x daily for 7 days
-node tests/test-doc-06-add-medicine.js
+# Add all 3 pre-configured medicines
+node tests/test-pres-05-add-medicines.js
 
-# With custom medicine
-node tests/test-doc-06-add-medicine.js Ibuprofen 400mg "2x daily" "5 days" 10
+# Add only the first medicine
+node tests/test-pres-05-add-medicines.js 1
 
-# Add multiple medicines (run multiple times)
-node tests/test-doc-06-add-medicine.js Amoxicillin 500mg "3x daily" "7 days" 21
-node tests/test-doc-06-add-medicine.js "Cough Syrup" 10ml "2x daily" "5 days" 1
+# Add first 2 medicines
+node tests/test-pres-05-add-medicines.js 2
 ```
-✅ Saves: each medicine to .test-data-doctor.json
-✅ Repeatable: add as many medicines as needed
+✅ Saves: medicine details to .test-data-doctor.json
+✅ Displays: all medicines added
 
 ---
 
-### 7️⃣ STEP 7: Check Drug Interactions
+### 6️⃣ STEP 6: Sign Prescription (with OTP)
 ```bash
-node tests/test-doc-07-check-interactions.js
+# Step 1: Request OTP (sends email)
+node tests/test-pres-06-sign-prescription.js
+
+# Step 2: Sign with OTP code (replace 123456)
+node tests/test-pres-06-sign-prescription.js 123456
 ```
-✅ Shows: any drug interactions found
-✅ Displays: severity and description
+✅ Requests: signature OTP
+✅ Signs: prescription digitally (RSA-SHA256)
+✅ Generates: QR code for patient
+
+═════════════════════════════════════════════════════════════════════════════════
+
+## 👤 PATIENT PRESCRIPTION OPERATIONS
+
+### 1️⃣ View All Prescriptions
+```bash
+node tests/test-patient-01-view-prescriptions.js
+```
+✅ Shows: all signed and pending prescriptions
+✅ Displays: doctor, diagnosis, medicines
+✅ Saves: latest prescription ID
 
 ---
 
-### 8️⃣ STEP 8: Request Signature OTP
+### 2️⃣ View Prescription Details
+Optional: [PRESCRIPTION_ID]
 ```bash
-node tests/test-doc-08-request-signature-otp.js
+# View latest prescription
+node tests/test-patient-02-prescription-details.js
+
+# View specific prescription
+node tests/test-patient-02-prescription-details.js 123abc456
 ```
-✅ Sends: signature OTP to your email
-📧 Action: Check email for signature OTP
+✅ Displays: complete prescription details
+✅ Shows: all medicines and dosages
+✅ Displays: digital signature info
 
 ---
 
-### 9️⃣ STEP 9: Sign Prescription
-⚠️  **Replace 123456 with Signature OTP from email**
+### 3️⃣ Rate Doctor
+Optional: [RATING] [REVIEW]
 ```bash
-node tests/test-doc-09-sign-prescription.js 123456
+# Rate 5 stars with default message
+node tests/test-patient-03-rate-doctor.js
+
+# Rate 4 stars with custom review
+node tests/test-patient-03-rate-doctor.js 4 "Professional and caring doctor"
 ```
-✅ Signs: prescription digitally
-✅ Generates: QR code
+✅ Saves: rating and review
+✅ Updates: doctor rating
+
+═════════════════════════════════════════════════════════════════════════════════
+
+## 👨‍💼 ADMIN OPERATIONS
+
+### 1️⃣ STEP 1: Admin Login
+```bash
+node tests/test-admin-01-login.js [EMAIL] [PASSWORD]
+```
+✅ Saves: email to .test-data-admin.json
+📧 Action: Check email for OTP
+
+Default: admin@example.com / secure123
 
 ---
 
-### 🔟 STEP 10: View Prescription Details
+### 2️⃣ STEP 2: Verify OTP
 ```bash
-node tests/test-doc-10-view-prescription.js
+node tests/test-admin-02-verify-otp.js 123456
 ```
-✅ Shows: complete prescription
-✅ Displays: all medicines and details
+✅ Saves: admin token to .test-data-admin.json
+
+---
+
+### 3️⃣ STEP 3: View All Users
+```bash
+node tests/test-admin-03-view-users.js
+```
+✅ Shows: all patients, doctors, pharmacists, admins
+✅ Displays: user count by role
+✅ Shows: verification status
+
+═════════════════════════════════════════════════════════════════════════════════
+
+## 💊 PHARMACY OPERATIONS
+
+### 1️⃣ Pharmacy Login
+```bash
+node tests/test-pharmacy-01-login.js [EMAIL] [PASSWORD]
+```
+✅ Saves: email to .test-data-pharmacy.json
+📧 Action: Check email for OTP
+
+Default: pharmacy@example.com / secure123
+
+═════════════════════════════════════════════════════════════════════════════════
+
+═════════════════════════════════════════════════════════════════════════════════
+
+## 🧪 ERROR HANDLING TESTS
+
+### 1️⃣ Test Invalid Tokens
+```bash
+node tests/test-errors-01-invalid-tokens.js
+```
+✅ Tests: missing token, invalid token, malformed headers
+✅ Verifies: proper error responses (401/403)
+✅ Checks: API security
+
+---
+
+### 2️⃣ Test Invalid Inputs
+```bash
+node tests/test-errors-02-invalid-inputs.js
+```
+✅ Tests: missing required fields, invalid formats
+✅ Verifies: input validation
+✅ Checks: error messages
+
+═════════════════════════════════════════════════════════════════════════════════
+
+## 🔄 USER MANAGEMENT FLOWS
+
+### 1️⃣ Password Reset Flow
+```bash
+# Step 1: Request reset
+node tests/test-flow-01-password-reset.js user@example.com
+
+# Step 2: Reset with token from email
+node tests/test-flow-01-password-reset.js user@example.com TOKEN newPassword123
+```
+✅ Sends: password reset email
+✅ Validates: reset token
+✅ Updates: user password
+
+---
+
+### 2️⃣ User Registration
+```bash
+# Quick registration
+node tests/test-flow-02-user-registration.js
+
+# With custom details
+node tests/test-flow-02-user-registration.js john@example.com John Doe +27123456789
+```
+✅ Creates: new patient account
+✅ Sends: verification email
+✅ Saves: credentials to .test-data-new-user.json
 
 ═════════════════════════════════════════════════════════════════════════════════
 
 ## 💾 DATA FILES SAVED
 
 ### Patient Testing (.test-data.json)
-- email: Patient email
-- token: Authentication token
-- selectedDoctorId: Selected doctor ID
-- selectedDoctorName: Doctor name
-- selectedDate: Selected appointment date
-- selectedTimeSlot: Selected time slot
-- appointmentId: Booked appointment ID
+```json
+{
+  "email": "patient@example.com",
+  "token": "JWT_TOKEN_HERE",
+  "refreshToken": "REFRESH_TOKEN_HERE",
+  "doctorId": "doctor_uuid",
+  "doctorName": "Dr. Name",
+  "appointmentId": "apt_uuid",
+  "date": "2026-05-28",
+  "timePeriod": "morning",
+  "timeSlot": "09:00",
+  "latestPrescriptionId": "pres_uuid",
+  "reviewId": "review_uuid"
+}
+```
 
 ### Doctor Testing (.test-data-doctor.json)
-- email: Doctor email
-- token: Authentication token
-- selectedAppointmentId: Appointment ID
-- patientName: Patient name
-- prescriptionId: Prescription ID
-- prescriptionNumber: Rx number
-- medicines: List of medicines added
+```json
+{
+  "email": "doctor@example.com",
+  "token": "JWT_TOKEN_HERE",
+  "appointmentId": "apt_uuid",
+  "patientId": "patient_uuid",
+  "patientName": "Patient Name",
+  "prescriptionId": "pres_uuid",
+  "prescriptionNumber": "RX-2026-001",
+  "prescriptionStatus": "pending",
+  "medicinesAdded": [
+    {"name": "Medicine 1", "dosage": "500mg", "frequency": "3x daily"}
+  ],
+  "prescriptionSigned": true
+}
+```
+
+### Admin Testing (.test-data-admin.json)
+```json
+{
+  "email": "admin@example.com",
+  "role": "admin",
+  "token": "JWT_TOKEN_HERE"
+}
+```
+
+### Pharmacy Testing (.test-data-pharmacy.json)
+```json
+{
+  "email": "pharmacy@example.com",
+  "role": "pharmacy",
+  "token": "JWT_TOKEN_HERE"
+}
+```
+
+### New User Registration (.test-data-new-user.json)
+```json
+{
+  "email": "new.user@example.com",
+  "password": "TestPassword123!",
+  "firstName": "Test",
+  "lastName": "Patient",
+  "registeredAt": "2026-05-26T10:30:00.000Z"
+}
+```
 - signed: Boolean - if prescription is signed
 
 ═════════════════════════════════════════════════════════════════════════════════
