@@ -6,6 +6,8 @@ const DoctorReview = require('./DoctorReview');
 const Payment = require('./Payment');
 const Prescription = require('./Prescription');
 const PrescriptionItem = require('./PrescriptionItem');
+const PHR = require('./PHR');
+const PHRAccess = require('./PHRAccess');
 
 module.exports = {
   User,
@@ -16,4 +18,6 @@ module.exports = {
   Payment,
   Prescription,
   PrescriptionItem,
+  PHR,
+  PHRAccess,
 };

@@ -9,6 +9,7 @@ const AppointmentCleanupService = require('./services/appointmentCleanupService'
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
 require('./config/passport');
@@ -90,6 +91,9 @@ app.get('/api/cache-stats', async (req, res) => {
 // Start server
 async function startServer() {
   try {
+    // Initialize database tables
+    await initializeDatabase();
+
     // Initialize Redis cache
     await cache.initialize();
     

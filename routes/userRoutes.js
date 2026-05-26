@@ -11,6 +11,7 @@ const AppointmentController = require('../controllers/appointmentController');
 const ReviewController = require('../controllers/reviewController');
 const PaymentController = require('../controllers/paymentController');
 const PrescriptionController = require('../controllers/prescriptionController');
+const PHRController = require('../controllers/phrController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
 const RefreshController = require('../controllers/refreshController');
@@ -393,5 +394,42 @@ router.get('/prescriptions/:prescriptionId/claim-info', authMiddleware, requireR
 
 // Admin: Revert prescription claim (for errors or fraud)
 router.post('/prescriptions/:prescriptionId/revert-claim', authMiddleware, requireRole('admin'), PrescriptionController.revertClaim);
+
+/**
+ * Personal Health Record (PHR) Routes
+ */
+
+// PATIENT ENDPOINTS - View own PHR
+router.get('/phr/complete', authMiddleware, requireRole('patient'), PHRController.getCompletePHR);
+router.get('/phr/personal-card', authMiddleware, requireRole('patient'), PHRController.getPersonalCard);
+router.put('/phr/personal-card', authMiddleware, requireRole('patient'), PHRController.updatePersonalCard);
+router.get('/phr/medical-summary', authMiddleware, requireRole('patient'), PHRController.getMedicalSummary);
+router.get('/phr/prescriptions', authMiddleware, requireRole('patient'), PHRController.getActivePrescriptions);
+router.get('/phr/medications', authMiddleware, requireRole('patient'), PHRController.getCurrentMedications);
+router.get('/phr/allergies', authMiddleware, requireRole('patient'), PHRController.getAllergies);
+router.get('/phr/conditions', authMiddleware, requireRole('patient'), PHRController.getMedicalConditions);
+router.get('/phr/appointments', authMiddleware, requireRole('patient'), PHRController.getUpcomingAppointments);
+router.get('/phr/history', authMiddleware, requireRole('patient'), PHRController.getHealthHistory);
+router.get('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.getHealthVitals);
+router.post('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.recordHealthVital);
+router.get('/phr/vitals/range', authMiddleware, requireRole('patient'), PHRController.getHealthVitalsRange);
+router.get('/phr/documents', authMiddleware, requireRole('patient'), PHRController.getPHRDocuments);
+router.post('/phr/documents', authMiddleware, requireRole('patient'), PHRController.uploadDocument);
+
+// PATIENT ACCESS CONTROL - Manage who can access PHR
+router.get('/phr/access', authMiddleware, requireRole('patient'), PHRController.getAccessList);
+router.post('/phr/access', authMiddleware, requireRole('patient'), PHRController.grantAccess);
+router.delete('/phr/access/:doctorId', authMiddleware, requireRole('patient'), PHRController.revokeAccess);
+router.get('/phr/access/requests', authMiddleware, requireRole('patient'), PHRController.getPendingRequests);
+router.post('/phr/access/requests/:requestId/approve', authMiddleware, requireRole('patient'), PHRController.approveAccessRequest);
+router.post('/phr/access/requests/:requestId/deny', authMiddleware, requireRole('patient'), PHRController.denyAccessRequest);
+router.get('/phr/access-logs', authMiddleware, requireRole('patient'), PHRController.getAccessLogs);
+
+// DOCTOR ENDPOINTS - Request and access patient PHR
+router.post('/phr/:patientId/access-request', authMiddleware, requireRole('doctor'), PHRController.requestAccess);
+router.get('/phr/:patientId', authMiddleware, requireRole('doctor'), PHRController.viewPatientPHR);
+router.get('/phr/:patientId/personal-card', authMiddleware, requireRole('doctor'), PHRController.viewPatientPersonalCard);
+router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.viewPatientVitals);
+router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'), PHRController.viewPatientMedications);
 
 module.exports = router;

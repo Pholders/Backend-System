@@ -6,6 +6,7 @@ const Appointment = require('../models/Appointment');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
 const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
+const createPHRTables = require('./createPHRTables');
 
 /**
  * Initialize Database Tables
@@ -39,6 +40,9 @@ const initializeDatabase = async () => {
 
     // Add pending_payment status to appointments
     await addPendingPaymentStatus();
+
+    // Create PHR tables (health vitals, documents, access control)
+    await createPHRTables();
     
     console.log('✅ Database initialization completed successfully');
     return true;
