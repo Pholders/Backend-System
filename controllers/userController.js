@@ -13,6 +13,7 @@ const emailService = require('../services/emailService');
 const SecurityAlertService = require('../services/securityAlertService');
 const GeolocationService = require('../services/geolocationService');
 const PasswordResetToken = require('../models/PasswordResetToken');
+const NotificationPreferences = require('../models/NotificationPreferences');
 
 /**
  * User Controller
@@ -115,6 +116,14 @@ class UserController {
 
       // Log successful signup
       await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'signup', 'success');
+
+      // Create default notification preferences so the preference check
+      // never fails on the first notification a patient should receive.
+      try {
+        await NotificationPreferences.ensureForPatient(newUser.id);
+      } catch (prefsError) {
+        console.error('⚠️ Failed to create notification preferences:', prefsError.message);
+      }
 
       // Generate email verification OTP (15-min expiry) and send it
       let verificationEmailSent = false;

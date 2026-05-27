@@ -2,6 +2,9 @@ const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
+const Notification = require('../models/Notification');
+const NotificationPreferences = require('../models/NotificationPreferences');
+const DeviceToken = require('../models/DeviceToken');
 
 /**
  * Initialize Database Tables
@@ -23,6 +26,12 @@ const initializeDatabase = async () => {
 
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
+
+    // Notifications stack
+    await Notification.createTable();
+    await NotificationPreferences.createTable();
+    await DeviceToken.createTable();
+    await DeviceToken.addDeviceTokenColumns();
     
     console.log('✅ Database initialization completed successfully');
     return true;

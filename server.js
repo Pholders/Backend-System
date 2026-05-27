@@ -8,9 +8,13 @@ const cache = require('./services/cacheService');
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 // Import Passport config
 require('./config/passport');
+
+// Import scheduled notification triggers
+const notificationTriggers = require('./jobs/notificationTriggers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -41,6 +45,7 @@ app.use(passport.session());
 
 // Routes
 app.use('/api/users', userRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Test database connection endpoint
 app.get('/api/test-db', async (req, res) => {
@@ -99,6 +104,14 @@ async function startServer() {
       console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
       console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+      console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
+
+      // Start scheduled notification triggers (medication + appointment).
+      try {
+        notificationTriggers.start();
+      } catch (err) {
+        console.error('Failed to start notification triggers:', err.message);
+      }
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

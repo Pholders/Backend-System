@@ -2,6 +2,7 @@ const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../models/User');
+const NotificationPreferences = require('../models/NotificationPreferences');
 const bcrypt = require('bcrypt');
 
 /**
@@ -102,6 +103,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           id_passport_number: null,
           nationality: null,
         });
+
+        // Ensure notification preferences row exists for the new patient.
+        try {
+          await NotificationPreferences.ensureForPatient(newUser.id);
+        } catch (prefsError) {
+          console.error('⚠️ Failed to create notification preferences:', prefsError.message);
+        }
 
         return done(null, newUser);
       } catch (error) {
