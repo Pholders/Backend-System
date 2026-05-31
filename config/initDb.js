@@ -7,6 +7,7 @@ const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
 const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 const createPHRTables = require('./createPHRTables');
+const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 
 /**
  * Initialize Database Tables
@@ -43,6 +44,9 @@ const initializeDatabase = async () => {
 
     // Create PHR tables (health vitals, documents, access control)
     await createPHRTables();
+
+    // Add session-based signature support
+    await addSessionBasedSignatures();
     
     console.log('✅ Database initialization completed successfully');
     return true;

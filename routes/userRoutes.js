@@ -335,10 +335,7 @@ router.post('/prescriptions/:prescriptionId/medicines', authMiddleware, requireR
 // Doctor: Check drug interactions before signing
 router.post('/prescriptions/:prescriptionId/check-interactions', authMiddleware, requireRole('doctor'), PrescriptionController.checkDrugInteractions);
 
-// Doctor: Request OTP for prescription signature
-router.post('/prescriptions/:prescriptionId/request-otp', authMiddleware, requireRole('doctor'), PrescriptionController.requestSignatureOTP);
-
-// Doctor: Sign prescription with OTP
+// Doctor: Sign prescription with session token (RSA-SHA256 digital signature)
 router.post('/prescriptions/:prescriptionId/sign', authMiddleware, requireRole('doctor'), PrescriptionController.signPrescription);
 
 // Doctor: Revoke prescription

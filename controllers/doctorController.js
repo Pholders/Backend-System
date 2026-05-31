@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { query } = require('../config/db');
+const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
@@ -190,6 +190,10 @@ class DoctorController {
   static async login(req, res) {
     try {
       const { email, password } = req.body;
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      const deviceId = req.headers['x-device-id'] || crypto.randomBytes(16).toString('hex');
+      const deviceFingerprint = req.headers['x-device-fingerprint'] || crypto.randomBytes(32).toString('hex');
 
       if (!email || !password) {
         await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'login', 'failed', 'Missing email or password');
@@ -235,51 +239,53 @@ class DoctorController {
         });
       }
 
-      // Generate and send OTP
-      const otpRecord = await OTP.create(doctor.id, 'login', 'doctor');
-
-      // Log OTP generation
-      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'success');
-
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      let emailSent = false;
-
-      try {
-        await emailService.sendOTP(doctor.email, otpRecord.otp_code, doctor.first_name);
-        emailSent = true;
-        console.log('✅ OTP email sent to doctor successfully');
-      } catch (emailError) {
-        console.error('❌ Failed to send OTP email:', emailError.message);
-
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send OTP email. Please try again.'
-          });
-        }
-
-        console.log('⚠️  Development mode: Skipping email requirement');
-      }
-
-      const response = {
-        success: true,
-        message: emailSent
-          ? 'OTP sent to your email. Please verify to complete login.'
-          : 'OTP generated. Check server logs for code (development mode).',
-        data: {
+      // ✅ NEW: Generate JWT token for general authentication
+      const token = jwt.sign(
+        {
+          id: doctor.id,
           email: doctor.email,
-          expiresIn: '10 minutes'
+          role: 'doctor',
+          firstName: doctor.first_name,
+          lastName: doctor.last_name
+        },
+        process.env.JWT_SECRET || 'jwtSecret',
+        { expiresIn: '8h' }
+      );
+
+      // ✅ NEW: Generate session token for prescription signing
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 8); // 8-hour session
+
+      // ✅ NEW: Store session in doctor_sessions table
+      await pool.query(
+        `INSERT INTO doctor_sessions 
+        (doctor_id, session_token, device_id, ip_address, user_agent, device_fingerprint, expires_at, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, true)`,
+        [doctor.id, sessionToken, deviceId, ipAddress, userAgent, deviceFingerprint, expiresAt]
+      );
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'success');
+
+      res.status(200).json({
+        success: true,
+        message: 'Login successful. You can now sign prescriptions.',
+        data: {
+          token,
+          sessionToken,
+          doctorId: doctor.id,
+          firstName: doctor.first_name,
+          lastName: doctor.last_name,
+          email: doctor.email,
+          hpcsaNumber: doctor.hpcsa_number,
+          sessionInfo: {
+            expiresIn: '8 hours',
+            canSignPrescriptions: true,
+            createdAt: new Date().toISOString()
+          }
         }
-      };
-
-      if (isDevelopment && !emailSent) {
-        response.data.otp_code = otpRecord.otp_code;
-        response.data.dev_note = 'OTP included in response (development mode only)';
-        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
-      }
-
-      res.status(200).json(response);
+      });
 
     } catch (error) {
       console.error('Doctor login error:', error);

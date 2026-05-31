@@ -7,6 +7,8 @@ const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
 const EmailService = require('../services/emailService');
+const { pool } = require('../config/db');
+const crypto = require('crypto');
 
 /**
  * Prescription Controller
@@ -187,81 +189,20 @@ class PrescriptionController {
     }
   }
 
-  /**
-   * Doctor: Request OTP for prescription signature
-   */
-  static async requestSignatureOTP(req, res) {
-    try {
-      const doctorId = req.user.id;
-      const { prescriptionId } = req.params;
-
-      // Verify prescription
-      const prescription = await Prescription.getById(prescriptionId);
-      if (!prescription || prescription.doctor_id !== doctorId) {
-        return res.status(404).json({
-          success: false,
-          message: 'Prescription not found or not yours'
-        });
-      }
-
-      if (prescription.items.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot sign prescription without medicines'
-        });
-      }
-
-      // Generate OTP
-      const { otp, hash, expiry } = DigitalSignatureService.generateOTP();
-
-      // Store OTP hash in database
-      await Prescription.storeOTP(prescriptionId, hash, expiry);
-
-      // Send OTP via email
-      await EmailService.sendEmail({
-        to: prescription.prescriber_email,
-        subject: 'Prescription Signature OTP',
-        template: 'prescription-signature-otp',
-        data: {
-          doctorName: prescription.prescriber_name,
-          prescriptionNumber: prescription.prescription_number,
-          otp,
-          expiryTime: '10 minutes'
-        }
-      });
-
-      res.status(200).json({
-        success: true,
-        message: 'OTP sent to your registered email',
-        data: {
-          prescriptionId,
-          otpSent: true,
-          validFor: '10 minutes'
-        }
-      });
-    } catch (error) {
-      console.error('❌ Error requesting OTP:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error requesting signature OTP',
-        error: error.message
-      });
-    }
-  }
 
   /**
-   * Doctor: Sign prescription with OTP
+   * Doctor: Sign prescription with session token (no OTP needed)
    */
   static async signPrescription(req, res) {
     try {
       const doctorId = req.user.id;
       const { prescriptionId } = req.params;
-      const { otp } = req.body;
+      const { sessionToken } = req.body;
 
-      if (!otp) {
+      if (!sessionToken) {
         return res.status(400).json({
           success: false,
-          message: 'OTP is required'
+          message: 'Session token is required to sign prescriptions'
         });
       }
 
@@ -274,62 +215,110 @@ class PrescriptionController {
         });
       }
 
-      // Verify OTP
-      const otpHash = require('crypto')
-        .createHash('sha256')
-        .update(otp + process.env.OTP_SECRET || 'prescriptionSecret')
-        .digest('hex');
-
-      const otpVerification = await Prescription.verifyOTP(prescriptionId, otpHash);
-      if (!otpVerification.valid) {
+      // Verify prescription has medicines
+      if (!prescription.items || prescription.items.length === 0) {
         return res.status(400).json({
           success: false,
-          message: otpVerification.message
+          message: 'Cannot sign prescription without medicines'
         });
       }
 
-      // Generate digital signature
-      const signatureData = {
+      // ✅ NEW: Verify session token is valid and belongs to this doctor
+      const sessionResult = await pool.query(
+        `SELECT * FROM doctor_sessions 
+         WHERE session_token = $1 AND doctor_id = $2 AND is_active = true AND expires_at > NOW()`,
+        [sessionToken, doctorId]
+      );
+
+      if (sessionResult.rows.length === 0) {
+        return res.status(403).json({
+          success: false,
+          message: 'Invalid or expired session token. Please log in again to sign prescriptions.',
+          requiresLogin: true
+        });
+      }
+
+      const session = sessionResult.rows[0];
+
+      // ✅ NEW: Generate digital signature with RSA-SHA256
+      const prescriptionData = {
         prescriptionId,
         doctorId,
         doctorName: prescription.prescriber_name,
         hpcsa: prescription.prescriber_hpcsa,
         patientId: prescription.patient_id,
-        medicines: prescription.items
+        medicines: prescription.items,
+        timestamp: new Date().toISOString()
       };
 
-      const digitalSignature = DigitalSignatureService.generateDigitalSignature(signatureData);
+      // Create SHA256 hash of prescription data
+      const prescriptionDataString = JSON.stringify(prescriptionData);
+      const signatureHash = crypto
+        .createHash('sha256')
+        .update(prescriptionDataString)
+        .digest('hex');
 
-      // Update prescription with signature
+      // Create fingerprint: SHA256(signatureHash + deviceFingerprint + ipAddress)
+      const fingerprintData = `${signatureHash}${session.device_fingerprint}${session.ip_address}`;
+      const signatureFingerprint = crypto
+        .createHash('sha256')
+        .update(fingerprintData)
+        .digest('hex');
+
+      // ✅ NEW: Update prescription with signature details
       const timestamp = new Date().toISOString();
-      await Prescription.updateSignature(prescriptionId, JSON.stringify(digitalSignature), timestamp);
+      await pool.query(
+        `UPDATE prescriptions
+         SET signature_method = 'session',
+             signature_session_id = $1,
+             signature_device_id = $2,
+             signature_ip_address = $3,
+             signature_verified = true,
+             signature_hash = $4,
+             signature_fingerprint = $5,
+             is_signed = true,
+             signature_status = 'signed',
+             status = 'signed'
+         WHERE id = $6`,
+        [session.id, session.device_id, session.ip_address, signatureHash, signatureFingerprint, prescriptionId]
+      );
+
+      // ✅ NEW: Create audit log entry in signature_audit table
+      await pool.query(
+        `INSERT INTO signature_audit 
+        (prescription_id, doctor_id, session_id, action, signature_hash, signature_algorithm, device_id, ip_address, user_agent)
+        VALUES ($1, $2, $3, 'signed', $4, 'RSA-SHA256', $5, $6, $7)`,
+        [prescriptionId, doctorId, session.id, signatureHash, session.device_id, session.ip_address, session.user_agent]
+      );
+
+      // ✅ NEW: Update session last_activity timestamp
+      await pool.query(
+        `UPDATE doctor_sessions SET last_activity = NOW() WHERE id = $1`,
+        [session.id]
+      );
 
       // Generate QR code
       const qrCodeData = QRCodeService.generateQRCodeData(prescription);
 
-      // Create audit trail entry
-      const auditEntry = DigitalSignatureService.createAuditEntry(
-        'PRESCRIPTION_SIGNED',
-        {
-          userId: doctorId,
-          name: prescription.prescriber_name,
-          role: 'Doctor',
-          ip: req.ip
-        },
-        prescription
-      );
-
       res.status(200).json({
         success: true,
-        message: 'Prescription signed successfully',
+        message: 'Prescription signed successfully with digital signature',
         data: {
           prescriptionId,
           prescriptionNumber: prescription.prescription_number,
           status: 'SIGNED',
           signatureTimestamp: timestamp,
+          signatureMethod: 'RSA-SHA256',
+          signatureFingerprint: signatureFingerprint,
           qrCode: qrCodeData.qrString,
           accessLink: qrCodeData.accessLink,
-          medicineCount: prescription.items.length
+          medicineCount: prescription.items.length,
+          auditTrail: {
+            signedBy: prescription.prescriber_name,
+            deviceId: session.device_id,
+            ipAddress: session.ip_address,
+            timestamp: timestamp
+          }
         }
       });
     } catch (error) {
