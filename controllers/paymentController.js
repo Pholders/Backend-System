@@ -79,7 +79,7 @@ class PaymentController {
         }
       }
 
-      const doctor = await Doctor.getById(appointment.doctor_id);
+      const doctor = await Doctor.findById(appointment.doctor_id);
       const consultationFee = doctor.consultation_fee || 0;
 
       // Create payment record
@@ -629,7 +629,7 @@ class PaymentController {
         });
       }
 
-      const doctor = await Doctor.getById(appointment.doctor_id);
+      const doctor = await Doctor.findById(appointment.doctor_id);
       const consultationFee = doctor.consultation_fee || 0;
 
       const StripeService = require('../services/stripeService');
@@ -991,7 +991,7 @@ class PaymentController {
         });
       }
 
-      const doctor = await Doctor.getById(appointment.doctor_id);
+      const doctor = await Doctor.findById(appointment.doctor_id);
       const consultationFee = doctor.consultation_fee || 0;
 
       const StripeService = require('../services/stripeService');

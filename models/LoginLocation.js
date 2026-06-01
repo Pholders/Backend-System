@@ -10,6 +10,13 @@ class LoginLocation {
    * Create login locations table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'login_locations');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS login_locations (
         id SERIAL PRIMARY KEY,

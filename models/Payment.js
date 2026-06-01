@@ -5,6 +5,13 @@ class Payment {
    * Create payments table if it doesn't exist
    */
   static async createTable() {
+    // Check if table already exists
+    const checkQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'payments');`;
+    const result = await pool.query(checkQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const query = `
       CREATE TABLE IF NOT EXISTS payments (
         id SERIAL PRIMARY KEY,

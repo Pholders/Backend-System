@@ -239,7 +239,7 @@ class DoctorController {
         });
       }
 
-      // ✅ NEW: Generate JWT token for general authentication
+      // ✅ Generate JWT token for authentication
       const token = jwt.sign(
         {
           id: doctor.id,
@@ -252,17 +252,22 @@ class DoctorController {
         { expiresIn: '8h' }
       );
 
-      // ✅ NEW: Generate session token for prescription signing
-      const sessionToken = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + 8); // 8-hour session
-
-      // ✅ NEW: Store session in doctor_sessions table
-      await pool.query(
-        `INSERT INTO doctor_sessions 
-        (doctor_id, session_token, device_id, ip_address, user_agent, device_fingerprint, expires_at, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, true)`,
-        [doctor.id, sessionToken, deviceId, ipAddress, userAgent, deviceFingerprint, expiresAt]
+      // ✅ Create session with token hash
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
+      };
+      
+      const session = await Session.create(
+        doctor.id,
+        'doctor',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
       );
 
       // Log successful login
@@ -273,7 +278,6 @@ class DoctorController {
         message: 'Login successful. You can now sign prescriptions.',
         data: {
           token,
-          sessionToken,
           doctorId: doctor.id,
           firstName: doctor.first_name,
           lastName: doctor.last_name,

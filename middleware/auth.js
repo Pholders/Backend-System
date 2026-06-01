@@ -28,9 +28,12 @@ const authMiddleware = async (req, res, next) => {
     const session = await Session.findByTokenHash(tokenHash);
     
     if (!session) {
+      console.warn('⚠️ Session not found for token hash:', tokenHash.substring(0, 16) + '...');
+      console.warn('   Token subject:', decoded.id);
       return res.status(401).json({
         success: false,
-        message: 'Session expired or revoked. Please login again.'
+        message: 'Session expired or revoked. Please login again.',
+        debug: process.env.NODE_ENV === 'development' ? { tokenHashStart: tokenHash.substring(0, 16) } : undefined
       });
     }
 

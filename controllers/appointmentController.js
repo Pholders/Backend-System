@@ -862,7 +862,7 @@ class AppointmentController {
   static async getDoctorAppointments(req, res) {
     try {
       const doctorId = req.user.id;
-      const { status = 'scheduled', limit = 50, offset = 0 } = req.query;
+      const { limit = 50, offset = 0 } = req.query;
 
       const query_string = `
         SELECT a.*, 
@@ -871,14 +871,14 @@ class AppointmentController {
         FROM appointments a
         LEFT JOIN patients u ON a.patient_id = u.id
         WHERE a.doctor_id = $1 
-          AND a.status = $2
+          AND a.status IN ('pending_payment', 'scheduled')
           AND a.doctor_accepted = FALSE
         ORDER BY a.appointment_date ASC, a.time_slot ASC
-        LIMIT $3 OFFSET $4;
+        LIMIT $2 OFFSET $3;
       `;
 
       const { query } = require('../config/db');
-      const result = await query(query_string, [doctorId, status, parseInt(limit), parseInt(offset)]);
+      const result = await query(query_string, [doctorId, parseInt(limit), parseInt(offset)]);
 
       res.status(200).json({
         success: true,

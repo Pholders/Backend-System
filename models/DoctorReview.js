@@ -5,6 +5,13 @@ class DoctorReview {
    * Create reviews table if it doesn't exist
    */
   static async createTable() {
+    // Check if table already exists
+    const checkQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'doctor_reviews');`;
+    const result = await pool.query(checkQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const query = `
       CREATE TABLE IF NOT EXISTS doctor_reviews (
         id SERIAL PRIMARY KEY,
@@ -112,15 +119,15 @@ class DoctorReview {
   static async getAverageRating(doctorId) {
     const query = `
       SELECT 
-        ROUND(AVG(rating)::NUMERIC, 2) as average_rating,
+        COALESCE(ROUND(AVG(rating)::NUMERIC, 2), 0) as average_rating,
         COUNT(*) as total_reviews,
-        MAX(rating) as highest_rating,
-        MIN(rating) as lowest_rating,
-        ROUND((COUNT(CASE WHEN rating = 5 THEN 1 END)::NUMERIC / COUNT(*) * 100), 1) as five_star_percentage,
-        ROUND((COUNT(CASE WHEN rating = 4 THEN 1 END)::NUMERIC / COUNT(*) * 100), 1) as four_star_percentage,
-        ROUND((COUNT(CASE WHEN rating = 3 THEN 1 END)::NUMERIC / COUNT(*) * 100), 1) as three_star_percentage,
-        ROUND((COUNT(CASE WHEN rating = 2 THEN 1 END)::NUMERIC / COUNT(*) * 100), 1) as two_star_percentage,
-        ROUND((COUNT(CASE WHEN rating = 1 THEN 1 END)::NUMERIC / COUNT(*) * 100), 1) as one_star_percentage
+        COALESCE(MAX(rating), 0) as highest_rating,
+        COALESCE(MIN(rating), 0) as lowest_rating,
+        ROUND((COUNT(CASE WHEN rating = 5 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as five_star_percentage,
+        ROUND((COUNT(CASE WHEN rating = 4 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as four_star_percentage,
+        ROUND((COUNT(CASE WHEN rating = 3 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as three_star_percentage,
+        ROUND((COUNT(CASE WHEN rating = 2 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as two_star_percentage,
+        ROUND((COUNT(CASE WHEN rating = 1 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as one_star_percentage
       FROM doctor_reviews 
       WHERE doctor_id = $1;
     `;

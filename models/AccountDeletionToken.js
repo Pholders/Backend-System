@@ -13,6 +13,15 @@ class AccountDeletionToken {
    */
   static async createTable() {
     try {
+      // Check if table already exists
+      const checkResult = await query(`
+        SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'account_deletion_tokens');
+      `);
+      
+      if (checkResult.rows[0].exists) {
+        return; // Table exists, skip creation and logging
+      }
+
       await query(`
         CREATE TABLE IF NOT EXISTS account_deletion_tokens (
           id SERIAL PRIMARY KEY,

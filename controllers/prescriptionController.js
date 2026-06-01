@@ -225,9 +225,9 @@ class PrescriptionController {
 
       // ✅ NEW: Verify session token is valid and belongs to this doctor
       const sessionResult = await pool.query(
-        `SELECT * FROM doctor_sessions 
-         WHERE session_token = $1 AND doctor_id = $2 AND is_active = true AND expires_at > NOW()`,
-        [sessionToken, doctorId]
+        `SELECT * FROM sessions 
+         WHERE token_hash = $1 AND user_id = $2 AND user_type = 'doctor' AND is_active = true AND expires_at > NOW()`,
+        [require('crypto').createHash('sha256').update(sessionToken).digest('hex'), doctorId]
       );
 
       if (sessionResult.rows.length === 0) {
@@ -269,31 +269,17 @@ class PrescriptionController {
       const timestamp = new Date().toISOString();
       await pool.query(
         `UPDATE prescriptions
-         SET signature_method = 'session',
-             signature_session_id = $1,
-             signature_device_id = $2,
-             signature_ip_address = $3,
-             signature_verified = true,
-             signature_hash = $4,
-             signature_fingerprint = $5,
-             is_signed = true,
-             signature_status = 'signed',
-             status = 'signed'
-         WHERE id = $6`,
-        [session.id, session.device_id, session.ip_address, signatureHash, signatureFingerprint, prescriptionId]
-      );
-
-      // ✅ NEW: Create audit log entry in signature_audit table
-      await pool.query(
-        `INSERT INTO signature_audit 
-        (prescription_id, doctor_id, session_id, action, signature_hash, signature_algorithm, device_id, ip_address, user_agent)
-        VALUES ($1, $2, $3, 'signed', $4, 'RSA-SHA256', $5, $6, $7)`,
-        [prescriptionId, doctorId, session.id, signatureHash, session.device_id, session.ip_address, session.user_agent]
+         SET signature_status = 'signed',
+             digital_signature = $1,
+             signature_timestamp = NOW(),
+             updated_at = NOW()
+         WHERE id = $2`,
+        [signatureHash, prescriptionId]
       );
 
       // ✅ NEW: Update session last_activity timestamp
       await pool.query(
-        `UPDATE doctor_sessions SET last_activity = NOW() WHERE id = $1`,
+        `UPDATE sessions SET last_activity_at = NOW() WHERE id = $1`,
         [session.id]
       );
 
@@ -964,6 +950,46 @@ class PrescriptionController {
     }
   }
 
+  // TEST METHOD: COPY OF getDoctorPrescriptions
+  static async doctorSignedRx(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { limit = 50, offset = 0, filter = 'all' } = req.query;
+
+      const prescriptions = await Prescription.getByDoctorId(doctorId, parseInt(limit), parseInt(offset));
+
+      let filtered = prescriptions;
+      if (filter === 'signed') {
+        filtered = prescriptions.filter(p => p.signature_status === 'signed');
+      } else if (filter === 'pending') {
+        filtered = prescriptions.filter(p => p.signature_status === 'pending');
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'SIGNED Prescriptions retrieved (TEST METHOD)',
+        data: {
+          total: filtered.length,
+          prescriptions: filtered.map(p => ({
+            id: p.id,
+            prescriptionNumber: p.prescription_number,
+            patient: p.patient_name,
+            diagnosis: p.diagnosis,
+            status: p.signature_status,
+            createdAt: p.created_at
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching signed prescriptions:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching prescriptions',
+        error: error.message
+      });
+    }
+  }
+
   /**
    * Patient: Claim prescription at pharmacy (one-time use)
    * After claiming, prescription cannot be claimed again
@@ -1176,6 +1202,7 @@ class PrescriptionController {
       });
     }
   }
+
 }
 
 module.exports = PrescriptionController;

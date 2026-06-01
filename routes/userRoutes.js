@@ -209,7 +209,7 @@ router.post('/profile/categories/reorder', authMiddleware, requireRole('patient'
 router.get('/appointments/booking-info', AppointmentController.getBookingInfo);
 
 // Get available doctors for appointment booking
-router.get('/appointments/doctors', AppointmentController.getAvailableDoctors);
+router.get('/appointments/doctors', authMiddleware, requireRole('patient'), AppointmentController.getAvailableDoctors);
 
 // Get available time slots for a specific doctor, date, and time period
 router.get('/appointments/available-slots', authMiddleware, requireRole('patient'), AppointmentController.getAvailableTimeSlots);
@@ -240,6 +240,11 @@ router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('ad
 
 // Doctor: Get appointments for doctor
 router.get('/doctor/appointments', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorAppointments);
+
+// TEST: Get signed prescriptions (early in file)
+router.get('/doctor/test-static', (req, res) => {
+  res.json({ test: 'static data' });
+});
 
 // Doctor: Accept appointment (acknowledge before consultation)
 router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
@@ -343,6 +348,9 @@ router.post('/prescriptions/:prescriptionId/revoke', authMiddleware, requireRole
 
 // Doctor: Get all prescriptions issued by doctor
 router.get('/doctor/prescriptions', authMiddleware, requireRole('doctor'), PrescriptionController.getDoctorPrescriptions);
+
+// TEST: Post to prescriptions-signed
+router.post('/doctor/prescriptions-signed', authMiddleware, PrescriptionController.doctorSignedRx);
 
 // Patient: Get all prescriptions
 router.get('/prescriptions', authMiddleware, requireRole('patient'), PrescriptionController.getPatientPrescriptions);

@@ -5,6 +5,7 @@ const Pharmacy = require('../models/Pharmacy');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
+const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 
@@ -171,51 +172,62 @@ class PharmacyController {
         });
       }
 
-      // Generate and send OTP
-      const otpRecord = await OTP.create(pharmacy.id, 'login', 'pharmacy');
+      // ✅ Direct login: Generate tokens immediately (no OTP)
+      // OTP is used ONLY for email verification during signup
+      delete pharmacy.password_hash;
 
-      // Log OTP generation
-      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'success');
-
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      let emailSent = false;
-
-      try {
-        await emailService.sendOTP(pharmacy.email, otpRecord.otp_code, pharmacy.first_name);
-        emailSent = true;
-        console.log('✅ OTP email sent to pharmacy successfully');
-      } catch (emailError) {
-        console.error('❌ Failed to send OTP email:', emailError.message);
-
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send OTP email. Please try again.'
-          });
-        }
-
-        console.log('⚠️  Development mode: Skipping email requirement');
-      }
-
-      const response = {
-        success: true,
-        message: emailSent
-          ? 'OTP sent to your email. Please verify to complete login.'
-          : 'OTP generated. Check server logs for code (development mode).',
-        data: {
+      const accessToken = jwt.sign(
+        {
+          id: pharmacy.id,
           email: pharmacy.email,
-          expiresIn: '10 minutes'
-        }
+          role: 'pharmacy'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+
+      // Create session with accessToken hash
+      const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
       };
 
-      if (isDevelopment && !emailSent) {
-        response.data.otp_code = otpRecord.otp_code;
-        response.data.dev_note = 'OTP included in response (development mode only)';
-        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
-      }
+      const session = await Session.create(
+        pharmacy.id,
+        'pharmacy',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
 
-      res.status(200).json(response);
+      const refreshTokenData = await RefreshToken.create(pharmacy.id, 'pharmacy', userAgent);
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'login', 'success', null);
+
+      console.log(`✅ Pharmacy ${pharmacy.id} logged in directly (password auth, no OTP)`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          pharmacy,
+          tokens: {
+            accessToken,
+            refreshToken: refreshTokenData.token,
+            expiresIn: 28800 // 8 hours
+          },
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
+          }
+        }
+      });
 
     } catch (error) {
       console.error('Pharmacy login error:', error);

@@ -10,6 +10,13 @@ class Appointment {
    * Create the appointments table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'appointments');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS appointments (
         id SERIAL PRIMARY KEY,
@@ -94,6 +101,13 @@ class Appointment {
       [id]
     );
     return result.rows[0];
+  }
+
+  /**
+   * Get appointment by ID (alias for findById)
+   */
+  static async getById(id) {
+    return this.findById(id);
   }
 
   /**

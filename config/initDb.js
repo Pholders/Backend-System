@@ -5,7 +5,10 @@ const AccountDeletionToken = require('../models/AccountDeletionToken');
 const Appointment = require('../models/Appointment');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
+const Session = require('../models/Session');
+const AuditLog = require('../models/AuditLog');
 const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
+const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 
@@ -39,8 +42,17 @@ const initializeDatabase = async () => {
     // Create Payments table
     await Payment.createTable();
 
+    // Create Sessions table (for session tracking)
+    await Session.createTable();
+
+    // Create Audit Logs table
+    await AuditLog.createTable();
+
     // Add pending_payment status to appointments
     await addPendingPaymentStatus();
+
+    // Add payment_status and payment_method columns to appointments
+    await addPaymentColumnsToAppointments();
 
     // Create PHR tables (health vitals, documents, access control)
     await createPHRTables();

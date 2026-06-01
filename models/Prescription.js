@@ -11,6 +11,13 @@ class Prescription {
    * Create the prescriptions table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'prescriptions');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS prescriptions (
         id SERIAL PRIMARY KEY,
@@ -198,23 +205,26 @@ class Prescription {
   static async getById(prescriptionId) {
     const getQuery = `
       SELECT p.*,
-        json_agg(json_build_object(
-          'id', pi.id,
-          'medicine_name', pi.medicine_name,
-          'generic_name', pi.generic_name,
-          'dosage', pi.dosage,
-          'dosage_form', pi.dosage_form,
-          'quantity', pi.quantity,
-          'quantity_unit', pi.quantity_unit,
-          'frequency', pi.frequency,
-          'route_of_administration', pi.route_of_administration,
-          'duration', pi.duration,
-          'special_instructions', pi.special_instructions,
-          'schedule_classification', pi.schedule_classification,
-          'possible_interactions', pi.possible_interactions,
-          'contraindications', pi.contraindications,
-          'warnings', pi.warnings
-        ) ORDER BY pi.id) as items
+        COALESCE(
+          json_agg(json_build_object(
+            'id', pi.id,
+            'medicine_name', pi.medicine_name,
+            'generic_name', pi.generic_name,
+            'dosage', pi.dosage,
+            'dosage_form', pi.dosage_form,
+            'quantity', pi.quantity,
+            'quantity_unit', pi.quantity_unit,
+            'frequency', pi.frequency,
+            'route_of_administration', pi.route_of_administration,
+            'duration', pi.duration,
+            'special_instructions', pi.special_instructions,
+            'schedule_classification', pi.schedule_classification,
+            'possible_interactions', pi.possible_interactions,
+            'contraindications', pi.contraindications,
+            'warnings', pi.warnings
+          ) ORDER BY pi.id) FILTER (WHERE pi.id IS NOT NULL),
+          '[]'::json
+        ) as items
       FROM prescriptions p
       LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
       WHERE p.id = $1 AND p.is_revoked = FALSE
@@ -270,6 +280,62 @@ class Prescription {
       return result.rows;
     } catch (error) {
       console.error('❌ Error fetching doctor prescriptions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get signed prescriptions with appointment details for a doctor
+   */
+  static async getSignedPrescriptionsWithAppointments(doctorId, limit = 50, offset = 0) {
+    const getQuery = `
+      SELECT 
+        p.id,
+        p.prescription_number,
+        p.diagnosis,
+        p.clinical_notes,
+        p.signature_status,
+        p.digital_signature,
+        p.signature_timestamp,
+        p.created_at,
+        p.patient_name,
+        p.patient_id,
+        p.patient_email,
+        p.patient_phone,
+        p.appointment_id,
+        a.appointment_date,
+        a.time_slot,
+        a.reason_for_visit,
+        a.status as appointment_status,
+        d.first_name as doctor_first_name,
+        d.last_name as doctor_last_name,
+        d.hpcsa_number,
+        json_agg(json_build_object(
+          'id', pi.id,
+          'medicine_name', pi.medicine_name,
+          'dosage', pi.dosage,
+          'dosage_form', pi.dosage_form,
+          'frequency', pi.frequency,
+          'route_of_administration', pi.route_of_administration,
+          'duration', pi.duration,
+          'quantity', pi.quantity,
+          'instructions', pi.special_instructions
+        ) ORDER BY pi.id) FILTER (WHERE pi.id IS NOT NULL) as medicines
+      FROM prescriptions p
+      LEFT JOIN appointments a ON p.appointment_id = a.id
+      LEFT JOIN doctors d ON p.doctor_id = d.id
+      LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
+      WHERE p.doctor_id = $1 AND p.signature_status = 'signed' AND p.is_revoked = FALSE
+      GROUP BY p.id, a.id, d.id
+      ORDER BY p.signature_timestamp DESC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    try {
+      const result = await query(getQuery, [doctorId, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error fetching signed prescriptions with appointments:', error);
       throw error;
     }
   }
@@ -757,6 +823,62 @@ class Prescription {
       };
     } catch (error) {
       console.error('❌ Error reverting claim:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get signed prescriptions with appointment details for a doctor
+   */
+  static async getSignedPrescriptionsWithAppointments(doctorId, limit = 50, offset = 0) {
+    const getQuery = `
+      SELECT 
+        p.id,
+        p.prescription_number,
+        p.diagnosis,
+        p.clinical_notes,
+        p.signature_status,
+        p.digital_signature,
+        p.signature_timestamp,
+        p.created_at,
+        p.patient_name,
+        p.patient_id,
+        p.patient_email,
+        p.patient_phone,
+        p.appointment_id,
+        a.appointment_date,
+        a.time_slot,
+        a.reason_for_visit,
+        a.status as appointment_status,
+        d.first_name as doctor_first_name,
+        d.last_name as doctor_last_name,
+        d.hpcsa_number,
+        json_agg(json_build_object(
+          'id', pi.id,
+          'medicine_name', pi.medicine_name,
+          'dosage', pi.dosage,
+          'dosage_form', pi.dosage_form,
+          'frequency', pi.frequency,
+          'route_of_administration', pi.route_of_administration,
+          'duration', pi.duration,
+          'quantity', pi.quantity,
+          'instructions', pi.special_instructions
+        ) ORDER BY pi.id) FILTER (WHERE pi.id IS NOT NULL) as medicines
+      FROM prescriptions p
+      LEFT JOIN appointments a ON p.appointment_id = a.id
+      LEFT JOIN doctors d ON p.doctor_id = d.id
+      LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
+      WHERE p.doctor_id = $1 AND p.signature_status = 'signed' AND p.is_revoked = FALSE
+      GROUP BY p.id, a.id, d.id
+      ORDER BY p.signature_timestamp DESC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    try {
+      const result = await query(getQuery, [doctorId, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error fetching signed prescriptions with appointments:', error);
       throw error;
     }
   }
