@@ -6,6 +6,16 @@ require('dotenv').config();
 const { pool } = require('./config/db');
 const cache = require('./services/cacheService');
 const AppointmentCleanupService = require('./services/appointmentCleanupService');
+const logger = require('./services/loggerService');
+const ResponseFormatter = require('./utils/responseFormatter');
+
+// Import centralized middleware
+const {
+  errorHandler,
+  notFoundHandler,
+  requestLogger,
+  asyncHandler
+} = require('./middleware/errorHandler');
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
@@ -17,13 +27,22 @@ require('./config/passport');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// ============================================================================
+// MIDDLEWARE CONFIGURATION
+// ============================================================================
+
+// CORS configuration
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging (must be early)
+app.use(requestLogger);
 
 // Session middleware (required for Passport)
 app.use(session({
@@ -41,52 +60,73 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Routes
+// ============================================================================
+// API ROUTES
+// ============================================================================
+
 app.use('/api/users', userRoutes);
 
+// ============================================================================
+// UTILITY ENDPOINTS
+// ============================================================================
+
 // Test database connection endpoint
-app.get('/api/test-db', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT NOW()');
-    res.json({
-      success: true,
-      message: 'Database connection successful',
-      timestamp: result.rows[0].now,
-    });
-  } catch (error) {
-    console.error('Database connection error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Database connection failed',
-      error: error.message,
-    });
-  }
-});
+app.get('/api/test-db', asyncHandler(async (req, res) => {
+  const result = await pool.query('SELECT NOW()');
+  logger.success('Database connection test successful');
+  res.json(ResponseFormatter.success(
+    { timestamp: result.rows[0].now },
+    'Database connection successful'
+  ));
+}));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    success: true,
+    statusCode: 200,
     message: 'Server is running',
-    cache: cache.isAvailable() ? 'connected' : 'unavailable'
+    data: {
+      status: 'OK',
+      cache: cache.isAvailable() ? 'connected' : 'unavailable',
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    }
   });
 });
 
 // Cache stats endpoint
-app.get('/api/cache-stats', async (req, res) => {
-  try {
-    const stats = await cache.stats();
-    res.json({
-      success: true,
-      data: stats
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+app.get('/api/cache-stats', asyncHandler(async (req, res) => {
+  const stats = await cache.stats();
+  res.json(ResponseFormatter.success(stats, 'Cache statistics retrieved'));
+}));
+
+// System logs endpoint (admin only - for development/monitoring)
+app.get('/api/system/logs', (req, res) => {
+  if (process.env.NODE_ENV === 'production' && !req.user?.isAdmin) {
+    return res.status(403).json(ResponseFormatter.forbidden('Access denied'));
   }
+
+  const lines = parseInt(req.query.lines) || 100;
+  const logs = logger.getLogs(null, 'app', lines);
+  res.json(ResponseFormatter.success(logs, 'Logs retrieved'));
 });
+
+// ============================================================================
+// 404 Handler (must be before error handler)
+// ============================================================================
+
+app.use(notFoundHandler);
+
+// ============================================================================
+// GLOBAL ERROR HANDLER (must be last)
+// ============================================================================
+
+app.use(errorHandler);
+
+// ============================================================================
+// SERVER INITIALIZATION
+// ============================================================================
 
 // Start server
 async function startServer() {

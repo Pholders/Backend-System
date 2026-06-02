@@ -223,6 +223,95 @@ class Pharmacy {
     );
     return result.rows[0];
   }
+
+  /**
+   * Create temporary pharmacy pending email verification
+   * Used during signup before OTP verification
+   */
+  static async createTemp(pharmacyData) {
+    const {
+      pharmacy_name,
+      first_name,
+      last_name,
+      email,
+      password_hash,
+      phone,
+      license_number,
+      city,
+      province,
+      status = 'pending_verification'
+    } = pharmacyData;
+
+    const insertQuery = `
+      INSERT INTO pharmacies (
+        pharmacy_name, first_name, last_name, email, password_hash,
+        phone, license_number, city, province, status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `;
+
+    const values = [
+      pharmacy_name, first_name, last_name, email, password_hash,
+      phone, license_number, city, province, status
+    ];
+
+    const result = await query(insertQuery, values);
+    return result.rows[0];
+  }
+
+  /**
+   * Update pharmacy fields
+   */
+  static async update(id, updates) {
+    const allowedFields = [
+      'pharmacy_name', 'phone', 'city', 'province', 'address', 'zip_code',
+      'latitude', 'longitude', 'website', 'description', 'status',
+      'is_24_hours', 'delivery_available', 'delivery_radius', 'profile_image'
+    ];
+
+    // Build SET clause dynamically
+    const setClause = Object.keys(updates)
+      .filter(key => allowedFields.includes(key))
+      .map((key, idx) => `${key} = $${idx + 1}`)
+      .join(', ');
+
+    if (!setClause) {
+      throw new Error('No valid fields provided for update');
+    }
+
+    const values = Object.values(updates).filter((_, idx) => 
+      allowedFields.includes(Object.keys(updates)[idx])
+    );
+    values.push(id);
+
+    const updateQuery = `
+      UPDATE pharmacies
+      SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $${values.length}
+      RETURNING *
+    `;
+
+    const result = await query(updateQuery, values);
+    return result.rows[0];
+  }
+
+  /**
+   * Mark a pharmacy's email as verified.
+   * Sets email_verified = true and stamps email_verified_at = NOW().
+   */
+  static async markEmailVerified(id) {
+    const result = await query(
+      `UPDATE pharmacies
+       SET email_verified = true,
+           email_verified_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
 }
 
 module.exports = Pharmacy;

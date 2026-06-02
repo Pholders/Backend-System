@@ -38,7 +38,7 @@ router.post('/signup', preventAuthenticated, UserController.signup);
 router.post('/login', preventAuthenticated, UserController.login);
 router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 
-// Email Verification (account activation)
+// Account Activation Routes (OTP-based)
 router.post('/verify-email', preventAuthenticated, UserController.verifyEmail);
 router.post('/resend-verification', preventAuthenticated, UserController.resendVerificationEmail);
 
@@ -121,6 +121,10 @@ router.post('/doctor/signup', preventAuthenticated, DoctorController.signup);
 router.post('/doctor/login', preventAuthenticated, DoctorController.login);
 router.post('/doctor/verify-otp', preventAuthenticated, DoctorController.verifyOTP);
 
+// Doctor Account Activation Routes (OTP-based)
+router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
+router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
+
 router.get('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.getProfile);
 router.put('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.updateProfile);
 
@@ -136,6 +140,8 @@ router.post('/doctors/nearby', authMiddleware, requireRole('patient'), DoctorCon
 router.get('/doctors', authMiddleware, requireRole('patient'), DoctorController.listDoctors);
 // GET /doctors/:id
 router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorController.getDoctorById);
+// GET /doctors/:doctorId/availability?date=YYYY-MM-DD
+router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patient'), DoctorController.getAvailability);
 
 /**
  * Pharmacy Routes
@@ -144,12 +150,31 @@ router.post('/pharmacy/signup', preventAuthenticated, PharmacyController.signup)
 router.post('/pharmacy/login', preventAuthenticated, PharmacyController.login);
 router.post('/pharmacy/verify-otp', preventAuthenticated, PharmacyController.verifyOTP);
 
+// Pharmacy Account Activation Routes (OTP-based)
+router.post('/pharmacy/verify-email', preventAuthenticated, PharmacyController.verifyEmail);
+router.post('/pharmacy/resend-verification', preventAuthenticated, PharmacyController.resendVerificationEmail);
+
 router.get('/pharmacy/profile', authMiddleware, requireRole('pharmacy'), PharmacyController.getProfile);
 router.put('/pharmacy/profile', authMiddleware, requireRole('pharmacy'), PharmacyController.updateProfile);
 
 router.post('/pharmacy/logout', authMiddleware, requireRole('pharmacy'), PharmacyController.logout);
 router.get('/pharmacy/sessions', authMiddleware, requireRole('pharmacy'), PharmacyController.getSessions);
 router.get('/pharmacy/activity-log', authMiddleware, requireRole('pharmacy'), PharmacyController.getActivityLog);
+
+/**
+ * Pharmacy Dispensing Routes
+ */
+// Get all claimed prescriptions available for dispensing
+router.get('/pharmacy/prescriptions/claimed', authMiddleware, requireRole('pharmacy'), PharmacyController.getClaimedPrescriptions);
+
+// Dispense a prescription (mark as dispensed)
+router.post('/pharmacy/prescriptions/:prescriptionId/dispense', authMiddleware, requireRole('pharmacy'), PharmacyController.dispensePrescription);
+
+// Get dispensing history
+router.get('/pharmacy/dispense-history', authMiddleware, requireRole('pharmacy'), PharmacyController.getDispenseHistory);
+
+// Get dispensing statistics
+router.get('/pharmacy/dispense-stats', authMiddleware, requireRole('pharmacy'), PharmacyController.getDispenseStats);
 
 /**
  * Admin Routes

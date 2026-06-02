@@ -11,6 +11,7 @@ const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
+const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
 
 /**
  * Initialize Database Tables
@@ -59,6 +60,9 @@ const initializeDatabase = async () => {
 
     // Add session-based signature support
     await addSessionBasedSignatures();
+
+    // Add pharmacy dispensing support
+    await addPharmacyDispensingSupport();
     
     console.log('✅ Database initialization completed successfully');
     return true;

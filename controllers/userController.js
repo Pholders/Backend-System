@@ -225,6 +225,8 @@ class UserController {
 
       // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      console.log(`[LOGIN DEBUG] Password check - Provided: "${password}" (${password.length} chars), Hash from DB: ${user.password_hash.substring(0, 50)}...`);
+      console.log(`[LOGIN DEBUG] bcrypt.compare result: ${isPasswordValid}`);
       if (!isPasswordValid) {
         await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login_failed', 'failed', 'Invalid password');
         return res.status(401).json({
@@ -233,76 +235,63 @@ class UserController {
         });
       }
 
-      // ✅ Direct password authentication (no OTP on login)
-      if (skipOTP === true) {
-        delete user.password_hash;
+      // ✅ Password verified - Return tokens directly (no OTP on login)
+      delete user.password_hash;
 
-        // Generate access token (8 hours)
-        const accessToken = jwt.sign(
-          { 
-            id: user.id, 
-            email: user.email,
-            role: 'patient'
+      // Generate access token (24 hours)
+      const accessToken = jwt.sign(
+        { 
+          id: user.id, 
+          email: user.email,
+          role: 'patient'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      // Create session with accessToken hash
+      const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+      
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
+      };
+      
+      const session = await Session.create(
+        user.id,
+        'patient',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
+
+      // Generate refresh token
+      const refreshTokenData = await RefreshToken.create(
+        user.id, 
+        'patient',
+        userAgent
+      );
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'success', null);
+
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          user,
+          tokens: {
+            accessToken,
+            refreshToken: refreshTokenData.token,
+            expiresIn: 86400 // 24 hours
           },
-          process.env.JWT_SECRET,
-          { expiresIn: '8h' }
-        );
-
-        // Create session with accessToken hash
-        const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
-        
-        const deviceInfo = {
-          userAgent: userAgent,
-          ipAddress: ipAddress,
-          timestamp: new Date().toISOString()
-        };
-        
-        const session = await Session.create(
-          user.id,
-          'patient',
-          tokenHash,
-          ipAddress,
-          userAgent,
-          deviceInfo
-        );
-
-        // Generate refresh token
-        const refreshTokenData = await RefreshToken.create(
-          user.id, 
-          'patient',
-          userAgent
-        );
-
-        // Log successful login
-        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'success', null);
-
-        res.status(200).json({
-          success: true,
-          message: 'Login successful',
-          data: {
-            user,
-            tokens: {
-              accessToken,
-              refreshToken: refreshTokenData.token,
-              expiresIn: 28800 // 8 hours
-            },
-            session: {
-              id: session.id,
-              expiresAt: session.expires_at
-            }
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
           }
-        });
-
-        return;
-      }
-
-      // ❌ OTP removed from login - use password auth only
-      // OTP is used ONLY for email verification during signup
-      console.log(`[LOGIN DEBUG] Reached end of login without skipOTP - sending error`);
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid login request. Use skipOTP: true for direct password login or signup first.',
-        code: 'INVALID_LOGIN_REQUEST'
+        }
       });
 
     } catch (error) {
@@ -367,7 +356,7 @@ class UserController {
       // Remove password_hash from response
       delete user.password_hash;
 
-      // Generate JWT token
+      // Generate JWT token (24 hours)
       const token = jwt.sign(
         { 
           id: user.id, 
@@ -376,7 +365,7 @@ class UserController {
           type: 'patient'
         },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '24h' }
       );
 
       // Create session

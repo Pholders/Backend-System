@@ -234,6 +234,23 @@ class Doctor {
     );
     return result.rows;
   }
+
+  /**
+   * Mark a doctor's email as verified.
+   * Sets email_verified = true and stamps email_verified_at = NOW().
+   */
+  static async markEmailVerified(id) {
+    const result = await query(
+      `UPDATE doctors
+       SET email_verified = true,
+           email_verified_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
 }
 
 module.exports = Doctor;

@@ -882,6 +882,197 @@ class Prescription {
       throw error;
     }
   }
+
+  /**
+   * Get all claimed prescriptions for a pharmacy
+   * These are prescriptions patients have claimed at this pharmacy but not yet dispensed
+   */
+  static async getClaimedPrescriptionsByPharmacy(pharmacyId, pharmacyName, limit = 50, offset = 0) {
+    const getQuery = `
+      SELECT 
+        p.id as prescription_id,
+        p.prescription_number,
+        p.patient_id,
+        u.first_name as patient_first_name,
+        u.last_name as patient_last_name,
+        u.email as patient_email,
+        u.phone as patient_phone,
+        p.diagnosis,
+        p.appointment_id,
+        a.appointment_date,
+        a.time_slot,
+        a.status as appointment_status,
+        p.claimed_at,
+        p.claimed_by_pharmacy_name,
+        p.is_dispensed,
+        p.dispensed_at,
+        COALESCE(json_agg(
+          json_build_object(
+            'medicine_id', pi.id,
+            'medicine_name', pi.medicine_name,
+            'dosage', pi.dosage,
+            'dosage_form', pi.dosage_form,
+            'route_of_administration', pi.route_of_administration,
+            'frequency', pi.frequency,
+            'duration', pi.duration,
+            'quantity', pi.quantity,
+            'instructions', pi.instructions
+          )
+        ) FILTER (WHERE pi.id IS NOT NULL), '[]'::json) as medicines,
+        COALESCE(json_agg(pi.id) FILTER (WHERE pi.id IS NOT NULL), ARRAY[]::integer[]) as medicine_ids
+      FROM prescriptions p
+      LEFT JOIN patients u ON p.patient_id = u.id
+      LEFT JOIN appointments a ON p.appointment_id = a.id
+      LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
+      WHERE p.claimed = TRUE 
+        AND p.claimed_by_pharmacy_id = $1
+        AND p.is_dispensed = FALSE
+      GROUP BY p.id, u.id, a.id
+      ORDER BY p.claimed_at DESC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    try {
+      const result = await query(getQuery, [pharmacyId, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error fetching claimed prescriptions for pharmacy:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get count of claimed prescriptions for a pharmacy
+   */
+  static async getClaimedPrescriptionsCount(pharmacyId) {
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM prescriptions
+      WHERE claimed = TRUE 
+        AND claimed_by_pharmacy_id = $1
+        AND is_dispensed = FALSE;
+    `;
+
+    try {
+      const result = await query(countQuery, [pharmacyId]);
+      return result.rows[0].total;
+    } catch (error) {
+      console.error('❌ Error counting claimed prescriptions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Dispense a prescription (mark as dispensed at pharmacy)
+   */
+  static async dispensePrescription(prescriptionId, pharmacyId, pharmacyName, staffName, notes) {
+    const dispenseQuery = `
+      UPDATE prescriptions
+      SET is_dispensed = TRUE,
+          dispensed_at = CURRENT_TIMESTAMP,
+          dispensed_by_pharmacy_id = $2,
+          dispensed_by_pharmacy_name = $3,
+          dispensing_notes = $4,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND claimed = TRUE AND is_dispensed = FALSE
+      RETURNING id, prescription_number, patient_id, dispensed_at;
+    `;
+
+    const auditQuery = `
+      INSERT INTO prescription_dispensing 
+      (prescription_id, patient_id, pharmacy_id, pharmacy_name, dispensed_by_staff_name, notes)
+      SELECT id, patient_id, $2, $3, $4, $5
+      FROM prescriptions
+      WHERE id = $1
+      RETURNING id;
+    `;
+
+    try {
+      const result = await query(dispenseQuery, [prescriptionId, pharmacyId, pharmacyName, notes]);
+
+      if (result.rows.length === 0) {
+        return {
+          success: false,
+          message: 'Prescription not found, already dispensed, or not claimed'
+        };
+      }
+
+      // Log the dispensing event
+      await query(auditQuery, [prescriptionId, pharmacyId, pharmacyName, staffName, notes]);
+
+      return {
+        success: true,
+        data: result.rows[0]
+      };
+    } catch (error) {
+      console.error('❌ Error dispensing prescription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get dispensing history for a pharmacy
+   */
+  static async getPharmacyDispenseHistory(pharmacyId, limit = 50, offset = 0) {
+    const getQuery = `
+      SELECT 
+        p.id as prescription_id,
+        p.prescription_number,
+        u.first_name as patient_first_name,
+        u.last_name as patient_last_name,
+        u.email as patient_email,
+        p.diagnosis,
+        p.dispensed_at,
+        p.dispensing_notes,
+        COUNT(pi.id) as medicine_count,
+        COALESCE(json_agg(
+          json_build_object(
+            'medicine_name', pi.medicine_name,
+            'dosage', pi.dosage,
+            'quantity', pi.quantity
+          )
+        ) FILTER (WHERE pi.id IS NOT NULL), '[]'::json) as medicines
+      FROM prescriptions p
+      LEFT JOIN patients u ON p.patient_id = u.id
+      LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
+      WHERE p.dispensed_by_pharmacy_id = $1 AND p.is_dispensed = TRUE
+      GROUP BY p.id, u.id
+      ORDER BY p.dispensed_at DESC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    try {
+      const result = await query(getQuery, [pharmacyId, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error fetching pharmacy dispense history:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get dispensing statistics for a pharmacy
+   */
+  static async getPharmacyDispenseStats(pharmacyId) {
+    const statsQuery = `
+      SELECT 
+        COUNT(CASE WHEN is_dispensed = FALSE THEN 1 END) as pending_dispense,
+        COUNT(CASE WHEN is_dispensed = TRUE THEN 1 END) as dispensed_count,
+        COUNT(DISTINCT patient_id) as unique_patients,
+        COUNT(CASE WHEN dispensed_at >= NOW() - INTERVAL '7 days' THEN 1 END) as dispensed_this_week,
+        COUNT(CASE WHEN dispensed_at >= NOW() - INTERVAL '30 days' THEN 1 END) as dispensed_this_month
+      FROM prescriptions
+      WHERE claimed_by_pharmacy_id = $1 AND claimed = TRUE;
+    `;
+
+    try {
+      const result = await query(statsQuery, [pharmacyId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error fetching pharmacy dispense stats:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Prescription;
