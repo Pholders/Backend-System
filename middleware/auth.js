@@ -63,6 +63,14 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
+    if (error.name === 'SyntaxError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Malformed token. Access denied.',
+        code: 'MALFORMED_TOKEN'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error authenticating user',

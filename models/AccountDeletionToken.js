@@ -27,13 +27,13 @@ class AccountDeletionToken {
           cancelled BOOLEAN DEFAULT FALSE,
           cancelled_at TIMESTAMP,
           reason_cancelled TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          
-          INDEX idx_user_id (user_id),
-          INDEX idx_email (email),
-          INDEX idx_deletion_token (deletion_token),
-          INDEX idx_confirmed (confirmed)
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_adt_user_id        ON account_deletion_tokens(user_id);
+        CREATE INDEX IF NOT EXISTS idx_adt_email          ON account_deletion_tokens(email);
+        CREATE INDEX IF NOT EXISTS idx_adt_deletion_token ON account_deletion_tokens(deletion_token);
+        CREATE INDEX IF NOT EXISTS idx_adt_confirmed      ON account_deletion_tokens(confirmed);
       `);
       console.log('✅ Account deletion tokens table created');
     } catch (error) {

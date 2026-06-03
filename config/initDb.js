@@ -2,9 +2,14 @@ const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
+const ActionToken = require('../models/ActionToken');
 const Notification = require('../models/Notification');
 const NotificationPreferences = require('../models/NotificationPreferences');
 const DeviceToken = require('../models/DeviceToken');
+const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
+const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
+const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
+const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 
 /**
  * Initialize Database Tables
@@ -26,6 +31,22 @@ const initializeDatabase = async () => {
 
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
+
+    // Action tokens (generic single-use tokens: email change, account unfreeze, 2FA enable)
+    await ActionToken.createTable();
+
+    // Add profile/security columns to patients (avatar_url, suburb, id_number_encrypted,
+    // password_changed_at, password_strength, biometric/2FA flags, account_frozen)
+    await addProfileSecurityColumns();
+
+    // Linked services (connected_doctors, connected_pharmacies, family_dependents)
+    await createLinkedServicesTables();
+
+    // Medical aid (medical_aid_schemes, medical_aid_claims, invoices)
+    await createMedicalAidTables();
+
+    // Support tickets
+    await createSupportTicketsTable();
 
     // Notifications stack
     await Notification.createTable();

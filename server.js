@@ -9,6 +9,9 @@ const cache = require('./services/cacheService');
 // Import routes
 const userRoutes = require('./routes/userRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const supportRoutes = require('./routes/supportRoutes');
+const legalRoutes = require('./routes/legalRoutes');
 
 // Import Passport config
 require('./config/passport');
@@ -46,6 +49,13 @@ app.use(passport.session());
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/legal', legalRoutes);
+
+// Static uploads (avatars, medical aid cards, etc.)
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Test database connection endpoint
 app.get('/api/test-db', async (req, res) => {

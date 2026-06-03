@@ -231,6 +231,16 @@ class UserController {
         });
       }
 
+      // 🧊 Account-frozen gate 
+      if (user.account_frozen === true) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'failed', 'Account frozen');
+        return res.status(423).json({
+          success: false,
+          code: 'ACCOUNT_FROZEN',
+          message: 'Your account is frozen. Please use the unfreeze link sent to your email to restore access.'
+        });
+      }
+
       // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password_hash);
       if (!isPasswordValid) {
@@ -496,6 +506,7 @@ class UserController {
         data: {
           user,
           tokens: {
+            token,
             accessToken,
             refreshToken: refreshTokenData.token,
             expiresIn: 900 // 15 minutes in seconds
@@ -1487,6 +1498,7 @@ class UserController {
 
         // Build redirect URL with tokens
         const redirectUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth-callback`);
+        redirectUrl.searchParams.append('token', token);
         redirectUrl.searchParams.append('accessToken', accessToken);
         redirectUrl.searchParams.append('refreshToken', refreshTokenData.token);
         redirectUrl.searchParams.append('userId', user.id);
