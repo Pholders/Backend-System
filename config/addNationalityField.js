@@ -11,7 +11,7 @@ const runMigration = async () => {
   try {
     // Add nationality column with CHECK constraint
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ADD COLUMN IF NOT EXISTS nationality VARCHAR(20) 
       CHECK (nationality IN ('South African', 'Other'));
     `);
@@ -21,7 +21,7 @@ const runMigration = async () => {
     // Uncomment if you have existing data that needs a default
     /*
     await query(`
-      UPDATE users 
+      UPDATE patients 
       SET nationality = 'Other' 
       WHERE nationality IS NULL;
     `);
@@ -31,7 +31,7 @@ const runMigration = async () => {
     // Now make it NOT NULL (skip if you have existing data without nationality)
     /*
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ALTER COLUMN nationality SET NOT NULL;
     `);
     console.log('✅ Made nationality column required');

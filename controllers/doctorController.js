@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { query } = require('../config/db');
+const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
@@ -46,17 +46,16 @@ class DoctorController {
         clinic_name,
         city,
         province,
-        latitude,
-        longitude,
-        clinic_address
+        clinic_address,
+        bio
       } = req.body;
 
       // Validate required fields
-      if (!first_name || !last_name || !email || !phone || !password || !hpcsa_number || !specialization || !experience || !clinic_name || !city || !province) {
+      if (!first_name || !last_name || !email || !phone || !password || !hpcsa_number || !specialization || !experience || !clinic_name || !city || !province || !clinic_address) {
         await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', 'Missing required fields');
         return res.status(400).json({
           success: false,
-          message: 'All fields are required: first_name, last_name, email, phone, password, hpcsa_number, specialization, experience, clinic_name, city, province'
+          message: 'All fields are required: first_name, last_name, email, phone, password, hpcsa_number, specialization, experience, clinic_name, city, province, clinic_address'
         });
       }
 
@@ -102,15 +101,13 @@ class DoctorController {
         });
       }
 
-      // Process location data
+      // Process location data - convert address to coordinates
       let finalLatitude = null;
       let finalLongitude = null;
       let finalClinicAddress = clinic_address;
 
-      if (latitude !== undefined || longitude !== undefined || clinic_address) {
+      try {
         const locationResult = await GeocodingService.processLocation({
-          latitude,
-          longitude,
           clinic_address
         });
 
@@ -118,14 +115,22 @@ class DoctorController {
           await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding error: ${locationResult.error}`);
           return res.status(400).json({
             success: false,
-            message: locationResult.error,
-            hint: 'Provide either manual coordinates (latitude, longitude) or clinic_address for auto-geocoding'
+            message: `Unable to geocode clinic address: ${locationResult.error}`,
+            hint: 'Please provide a valid clinic address (e.g., "123 Medical Street, Johannesburg, South Africa")'
           });
         }
 
         finalLatitude = locationResult.latitude;
         finalLongitude = locationResult.longitude;
         finalClinicAddress = locationResult.formatted_address;
+      } catch (geoError) {
+        console.error('Geocoding error:', geoError);
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'signup', 'failed', `Geocoding service error: ${geoError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Error processing clinic address location',
+          hint: 'Please ensure your clinic address is complete and valid'
+        });
       }
 
       // Hash password
@@ -147,7 +152,8 @@ class DoctorController {
         latitude: finalLatitude,
         longitude: finalLongitude,
         clinic_address: finalClinicAddress,
-        password_hash
+        password_hash,
+        bio
       });
 
       // Log successful signup
@@ -184,6 +190,10 @@ class DoctorController {
   static async login(req, res) {
     try {
       const { email, password } = req.body;
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      const deviceId = req.headers['x-device-id'] || crypto.randomBytes(16).toString('hex');
+      const deviceFingerprint = req.headers['x-device-fingerprint'] || crypto.randomBytes(32).toString('hex');
 
       if (!email || !password) {
         await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'login', 'failed', 'Missing email or password');
@@ -229,51 +239,57 @@ class DoctorController {
         });
       }
 
-      // Generate and send OTP
-      const otpRecord = await OTP.create(doctor.id, 'login', 'doctor');
-
-      // Log OTP generation
-      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'success');
-
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      let emailSent = false;
-
-      try {
-        await emailService.sendOTP(doctor.email, otpRecord.otp_code, doctor.first_name);
-        emailSent = true;
-        console.log('✅ OTP email sent to doctor successfully');
-      } catch (emailError) {
-        console.error('❌ Failed to send OTP email:', emailError.message);
-
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send OTP email. Please try again.'
-          });
-        }
-
-        console.log('⚠️  Development mode: Skipping email requirement');
-      }
-
-      const response = {
-        success: true,
-        message: emailSent
-          ? 'OTP sent to your email. Please verify to complete login.'
-          : 'OTP generated. Check server logs for code (development mode).',
-        data: {
+      // ✅ Generate JWT token for authentication (24 hours)
+      const token = jwt.sign(
+        {
+          id: doctor.id,
           email: doctor.email,
-          expiresIn: '10 minutes'
-        }
+          role: 'doctor',
+          firstName: doctor.first_name,
+          lastName: doctor.last_name
+        },
+        process.env.JWT_SECRET || 'jwtSecret',
+        { expiresIn: '24h' }
+      );
+
+      // ✅ Create session with token hash
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
       };
+      
+      const session = await Session.create(
+        doctor.id,
+        'doctor',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
 
-      if (isDevelopment && !emailSent) {
-        response.data.otp_code = otpRecord.otp_code;
-        response.data.dev_note = 'OTP included in response (development mode only)';
-        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
-      }
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'success');
 
-      res.status(200).json(response);
+      res.status(200).json({
+        success: true,
+        message: 'Login successful. You can now sign prescriptions.',
+        data: {
+          token,
+          doctorId: doctor.id,
+          firstName: doctor.first_name,
+          lastName: doctor.last_name,
+          email: doctor.email,
+          hpcsaNumber: doctor.hpcsa_number,
+          sessionInfo: {
+            expiresIn: '8 hours',
+            canSignPrescriptions: true,
+            createdAt: new Date().toISOString()
+          }
+        }
+      });
 
     } catch (error) {
       console.error('Doctor login error:', error);
@@ -837,6 +853,233 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error fetching doctor',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Verify OTP for Email Verification (Account Activation)
+   * Doctor-specific OTP verification endpoint
+   */
+  static async verifyEmail(req, res) {
+    try {
+      const { email, otp_code } = req.body;
+
+      if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'email_verification', 'failed', 'Missing email or code');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and verification code are required'
+        });
+      }
+
+      const doctor = await Doctor.findByEmail(email);
+      if (!doctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'email_verification', 'failed', 'Doctor not found');
+        // Generic response to prevent account enumeration
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      // Idempotent: already verified
+      if (doctor.email_verified === true) {
+        return res.status(200).json({
+          success: true,
+          message: 'Email is already verified. You can log in.',
+          data: { email: doctor.email, alreadyVerified: true }
+        });
+      }
+
+      const otpResult = await OTP.verify(doctor.id, otp_code, 'email_verification', 'doctor');
+      if (!otpResult || !otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'email_verification', 'failed', 'Invalid or expired code');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      await Doctor.markEmailVerified(doctor.id);
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'email_verification', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. You can now log in.',
+        data: {
+          email: doctor.email,
+          email_verified: true
+        }
+      });
+    } catch (error) {
+      console.error('Doctor verify email error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error verifying email',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Resend Email Verification Code (OTP)
+   * Doctor-specific resend verification endpoint
+   */
+  static async resendVerificationEmail(req, res) {
+    try {
+      const { email } = req.body;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required'
+        });
+      }
+
+      const genericResponse = {
+        success: true,
+        message: 'If an unverified account exists for this email, a new verification code has been sent.'
+      };
+
+      const doctor = await Doctor.findByEmail(email);
+
+      // Don't reveal whether the account exists or its verification state
+      if (!doctor || doctor.email_verified === true) {
+        return res.status(200).json(genericResponse);
+      }
+
+      // Rate-limit: reject if a code was issued in the last 60 seconds
+      const latest = await OTP.getLatest(doctor.id, 'email_verification', 'doctor');
+      if (latest) {
+        const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
+        if (ageSeconds < 60) {
+          await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'email_verification_resend', 'failed', 'Rate limited');
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${Math.ceil(60 - ageSeconds)} seconds before requesting another code.`
+          });
+        }
+      }
+
+      const otpRecord = await OTP.create(doctor.id, 'email_verification', 'doctor', 15);
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'email_verification_resend', 'success');
+
+      try {
+        await emailService.sendVerificationOTP(doctor.email, otpRecord.otp_code, doctor.first_name);
+      } catch (emailError) {
+        console.error('❌ Failed to resend verification email:', emailError.message);
+        if (!isDevelopment) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send verification email. Please try again.'
+          });
+        }
+        console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+      }
+
+      const response = { ...genericResponse };
+      if (isDevelopment) {
+        response.data = {
+          verification_code: otpRecord.otp_code,
+          dev_note: 'Verification code included in response (development mode only)'
+        };
+      }
+      return res.status(200).json(response);
+    } catch (error) {
+      console.error('Doctor resend verification error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error resending verification code',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get doctor availability time slots for a specific date
+   * GET /doctors/:doctorId/availability?date=YYYY-MM-DD
+   */
+  static async getAvailability(req, res) {
+    try {
+      const { doctorId } = req.params;
+      const { date } = req.query;
+
+      // Validate required parameters
+      if (!doctorId || !date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required parameters: doctorId (path), date (query)',
+          required: { doctorId: 'integer', date: 'YYYY-MM-DD' }
+        });
+      }
+
+      // Validate date format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format. Use YYYY-MM-DD'
+        });
+      }
+
+      // Validate date is today or in the future
+      const selectedDate = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot check appointments for past dates'
+        });
+      }
+
+      // Verify doctor exists and is active
+      const doctor = await Doctor.findById(parseInt(doctorId));
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      if (doctor.status !== 'active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Doctor is not available'
+        });
+      }
+
+      // Get availability for all time periods
+      const Appointment = require('../models/Appointment');
+      const availability = await Appointment.getDayAvailability(doctorId, date);
+
+      res.json({
+        success: true,
+        message: 'Doctor availability retrieved successfully',
+        data: {
+          doctorId: parseInt(doctorId),
+          doctorName: `Dr ${doctor.first_name} ${doctor.last_name}`,
+          date,
+          availability,
+          summary: {
+            periodStatus: Object.entries(availability).map(([period, data]) => ({
+              period: period.charAt(0).toUpperCase() + period.slice(1),
+              available: !data.isFullyBooked,
+              availableSlots: data.availableSlots,
+              totalSlots: data.totalSlots
+            }))
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error getting doctor availability:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving doctor availability',
         error: error.message
       });
     }

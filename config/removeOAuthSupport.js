@@ -11,7 +11,7 @@ const runMigration = async () => {
   try {
     // Remove the auth method constraint
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       DROP CONSTRAINT IF EXISTS check_auth_method;
     `);
     console.log('✅ Removed authentication method constraint');
@@ -24,7 +24,7 @@ const runMigration = async () => {
 
     // Remove OAuth columns
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       DROP COLUMN IF EXISTS oauth_provider,
       DROP COLUMN IF EXISTS oauth_provider_id,
       DROP COLUMN IF EXISTS oauth_profile_picture;
@@ -33,7 +33,7 @@ const runMigration = async () => {
 
     // Restore NOT NULL constraints for standard auth fields
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ALTER COLUMN password_hash SET NOT NULL,
       ALTER COLUMN phone SET NOT NULL,
       ALTER COLUMN id_passport_number SET NOT NULL,

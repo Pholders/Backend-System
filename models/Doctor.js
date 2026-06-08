@@ -10,6 +10,13 @@ class Doctor {
    * Create the doctors table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'doctors');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS doctors (
         id SERIAL PRIMARY KEY,
@@ -69,23 +76,24 @@ class Doctor {
       province,
       latitude,
       longitude,
-      clinic_address
+      clinic_address,
+      bio
     } = doctorData;
 
     const insertQuery = `
       INSERT INTO doctors (
         first_name, last_name, email, password_hash, phone,
         hpcsa_number, specialization, experience,
-        clinic_name, city, province, latitude, longitude, clinic_address
+        clinic_name, city, province, latitude, longitude, clinic_address, bio
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `;
 
     const values = [
       first_name, last_name, email, password_hash, phone,
       hpcsa_number, specialization, experience,
-      clinic_name, city, province, latitude, longitude, clinic_address
+      clinic_name, city, province, latitude, longitude, clinic_address, bio || null
     ];
 
     const result = await query(insertQuery, values);
@@ -225,6 +233,23 @@ class Doctor {
       [latitude, longitude, 'active', radiusKm]
     );
     return result.rows;
+  }
+
+  /**
+   * Mark a doctor's email as verified.
+   * Sets email_verified = true and stamps email_verified_at = NOW().
+   */
+  static async markEmailVerified(id) {
+    const result = await query(
+      `UPDATE doctors
+       SET email_verified = true,
+           email_verified_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
   }
 }
 

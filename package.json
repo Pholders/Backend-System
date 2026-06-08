@@ -20,7 +20,10 @@
     "migrate:password-reset": "node config/addPasswordReset.js",
     "migrate:login-locations": "node config/addLoginLocationTracking.js",
     "migrate:security-alerts": "node config/addSecurityAlerts.js",
-    "migrate:notifications": "node config/createNotificationsTables.js",
+    "migrate:doctor-acceptance": "node config/addDoctorAppointmentAcceptance.js",
+    "migrate:prescriptions": "node config/addPrescriptionSupport.js",
+    "migrate:qr-one-time-use": "node config/addQRCodeOneTimeUse.js",
+    "migrate:prescription-claims": "node config/addPrescriptionClaimTracking.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -44,6 +47,7 @@
     "pg": "^8.20.0",
     "redis": "^4.6.14",
     "socket.io": "^4.8.3",
+    "stripe": "^22.1.1",
     "ua-parser-js": "^0.7.41",
     "uuid": "9.0.1"
   },

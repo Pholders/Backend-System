@@ -11,7 +11,7 @@ const runMigration = async () => {
   try {
     // Add role column with CHECK constraint
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'patient'
       CHECK (role IN ('patient', 'admin'));
     `);
@@ -19,7 +19,7 @@ const runMigration = async () => {
 
     // Set existing users to 'patient'
     await query(`
-      UPDATE users 
+      UPDATE patients 
       SET role = 'patient' 
       WHERE role IS NULL;
     `);

@@ -2,6 +2,13 @@ const { query } = require('../config/db');
 
 class Admin {
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'admins');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,

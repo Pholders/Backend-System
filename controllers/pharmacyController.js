@@ -5,6 +5,7 @@ const Pharmacy = require('../models/Pharmacy');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
+const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 
@@ -82,12 +83,12 @@ class PharmacyController {
         });
       }
 
-      // Hash password
+      // Hash password for temporary storage
       const saltRounds = 10;
       const password_hash = await bcrypt.hash(password, saltRounds);
 
-      // Create new pharmacy
-      const newPharmacy = await Pharmacy.create({
+      // Create temporary pharmacy record with 'pending' status for OTP verification
+      const tempPharmacy = await Pharmacy.createTemp({
         pharmacy_name,
         first_name,
         last_name,
@@ -96,18 +97,29 @@ class PharmacyController {
         license_number,
         city,
         province,
-        password_hash
+        password_hash,
+        status: 'pending_verification'
       });
 
-      // Log successful signup
-      await AuditLog.logSecurityEvent(req, newPharmacy.id, 'pharmacy', email, 'signup', 'success');
+      // Generate and send OTP
+      const otpRecord = await OTP.create(tempPharmacy.id, 'signup', 'pharmacy');
+      const otpCode = otpRecord.otp_code;
 
-      delete newPharmacy.password_hash;
+      // Send OTP email
+      await emailService.sendOTPEmail(email, otpCode, `${first_name} ${last_name}`, 'pharmacy');
 
-      res.status(201).json({
+      // Log signup initiation
+      await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup_initiated', 'success', 'OTP sent for verification');
+
+      res.status(200).json({
         success: true,
-        message: 'Pharmacy registered successfully. Please log in.',
-        data: { pharmacy: newPharmacy }
+        message: 'Pharmacy registration initiated. Please verify your email with the OTP code sent to your email address.',
+        data: {
+          email: email,
+          pharmacy_name: pharmacy_name,
+          message: 'Check your email for the OTP code (valid for 10 minutes)',
+          nextStep: 'Call /api/users/pharmacy/verify-otp with email and otp_code'
+        }
       });
 
     } catch (error) {
@@ -171,51 +183,65 @@ class PharmacyController {
         });
       }
 
-      // Generate and send OTP
-      const otpRecord = await OTP.create(pharmacy.id, 'login', 'pharmacy');
+      // ✅ Direct login: Generate tokens immediately (no OTP)
+      // OTP is used ONLY for email verification during signup
+      delete pharmacy.password_hash;
 
-      // Log OTP generation
-      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'success');
-
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      let emailSent = false;
-
-      try {
-        await emailService.sendOTP(pharmacy.email, otpRecord.otp_code, pharmacy.first_name);
-        emailSent = true;
-        console.log('✅ OTP email sent to pharmacy successfully');
-      } catch (emailError) {
-        console.error('❌ Failed to send OTP email:', emailError.message);
-
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send OTP email. Please try again.'
-          });
-        }
-
-        console.log('⚠️  Development mode: Skipping email requirement');
-      }
-
-      const response = {
-        success: true,
-        message: emailSent
-          ? 'OTP sent to your email. Please verify to complete login.'
-          : 'OTP generated. Check server logs for code (development mode).',
-        data: {
+      const accessToken = jwt.sign(
+        {
+          id: pharmacy.id,
           email: pharmacy.email,
-          expiresIn: '10 minutes'
-        }
+          role: 'pharmacy',
+          pharmacy_name: pharmacy.pharmacy_name,
+          first_name: pharmacy.first_name,
+          last_name: pharmacy.last_name
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      // Create session with accessToken hash
+      const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
       };
 
-      if (isDevelopment && !emailSent) {
-        response.data.otp_code = otpRecord.otp_code;
-        response.data.dev_note = 'OTP included in response (development mode only)';
-        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
-      }
+      const session = await Session.create(
+        pharmacy.id,
+        'pharmacy',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
 
-      res.status(200).json(response);
+      const refreshTokenData = await RefreshToken.create(pharmacy.id, 'pharmacy', userAgent);
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'login', 'success', null);
+
+      console.log(`✅ Pharmacy ${pharmacy.id} logged in directly (password auth, no OTP)`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          pharmacy,
+          tokens: {
+            accessToken,
+            refreshToken: refreshTokenData.token,
+            expiresIn: 28800 // 8 hours
+          },
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
+          }
+        }
+      });
 
     } catch (error) {
       console.error('Pharmacy login error:', error);
@@ -250,12 +276,34 @@ class PharmacyController {
         await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'otp_verified', 'failed', 'Pharmacy not found');
         return res.status(403).json({
           success: false,
-          message: 'No pharmacy account found with this email. Please use the correct login page.'
+          message: 'No pharmacy account found with this email. Please use the correct page.'
         });
       }
 
-      const otpResult = await OTP.verify(pharmacy.id, otp_code, 'login', 'pharmacy');
-      if (!otpResult.valid) {
+      const otpResult = await OTP.verify(pharmacy.id, otp_code, 'signup', 'pharmacy');
+      
+      // If signup OTP verification
+      if (otpResult.valid && pharmacy.status === 'pending_verification') {
+        // Activate the pharmacy account
+        await Pharmacy.update(pharmacy.id, { status: 'active' });
+
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'signup_verified', 'success');
+
+        delete pharmacy.password_hash;
+
+        return res.status(200).json({
+          success: true,
+          message: 'Email verified successfully! Your pharmacy account is now active. You can now log in.',
+          data: {
+            pharmacy: pharmacy,
+            nextStep: 'Use /api/users/pharmacy/login with your email and password'
+          }
+        });
+      }
+
+      // If login OTP verification
+      const otpResultLogin = await OTP.verify(pharmacy.id, otp_code, 'login', 'pharmacy');
+      if (!otpResultLogin.valid) {
         await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'otp_failed', 'failed', 'Invalid or expired OTP');
         return res.status(401).json({
           success: false,
@@ -270,10 +318,13 @@ class PharmacyController {
           id: pharmacy.id,
           email: pharmacy.email,
           role: 'pharmacy',
-          type: 'pharmacy'
+          type: 'pharmacy',
+          pharmacy_name: pharmacy.pharmacy_name,
+          first_name: pharmacy.first_name,
+          last_name: pharmacy.last_name
         },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '8h' }
       );
 
       // Create session
@@ -300,11 +351,13 @@ class PharmacyController {
         success: true,
         message: 'Login successful',
         data: {
-          pharmacy,
           token,
-          session: {
-            id: session.id,
-            expiresAt: session.expires_at
+          pharmacyId: pharmacy.id,
+          pharmacy_name: pharmacy.pharmacy_name,
+          email: pharmacy.email,
+          sessionInfo: {
+            expiresIn: '8 hours',
+            createdAt: new Date().toISOString()
           }
         }
       });
@@ -471,6 +524,434 @@ class PharmacyController {
       res.status(500).json({
         success: false,
         message: 'Error updating profile',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get all claimed prescriptions for this pharmacy (available to dispense)
+   */
+  static async getClaimedPrescriptions(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const { limit = 50, offset = 0 } = req.query;
+
+      const Prescription = require('../models/Prescription');
+
+      // Get claimed prescriptions
+      const prescriptions = await Prescription.getClaimedPrescriptionsByPharmacy(
+        pharmacyId,
+        req.user.pharmacy_name,
+        parseInt(limit),
+        parseInt(offset)
+      );
+
+      // Get total count
+      const totalCount = await Prescription.getClaimedPrescriptionsCount(pharmacyId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Claimed prescriptions retrieved',
+        data: {
+          total: totalCount,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          prescriptions: prescriptions.map(p => ({
+            prescriptionId: p.prescription_id,
+            prescriptionNumber: p.prescription_number,
+            patientName: `${p.patient_first_name} ${p.patient_last_name}`,
+            patientEmail: p.patient_email,
+            patientPhone: p.patient_phone,
+            diagnosis: p.diagnosis,
+            claimedAt: p.claimed_at,
+            medicines: p.medicines,
+            medicineCount: (p.medicines || []).length
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting claimed prescriptions:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving claimed prescriptions',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Dispense a prescription (mark as dispensed at pharmacy)
+   */
+  static async dispensePrescription(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const pharmacyName = req.user.pharmacy_name;
+      const staffName = `${req.user.first_name} ${req.user.last_name}`;
+      const { prescriptionId } = req.params;
+      const { notes } = req.body;
+
+      if (!prescriptionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Prescription ID is required'
+        });
+      }
+
+      const Prescription = require('../models/Prescription');
+
+      // Verify prescription exists and is claimed
+      const prescription = await Prescription.getById(prescriptionId);
+      if (!prescription) {
+        return res.status(404).json({
+          success: false,
+          message: 'Prescription not found'
+        });
+      }
+
+      if (!prescription.claimed || prescription.claimed_by_pharmacy_id !== String(pharmacyId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Prescription is not claimed at your pharmacy'
+        });
+      }
+
+      if (prescription.is_dispensed) {
+        return res.status(400).json({
+          success: false,
+          message: 'Prescription has already been dispensed'
+        });
+      }
+
+      // Dispense the prescription
+      const result = await Prescription.dispensePrescription(
+        prescriptionId,
+        pharmacyId,
+        pharmacyName,
+        staffName,
+        notes || 'Dispensed at pharmacy'
+      );
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: result.message
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Prescription dispensed successfully',
+        data: {
+          prescriptionId: result.data.id,
+          prescriptionNumber: result.data.prescription_number,
+          patientId: result.data.patient_id,
+          dispensedAt: result.data.dispensed_at,
+          dispensedBy: staffName,
+          pharmacy: pharmacyName
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error dispensing prescription:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error dispensing prescription',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get dispensing history for this pharmacy
+   */
+  static async getDispenseHistory(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const { limit = 50, offset = 0 } = req.query;
+
+      const Prescription = require('../models/Prescription');
+
+      const history = await Prescription.getPharmacyDispenseHistory(
+        pharmacyId,
+        parseInt(limit),
+        parseInt(offset)
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Dispensing history retrieved',
+        data: {
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          dispensedCount: history.length,
+          history: history.map(h => ({
+            prescriptionId: h.prescription_id,
+            prescriptionNumber: h.prescription_number,
+            patientName: `${h.patient_first_name} ${h.patient_last_name}`,
+            patientEmail: h.patient_email,
+            diagnosis: h.diagnosis,
+            dispensedAt: h.dispensed_at,
+            notes: h.dispensing_notes,
+            medicines: h.medicines,
+            medicineCount: h.medicine_count
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting dispense history:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving dispensing history',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * View detailed medicines for a claimed prescription
+   */
+  static async viewClaimedPrescriptionMedicines(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const { prescriptionId } = req.params;
+
+      if (!prescriptionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Prescription ID is required'
+        });
+      }
+
+      const Prescription = require('../models/Prescription');
+
+      // Get prescription
+      const prescription = await Prescription.getById(prescriptionId);
+      if (!prescription) {
+        return res.status(404).json({
+          success: false,
+          message: 'Prescription not found'
+        });
+      }
+
+      // Verify prescription is claimed at this pharmacy
+      if (!prescription.claimed || (prescription.claimed_by_pharmacy_id && String(prescription.claimed_by_pharmacy_id) !== String(pharmacyId))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Prescription is not claimed at your pharmacy'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Prescription medicines retrieved successfully',
+        data: {
+          prescriptionId: prescription.id,
+          prescriptionNumber: prescription.prescription_number,
+          patientName: prescription.patient_name,
+          patientEmail: prescription.patient_email,
+          patientPhone: prescription.patient_phone,
+          diagnosis: prescription.diagnosis,
+          clinicalNotes: prescription.clinical_notes,
+          claimedAt: prescription.claimed_at_pharmacy,
+          medicines: (prescription.items && Array.isArray(prescription.items)) 
+            ? prescription.items.map(item => ({
+                id: item.id,
+                name: item.medicine_name,
+                genericName: item.generic_name,
+                dosage: item.dosage,
+                form: item.dosage_form,
+                quantity: item.quantity,
+                quantityUnit: item.quantity_unit,
+                frequency: item.frequency,
+                route: item.route_of_administration,
+                duration: item.duration,
+                instructions: item.special_instructions,
+                schedule: item.schedule_classification,
+                interactions: item.possible_interactions,
+                contraindications: item.contraindications,
+                warnings: item.warnings
+              }))
+            : [],
+          totalMedicines: (prescription.items || []).length
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error viewing claimed prescription medicines:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving prescription medicines',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get dispensing statistics for this pharmacy
+   */
+  static async getDispenseStats(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+
+      const Prescription = require('../models/Prescription');
+
+      const stats = await Prescription.getPharmacyDispenseStats(pharmacyId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Dispensing statistics retrieved',
+        data: {
+          pendingDispense: parseInt(stats.pending_dispense),
+          dispensedCount: parseInt(stats.dispensed_count),
+          uniquePatients: parseInt(stats.unique_patients),
+          dispensedThisWeek: parseInt(stats.dispensed_this_week),
+          dispensedThisMonth: parseInt(stats.dispensed_this_month)
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error getting dispense stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving dispensing statistics',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Verify OTP for Email Verification (Account Activation)
+   * Pharmacy-specific OTP verification endpoint
+   */
+  static async verifyEmail(req, res) {
+    try {
+      const { email, otp_code } = req.body;
+
+      if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'email_verification', 'failed', 'Missing email or code');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and verification code are required'
+        });
+      }
+
+      const pharmacy = await Pharmacy.findByEmail(email);
+      if (!pharmacy) {
+        await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'email_verification', 'failed', 'Pharmacy not found');
+        // Generic response to prevent account enumeration
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      // Idempotent: already verified
+      if (pharmacy.email_verified === true) {
+        return res.status(200).json({
+          success: true,
+          message: 'Email is already verified. You can log in.',
+          data: { email: pharmacy.email, alreadyVerified: true }
+        });
+      }
+
+      const otpResult = await OTP.verify(pharmacy.id, otp_code, 'email_verification', 'pharmacy');
+      if (!otpResult || !otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'failed', 'Invalid or expired code');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      await Pharmacy.markEmailVerified(pharmacy.id);
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. You can now log in.',
+        data: {
+          email: pharmacy.email,
+          email_verified: true
+        }
+      });
+    } catch (error) {
+      console.error('Pharmacy verify email error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error verifying email',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Resend Email Verification Code (OTP)
+   * Pharmacy-specific resend verification endpoint
+   */
+  static async resendVerificationEmail(req, res) {
+    try {
+      const { email } = req.body;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required'
+        });
+      }
+
+      const genericResponse = {
+        success: true,
+        message: 'If an unverified account exists for this email, a new verification code has been sent.'
+      };
+
+      const pharmacy = await Pharmacy.findByEmail(email);
+
+      // Don't reveal whether the account exists or its verification state
+      if (!pharmacy || pharmacy.email_verified === true) {
+        return res.status(200).json(genericResponse);
+      }
+
+      // Rate-limit: reject if a code was issued in the last 60 seconds
+      const latest = await OTP.getLatest(pharmacy.id, 'email_verification', 'pharmacy');
+      if (latest) {
+        const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
+        if (ageSeconds < 60) {
+          await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification_resend', 'failed', 'Rate limited');
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${Math.ceil(60 - ageSeconds)} seconds before requesting another code.`
+          });
+        }
+      }
+
+      const otpRecord = await OTP.create(pharmacy.id, 'email_verification', 'pharmacy', 15);
+      await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification_resend', 'success');
+
+      try {
+        await emailService.sendVerificationOTP(pharmacy.email, otpRecord.otp_code, pharmacy.first_name);
+      } catch (emailError) {
+        console.error('❌ Failed to resend verification email:', emailError.message);
+        if (!isDevelopment) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send verification email. Please try again.'
+          });
+        }
+        console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+      }
+
+      const response = { ...genericResponse };
+      if (isDevelopment) {
+        response.data = {
+          verification_code: otpRecord.otp_code,
+          dev_note: 'Verification code included in response (development mode only)'
+        };
+      }
+      return res.status(200).json(response);
+    } catch (error) {
+      console.error('Pharmacy resend verification error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error resending verification code',
         error: error.message
       });
     }

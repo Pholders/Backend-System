@@ -11,6 +11,13 @@ class Session {
    * Create sessions table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sessions');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS sessions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,8 +83,28 @@ class Session {
       WHERE token_hash = $1 AND is_active = true AND expires_at > NOW()
     `;
 
-    const result = await query(selectQuery, [tokenHash]);
-    return result.rows[0] || null;
+    try {
+      const result = await query(selectQuery, [tokenHash]);
+      if (!result.rows[0]) {
+        // Debug: check if token hash exists at all
+        const debugQuery = `SELECT token_hash, is_active, expires_at, NOW() as db_now FROM sessions WHERE token_hash = $1 LIMIT 1`;
+        const debugResult = await query(debugQuery, [tokenHash]);
+        if (debugResult.rows[0]) {
+          const session = debugResult.rows[0];
+          console.warn('⚠️ Session found but conditions not met:');
+          console.warn('   is_active:', session.is_active);
+          console.warn('   expires_at:', session.expires_at);
+          console.warn('   db_now:', session.db_now);
+          console.warn('   expires_at > now?', new Date(session.expires_at) > new Date(session.db_now));
+        } else {
+          console.warn('⚠️ No session found with this token hash');
+        }
+      }
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('❌ Error finding session by token hash:', error.message);
+      throw error;
+    }
   }
 
   /**

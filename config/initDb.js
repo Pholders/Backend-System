@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
+<<<<<<< HEAD
 const ActionToken = require('../models/ActionToken');
 const Notification = require('../models/Notification');
 const NotificationPreferences = require('../models/NotificationPreferences');
@@ -10,6 +11,18 @@ const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurit
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+=======
+const Appointment = require('../models/Appointment');
+const DoctorReview = require('../models/DoctorReview');
+const Payment = require('../models/Payment');
+const Session = require('../models/Session');
+const AuditLog = require('../models/AuditLog');
+const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
+const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
+const createPHRTables = require('./createPHRTables');
+const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
+const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
+>>>>>>> dc64845b1ada069271c2ae6cf957fa89d3d5894e
 
 /**
  * Initialize Database Tables
@@ -32,6 +45,7 @@ const initializeDatabase = async () => {
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
 
+<<<<<<< HEAD
     // Action tokens (generic single-use tokens: email change, account unfreeze, 2FA enable)
     await ActionToken.createTable();
 
@@ -53,6 +67,37 @@ const initializeDatabase = async () => {
     await NotificationPreferences.createTable();
     await DeviceToken.createTable();
     await DeviceToken.addDeviceTokenColumns();
+=======
+    // Create Appointments table
+    await Appointment.createTable();
+
+    // Create Doctor Reviews table
+    await DoctorReview.createTable();
+
+    // Create Payments table
+    await Payment.createTable();
+
+    // Create Sessions table (for session tracking)
+    await Session.createTable();
+
+    // Create Audit Logs table
+    await AuditLog.createTable();
+
+    // Add pending_payment status to appointments
+    await addPendingPaymentStatus();
+
+    // Add payment_status and payment_method columns to appointments
+    await addPaymentColumnsToAppointments();
+
+    // Create PHR tables (health vitals, documents, access control)
+    await createPHRTables();
+
+    // Add session-based signature support
+    await addSessionBasedSignatures();
+
+    // Add pharmacy dispensing support
+    await addPharmacyDispensingSupport();
+>>>>>>> dc64845b1ada069271c2ae6cf957fa89d3d5894e
     
     console.log('✅ Database initialization completed successfully');
     return true;

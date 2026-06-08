@@ -7,6 +7,10 @@ const PharmacyController = require('../controllers/pharmacyController');
 const AdminController = require('../controllers/adminController');
 const PatientProfileController = require('../controllers/patientProfileController');
 const EnhancedProfileController = require('../controllers/enhancedProfileController');
+const AppointmentController = require('../controllers/appointmentController');
+const ReviewController = require('../controllers/reviewController');
+const PaymentController = require('../controllers/paymentController');
+const PHRController = require('../controllers/phrController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
 const RefreshController = require('../controllers/refreshController');
@@ -33,7 +37,7 @@ router.post('/signup', preventAuthenticated, UserController.signup);
 router.post('/login', preventAuthenticated, UserController.login);
 router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 
-// Email Verification (account activation)
+// Account Activation Routes (OTP-based)
 router.post('/verify-email', preventAuthenticated, UserController.verifyEmail);
 router.post('/resend-verification', preventAuthenticated, UserController.resendVerificationEmail);
 
@@ -116,6 +120,10 @@ router.post('/doctor/signup', preventAuthenticated, DoctorController.signup);
 router.post('/doctor/login', preventAuthenticated, DoctorController.login);
 router.post('/doctor/verify-otp', preventAuthenticated, DoctorController.verifyOTP);
 
+// Doctor Account Activation Routes (OTP-based)
+router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
+router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
+
 router.get('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.getProfile);
 router.put('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.updateProfile);
 
@@ -131,6 +139,8 @@ router.post('/doctors/nearby', authMiddleware, requireRole('patient'), DoctorCon
 router.get('/doctors', authMiddleware, requireRole('patient'), DoctorController.listDoctors);
 // GET /doctors/:id
 router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorController.getDoctorById);
+// GET /doctors/:doctorId/availability?date=YYYY-MM-DD
+router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patient'), DoctorController.getAvailability);
 
 /**
  * Pharmacy Routes
@@ -138,6 +148,10 @@ router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorControl
 router.post('/pharmacy/signup', preventAuthenticated, PharmacyController.signup);
 router.post('/pharmacy/login', preventAuthenticated, PharmacyController.login);
 router.post('/pharmacy/verify-otp', preventAuthenticated, PharmacyController.verifyOTP);
+
+// Pharmacy Account Activation Routes (OTP-based)
+router.post('/pharmacy/verify-email', preventAuthenticated, PharmacyController.verifyEmail);
+router.post('/pharmacy/resend-verification', preventAuthenticated, PharmacyController.resendVerificationEmail);
 
 router.get('/pharmacy/profile', authMiddleware, requireRole('pharmacy'), PharmacyController.getProfile);
 router.put('/pharmacy/profile', authMiddleware, requireRole('pharmacy'), PharmacyController.updateProfile);
@@ -198,10 +212,166 @@ router.put('/profile/categories/:categoryId/rename', authMiddleware, requireRole
 router.post('/profile/categories/reorder', authMiddleware, requireRole('patient'), EnhancedProfileController.reorderCategories);
 
 /**
+ * Appointment Booking Routes
+ */
+// Get booking information (time periods, date ranges)
+router.get('/appointments/booking-info', AppointmentController.getBookingInfo);
+
+// Get available doctors for appointment booking
+router.get('/appointments/doctors', authMiddleware, requireRole('patient'), AppointmentController.getAvailableDoctors);
+
+// Get available time slots for a specific doctor, date, and time period
+router.get('/appointments/available-slots', authMiddleware, requireRole('patient'), AppointmentController.getAvailableTimeSlots);
+
+// Book a new appointment
+router.post('/appointments/book', authMiddleware, requireRole('patient'), AppointmentController.bookAppointment);
+
+// Get all appointments for the patient
+router.get('/appointments', authMiddleware, requireRole('patient'), AppointmentController.getPatientAppointments);
+
+// Get patient's upcoming appointments
+router.get('/appointments/upcoming', authMiddleware, requireRole('patient'), AppointmentController.getUpcomingAppointments);
+
+// Get specific appointment details
+router.get('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentDetails);
+
+// Cancel an appointment
+router.delete('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.cancelAppointment);
+
+// Reschedule an appointment
+router.put('/appointments/:appointmentId/reschedule', authMiddleware, requireRole('patient'), AppointmentController.rescheduleAppointment);
+
+// Get daily availability (all time periods) for a doctor
+router.get('/appointments/day-availability', AppointmentController.getDayAvailability);
+
+// Auto-cancel expired pending payments (admin endpoint)
+router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('admin'), AppointmentController.autoCancelExpiredPayments);
+
+// Doctor: Get appointments for doctor
+router.get('/doctor/appointments', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorAppointments);
+
+// TEST: Get signed prescriptions (early in file)
+router.get('/doctor/test-static', (req, res) => {
+  res.json({ test: 'static data' });
+});
+
+// Doctor: Accept appointment (acknowledge before consultation)
+router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
+
+/**
+ * Doctor Reviews & Ratings Routes
+ */
+// Submit or update a review for a doctor
+router.post('/appointments/doctors/:doctorId/reviews', authMiddleware, requireRole('patient'), ReviewController.submitReview);
+
+// Get all reviews for a doctor
+router.get('/appointments/doctors/:doctorId/reviews', ReviewController.getDoctorReviews);
+
+// Get rating summary for a doctor
+router.get('/appointments/doctors/:doctorId/reviews/summary', ReviewController.getRatingSummary);
+
+// Check if patient has already reviewed a doctor
+router.get('/appointments/doctors/:doctorId/reviews/check-review', authMiddleware, requireRole('patient'), ReviewController.checkExistingReview);
+
+// Get patient's reviews
+router.get('/reviews', authMiddleware, requireRole('patient'), ReviewController.getPatientReviews);
+
+// Update a review
+router.put('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.updateReview);
+
+// Delete a review
+router.delete('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.deleteReview);
+
+/**
+ * Payment Routes
+ */
+// Get available payment methods
+router.get('/payments/methods', authMiddleware, requireRole('patient'), PaymentController.getAvailablePaymentMethods);
+
+// Initialize payment for appointment
+router.post('/payments/initialize', authMiddleware, requireRole('patient'), PaymentController.initializePayment);
+
+// Confirm Stripe payment
+router.post('/payments/confirm-stripe', authMiddleware, requireRole('patient'), PaymentController.confirmStripePayment);
+
+// Complete cash on arrival payment
+router.post('/payments/cash-on-arrival', authMiddleware, requireRole('patient'), PaymentController.completeCashPayment);
+
+// Complete medical aid payment
+router.post('/payments/medical-aid', authMiddleware, requireRole('patient'), PaymentController.completeMedicalAidPayment);
+
+// Get payment status for appointment
+router.get('/payments/appointment/:appointmentId', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
+
+// Get payment history
+router.get('/payments', authMiddleware, requireRole('patient'), PaymentController.getPaymentHistory);
+
+/**
+ * Stripe Payment Routes (Enhanced Stripe Integration)
+ */
+// Create Stripe Payment Intent
+router.post('/payments/stripe/create-intent', authMiddleware, requireRole('patient'), PaymentController.createStripePaymentIntent);
+
+// Get saved payment methods
+router.get('/payments/stripe/methods', authMiddleware, requireRole('patient'), PaymentController.getStripePaymentMethods);
+
+// Get payment status
+router.get('/payments/:paymentId/status', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
+
+// Request refund
+router.post('/payments/:paymentId/refund', authMiddleware, requireRole('patient'), PaymentController.requestRefund);
+
+// Get payment breakdown
+router.get('/payments/appointment/:appointmentId/breakdown', authMiddleware, requireRole('patient'), PaymentController.getPaymentBreakdown);
+
+// Stripe Webhook (no auth required - for Stripe)
+router.post('/payments/webhook/stripe', PaymentController.handleStripeWebhook);
+
+// Test Stripe connection (admin only)
+router.get('/payments/stripe/test', authMiddleware, requireRole('admin'), PaymentController.testStripeConnection);
+
+/**
  * Token Management Routes (for access/refresh token system)
  */
 // Refresh Token Routes
 router.post('/refresh-token', RefreshController.refreshToken);
 router.post('/logout', authMiddleware, RefreshController.logout);
+
+/**
+ * Personal Health Record (PHR) Routes
+ */
+
+// PATIENT ENDPOINTS - View own PHR
+router.get('/phr/complete', authMiddleware, requireRole('patient'), PHRController.getCompletePHR);
+router.get('/phr/personal-card', authMiddleware, requireRole('patient'), PHRController.getPersonalCard);
+router.put('/phr/personal-card', authMiddleware, requireRole('patient'), PHRController.updatePersonalCard);
+router.get('/phr/medical-summary', authMiddleware, requireRole('patient'), PHRController.getMedicalSummary);
+router.get('/phr/prescriptions', authMiddleware, requireRole('patient'), PHRController.getActivePrescriptions);
+router.get('/phr/medications', authMiddleware, requireRole('patient'), PHRController.getCurrentMedications);
+router.get('/phr/allergies', authMiddleware, requireRole('patient'), PHRController.getAllergies);
+router.get('/phr/conditions', authMiddleware, requireRole('patient'), PHRController.getMedicalConditions);
+router.get('/phr/appointments', authMiddleware, requireRole('patient'), PHRController.getUpcomingAppointments);
+router.get('/phr/history', authMiddleware, requireRole('patient'), PHRController.getHealthHistory);
+router.get('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.getHealthVitals);
+router.post('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.recordHealthVital);
+router.get('/phr/vitals/range', authMiddleware, requireRole('patient'), PHRController.getHealthVitalsRange);
+router.get('/phr/documents', authMiddleware, requireRole('patient'), PHRController.getPHRDocuments);
+router.post('/phr/documents', authMiddleware, requireRole('patient'), PHRController.uploadDocument);
+
+// PATIENT ACCESS CONTROL - Manage who can access PHR
+router.get('/phr/access', authMiddleware, requireRole('patient'), PHRController.getAccessList);
+router.post('/phr/access', authMiddleware, requireRole('patient'), PHRController.grantAccess);
+router.delete('/phr/access/:doctorId', authMiddleware, requireRole('patient'), PHRController.revokeAccess);
+router.get('/phr/access/requests', authMiddleware, requireRole('patient'), PHRController.getPendingRequests);
+router.post('/phr/access/requests/:requestId/approve', authMiddleware, requireRole('patient'), PHRController.approveAccessRequest);
+router.post('/phr/access/requests/:requestId/deny', authMiddleware, requireRole('patient'), PHRController.denyAccessRequest);
+router.get('/phr/access-logs', authMiddleware, requireRole('patient'), PHRController.getAccessLogs);
+
+// DOCTOR ENDPOINTS - Request and access patient PHR
+router.post('/phr/:patientId/access-request', authMiddleware, requireRole('doctor'), PHRController.requestAccess);
+router.get('/phr/:patientId', authMiddleware, requireRole('doctor'), PHRController.viewPatientPHR);
+router.get('/phr/:patientId/personal-card', authMiddleware, requireRole('doctor'), PHRController.viewPatientPersonalCard);
+router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.viewPatientVitals);
+router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'), PHRController.viewPatientMedications);
 
 module.exports = router;
