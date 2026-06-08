@@ -191,7 +191,10 @@ class PharmacyController {
         {
           id: pharmacy.id,
           email: pharmacy.email,
-          role: 'pharmacy'
+          role: 'pharmacy',
+          pharmacy_name: pharmacy.pharmacy_name,
+          first_name: pharmacy.first_name,
+          last_name: pharmacy.last_name
         },
         process.env.JWT_SECRET,
         { expiresIn: '24h' }
@@ -699,6 +702,84 @@ class PharmacyController {
       res.status(500).json({
         success: false,
         message: 'Error retrieving dispensing history',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * View detailed medicines for a claimed prescription
+   */
+  static async viewClaimedPrescriptionMedicines(req, res) {
+    try {
+      const pharmacyId = req.user.id;
+      const { prescriptionId } = req.params;
+
+      if (!prescriptionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Prescription ID is required'
+        });
+      }
+
+      const Prescription = require('../models/Prescription');
+
+      // Get prescription
+      const prescription = await Prescription.getById(prescriptionId);
+      if (!prescription) {
+        return res.status(404).json({
+          success: false,
+          message: 'Prescription not found'
+        });
+      }
+
+      // Verify prescription is claimed at this pharmacy
+      if (!prescription.claimed || (prescription.claimed_by_pharmacy_id && String(prescription.claimed_by_pharmacy_id) !== String(pharmacyId))) {
+        return res.status(403).json({
+          success: false,
+          message: 'Prescription is not claimed at your pharmacy'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Prescription medicines retrieved successfully',
+        data: {
+          prescriptionId: prescription.id,
+          prescriptionNumber: prescription.prescription_number,
+          patientName: prescription.patient_name,
+          patientEmail: prescription.patient_email,
+          patientPhone: prescription.patient_phone,
+          diagnosis: prescription.diagnosis,
+          clinicalNotes: prescription.clinical_notes,
+          claimedAt: prescription.claimed_at_pharmacy,
+          medicines: (prescription.items && Array.isArray(prescription.items)) 
+            ? prescription.items.map(item => ({
+                id: item.id,
+                name: item.medicine_name,
+                genericName: item.generic_name,
+                dosage: item.dosage,
+                form: item.dosage_form,
+                quantity: item.quantity,
+                quantityUnit: item.quantity_unit,
+                frequency: item.frequency,
+                route: item.route_of_administration,
+                duration: item.duration,
+                instructions: item.special_instructions,
+                schedule: item.schedule_classification,
+                interactions: item.possible_interactions,
+                contraindications: item.contraindications,
+                warnings: item.warnings
+              }))
+            : [],
+          totalMedicines: (prescription.items || []).length
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error viewing claimed prescription medicines:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error retrieving prescription medicines',
         error: error.message
       });
     }

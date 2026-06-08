@@ -741,7 +741,7 @@ class Prescription {
     const getQuery = `
       SELECT pc.id, pc.claimed_at, pc.pharmacy_name, pc.pharmacy_location,
              pc.claim_method, pc.claim_status, pc.claimed_by_ip_address,
-             pc.verified_at, pc.claim_notes, pc.reverted_at, pc.reverted_reason
+             pc.verified_at, pc.claim_notes, pc.claim_reverted_at, pc.reverted_reason
       FROM prescription_claims pc
       WHERE pc.prescription_id = $1
       ORDER BY pc.claimed_at DESC
@@ -916,10 +916,10 @@ class Prescription {
             'frequency', pi.frequency,
             'duration', pi.duration,
             'quantity', pi.quantity,
-            'instructions', pi.instructions
+            'instructions', pi.special_instructions
           )
         ) FILTER (WHERE pi.id IS NOT NULL), '[]'::json) as medicines,
-        COALESCE(json_agg(pi.id) FILTER (WHERE pi.id IS NOT NULL), ARRAY[]::integer[]) as medicine_ids
+        COALESCE(array_agg(pi.id) FILTER (WHERE pi.id IS NOT NULL), ARRAY[]::integer[]) as medicine_ids
       FROM prescriptions p
       LEFT JOIN patients u ON p.patient_id = u.id
       LEFT JOIN appointments a ON p.appointment_id = a.id

@@ -10,7 +10,6 @@ const EnhancedProfileController = require('../controllers/enhancedProfileControl
 const AppointmentController = require('../controllers/appointmentController');
 const ReviewController = require('../controllers/reviewController');
 const PaymentController = require('../controllers/paymentController');
-const PrescriptionController = require('../controllers/prescriptionController');
 const PHRController = require('../controllers/phrController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
@@ -160,21 +159,6 @@ router.put('/pharmacy/profile', authMiddleware, requireRole('pharmacy'), Pharmac
 router.post('/pharmacy/logout', authMiddleware, requireRole('pharmacy'), PharmacyController.logout);
 router.get('/pharmacy/sessions', authMiddleware, requireRole('pharmacy'), PharmacyController.getSessions);
 router.get('/pharmacy/activity-log', authMiddleware, requireRole('pharmacy'), PharmacyController.getActivityLog);
-
-/**
- * Pharmacy Dispensing Routes
- */
-// Get all claimed prescriptions available for dispensing
-router.get('/pharmacy/prescriptions/claimed', authMiddleware, requireRole('pharmacy'), PharmacyController.getClaimedPrescriptions);
-
-// Dispense a prescription (mark as dispensed)
-router.post('/pharmacy/prescriptions/:prescriptionId/dispense', authMiddleware, requireRole('pharmacy'), PharmacyController.dispensePrescription);
-
-// Get dispensing history
-router.get('/pharmacy/dispense-history', authMiddleware, requireRole('pharmacy'), PharmacyController.getDispenseHistory);
-
-// Get dispensing statistics
-router.get('/pharmacy/dispense-stats', authMiddleware, requireRole('pharmacy'), PharmacyController.getDispenseStats);
 
 /**
  * Admin Routes
@@ -352,78 +336,6 @@ router.get('/payments/stripe/test', authMiddleware, requireRole('admin'), Paymen
 // Refresh Token Routes
 router.post('/refresh-token', RefreshController.refreshToken);
 router.post('/logout', authMiddleware, RefreshController.logout);
-
-/**
- * e-Prescribing Routes
- */
-// Doctor: Create new prescription (after appointment acceptance)
-router.post('/prescriptions', authMiddleware, requireRole('doctor'), PrescriptionController.createPrescription);
-
-// Doctor: Add medicine to prescription
-router.post('/prescriptions/:prescriptionId/medicines', authMiddleware, requireRole('doctor'), PrescriptionController.addMedicine);
-
-// Doctor: Check drug interactions before signing
-router.post('/prescriptions/:prescriptionId/check-interactions', authMiddleware, requireRole('doctor'), PrescriptionController.checkDrugInteractions);
-
-// Doctor: Sign prescription with session token (RSA-SHA256 digital signature)
-router.post('/prescriptions/:prescriptionId/sign', authMiddleware, requireRole('doctor'), PrescriptionController.signPrescription);
-
-// Doctor: Revoke prescription
-router.post('/prescriptions/:prescriptionId/revoke', authMiddleware, requireRole('doctor'), PrescriptionController.revokePrescription);
-
-// Doctor: Get all prescriptions issued by doctor
-router.get('/doctor/prescriptions', authMiddleware, requireRole('doctor'), PrescriptionController.getDoctorPrescriptions);
-
-// TEST: Post to prescriptions-signed
-router.post('/doctor/prescriptions-signed', authMiddleware, PrescriptionController.doctorSignedRx);
-
-// Patient: Get all prescriptions
-router.get('/prescriptions', authMiddleware, requireRole('patient'), PrescriptionController.getPatientPrescriptions);
-
-// Patient: View prescription details
-router.get('/prescriptions/:prescriptionId', authMiddleware, requireRole('patient'), PrescriptionController.viewPrescription);
-
-// Patient: Download prescription as PDF
-router.get('/prescriptions/:prescriptionId/download', authMiddleware, requireRole('patient'), PrescriptionController.downloadPrescription);
-
-// Patient: Print prescription
-router.get('/prescriptions/:prescriptionId/print', authMiddleware, requireRole('patient'), PrescriptionController.printPrescription);
-
-// Patient: Share prescription via email
-router.post('/prescriptions/:prescriptionId/share-email', authMiddleware, requireRole('patient'), PrescriptionController.sharePrescriptionEmail);
-
-// Patient: Generate QR code for prescription
-router.get('/prescriptions/:prescriptionId/qrcode', authMiddleware, requireRole('patient'), PrescriptionController.generateQRCode);
-
-// Patient: Get prescription share history
-router.get('/prescriptions/:prescriptionId/share-history', authMiddleware, requireRole('patient'), PrescriptionController.getShareHistory);
-
-// Patient: Get QR code access history
-router.get('/prescriptions/:prescriptionId/qrcode-history', authMiddleware, requireRole('patient'), PrescriptionController.getQRCodeAccessHistory);
-
-// Public: Access prescription via one-time use QR code (no auth required)
-// This endpoint verifies the QR code and marks it as used
-router.get('/qr/:qrToken', PrescriptionController.accessQRCodePrescription);
-
-// Public: Check QR code status before accessing (optional - no auth required)
-router.get('/qr/:qrToken/status', PrescriptionController.checkQRCodeStatus);
-
-/**
- * Prescription Claim Routes (One-time use at pharmacy)
- * Patient claims prescription at pharmacy - cannot be used again after claiming
- */
-
-// Patient: Claim prescription at pharmacy (one-time use)
-router.post('/prescriptions/:prescriptionId/claim', authMiddleware, requireRole('patient'), PrescriptionController.claimPrescription);
-
-// Patient: Check prescription claim status
-router.get('/prescriptions/:prescriptionId/claim-status', authMiddleware, requireRole('patient'), PrescriptionController.checkClaimStatus);
-
-// Patient: Get prescription claim information
-router.get('/prescriptions/:prescriptionId/claim-info', authMiddleware, requireRole('patient'), PrescriptionController.getClaimInfo);
-
-// Admin: Revert prescription claim (for errors or fraud)
-router.post('/prescriptions/:prescriptionId/revert-claim', authMiddleware, requireRole('admin'), PrescriptionController.revertClaim);
 
 /**
  * Personal Health Record (PHR) Routes

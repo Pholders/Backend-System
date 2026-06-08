@@ -386,6 +386,19 @@ class PrescriptionController {
         });
       }
 
+      // Safely parse digital signature
+      let parsedCertificate = null;
+      if (prescription.digital_signature) {
+        try {
+          parsedCertificate = typeof prescription.digital_signature === 'string' 
+            ? JSON.parse(prescription.digital_signature) 
+            : prescription.digital_signature;
+        } catch (parseError) {
+          console.warn('⚠️ Could not parse digital signature:', parseError.message);
+          parsedCertificate = null;
+        }
+      }
+
       res.status(200).json({
         success: true,
         message: 'Prescription retrieved successfully',
@@ -408,24 +421,26 @@ class PrescriptionController {
             },
             diagnosis: prescription.diagnosis,
             clinicalNotes: prescription.clinical_notes,
-            medicines: prescription.items.map(item => ({
-              id: item.id,
-              name: item.medicine_name,
-              genericName: item.generic_name,
-              dosage: item.dosage,
-              form: item.dosage_form,
-              quantity: item.quantity,
-              frequency: item.frequency,
-              route: item.route_of_administration,
-              duration: item.duration,
-              instructions: item.special_instructions,
-              schedule: item.schedule_classification,
-              warnings: item.warnings
-            })),
+            medicines: (prescription.items && Array.isArray(prescription.items)) 
+              ? prescription.items.map(item => ({
+                  id: item.id,
+                  name: item.medicine_name,
+                  genericName: item.generic_name,
+                  dosage: item.dosage,
+                  form: item.dosage_form,
+                  quantity: item.quantity,
+                  frequency: item.frequency,
+                  route: item.route_of_administration,
+                  duration: item.duration,
+                  instructions: item.special_instructions,
+                  schedule: item.schedule_classification,
+                  warnings: item.warnings
+                }))
+              : [],
             signature: {
               status: prescription.signature_status,
               timestamp: prescription.signature_timestamp,
-              certificate: prescription.digital_signature ? JSON.parse(prescription.digital_signature) : null
+              certificate: parsedCertificate
             },
             createdAt: prescription.created_at,
             updatedAt: prescription.updated_at

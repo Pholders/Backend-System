@@ -19,6 +19,7 @@ const {
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -65,6 +66,7 @@ app.use(passport.session());
 // ============================================================================
 
 app.use('/api/users', userRoutes);
+app.use('/api/prescriptions', prescriptionRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS
