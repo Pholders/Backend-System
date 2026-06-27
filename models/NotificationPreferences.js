@@ -10,6 +10,7 @@ const TYPE_TO_PREF_COLUMN = {
   prescription: 'prescription_updates',
   appointment: 'appointment_notifications',
   message: 'messages',
+  order: 'order_updates',
 };
 
 // Optional sub-types map to specific columns (e.g. refill notifications).
@@ -25,6 +26,7 @@ const DEFAULTS = {
   appointment_notifications: true,
   messages: true,
   health_monitoring_alerts: true,
+  order_updates: true,
   reminder_time_window: 30,
 };
 
@@ -54,6 +56,7 @@ class NotificationPreferences {
         appointment_notifications BOOLEAN NOT NULL DEFAULT TRUE,
         messages BOOLEAN NOT NULL DEFAULT TRUE,
         health_monitoring_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+        order_updates BOOLEAN NOT NULL DEFAULT TRUE,
         reminder_time_window INTEGER NOT NULL DEFAULT 30 CHECK (reminder_time_window >= 0),
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -103,6 +106,7 @@ class NotificationPreferences {
       'appointment_notifications',
       'messages',
       'health_monitoring_alerts',
+      'order_updates',
     ];
     const sets = [];
     const values = [patient_id];

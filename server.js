@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const session = require('express-session');
 const passport = require('passport');
@@ -8,6 +9,7 @@ const cache = require('./services/cacheService');
 const AppointmentCleanupService = require('./services/appointmentCleanupService');
 const logger = require('./services/loggerService');
 const ResponseFormatter = require('./utils/responseFormatter');
+const realtimeService = require('./services/realtimeService');
 
 // Import centralized middleware
 const {
@@ -20,6 +22,8 @@ const {
 // Import routes
 const userRoutes = require('./routes/userRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const orderRoutes = require('./routes/orderRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -70,6 +74,8 @@ app.use(passport.session());
 
 app.use('/api/users', userRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/orders', orderRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS
@@ -146,7 +152,15 @@ async function startServer() {
     // Runs every 15 minutes, cancels payments pending for more than 30 minutes
     AppointmentCleanupService.start(15, 30);
     
-    app.listen(PORT, () => {
+    // Create raw HTTP server so Socket.IO can attach.
+    const httpServer = http.createServer(app);
+
+    // Initialize Socket.IO BEFORE listen so it's ready when clients connect.
+    realtimeService.init(httpServer, {
+      corsOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    });
+
+    httpServer.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
       console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
       console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
@@ -154,6 +168,8 @@ async function startServer() {
       console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
       console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
+      console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
+      console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
 
       // Start scheduled notification triggers (medication + appointment).
       try {

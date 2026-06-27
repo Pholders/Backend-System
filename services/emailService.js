@@ -139,6 +139,18 @@ Thank you for trusting Pholders Healthcare for your medical needs!
       console.log('✅ OTP email sent:', info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
+      // Dev-mode fallback: SMTP unavailable (e.g. broken Gmail creds).
+      // Log the OTP to the server console so local testing isn't blocked.
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('⚠️  SMTP send failed, falling back to console (dev mode):', error.message);
+        console.log('────────────────────────────────────────────');
+        console.log('🔐 Development OTP Code');
+        console.log('   To:    ', email);
+        console.log('   Name:  ', firstName);
+        console.log('   Code:  ', otpCode);
+        console.log('────────────────────────────────────────────');
+        return { success: true, devMode: true };
+      }
       console.error('❌ Email sending failed:', error);
       throw error;
     }

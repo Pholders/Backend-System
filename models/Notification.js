@@ -5,7 +5,7 @@ const { query } = require('../config/db');
  * Handles the `notifications` table (patient inbox + push history).
  */
 
-const VALID_TYPES = ['medication', 'prescription', 'appointment', 'message'];
+const VALID_TYPES = ['medication', 'prescription', 'appointment', 'message', 'order'];
 
 class Notification {
   static get VALID_TYPES() {
@@ -20,7 +20,7 @@ class Notification {
       CREATE TABLE IF NOT EXISTS notifications (
         id SERIAL PRIMARY KEY,
         patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-        type VARCHAR(32) NOT NULL CHECK (type IN ('medication', 'prescription', 'appointment', 'message')),
+        type VARCHAR(32) NOT NULL CHECK (type IN ('medication', 'prescription', 'appointment', 'message', 'order')),
         title VARCHAR(255) NOT NULL,
         body TEXT NOT NULL,
         data JSONB,
