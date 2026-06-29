@@ -1,4 +1,4 @@
-const { query } = require('../config/db');
+ const { query } = require('../config/db');
 const crypto = require('crypto');
 
 /**
@@ -168,8 +168,8 @@ class Prescription {
         appointment_id, doctor_id, patient_id, prescription_number,
         prescriber_name, prescriber_hpcsa, prescriber_phone, prescriber_email,
         patient_name, patient_id_number, patient_dob, patient_phone, patient_email,
-        diagnosis, clinical_notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        diagnosis, clinical_notes, claim_expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP + INTERVAL '30 days')
       RETURNING *;
     `;
 

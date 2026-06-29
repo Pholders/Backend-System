@@ -6,6 +6,8 @@ require('dotenv').config();
 const { pool } = require('./config/db');
 const cache = require('./services/cacheService');
 const AppointmentCleanupService = require('./services/appointmentCleanupService');
+const ReminderSchedulerService = require('./services/reminderSchedulerService');
+const ComplianceTrackingService = require('./services/complianceTrackingService');
 const logger = require('./services/loggerService');
 const ResponseFormatter = require('./utils/responseFormatter');
 
@@ -142,6 +144,14 @@ async function startServer() {
     // Start appointment cleanup service (auto-cancel expired pending payments)
     // Runs every 15 minutes, cancels payments pending for more than 30 minutes
     AppointmentCleanupService.start(15, 30);
+
+    // Initialize appointment reminder scheduler
+    // Checks for due reminders every 5 minutes and sends notifications
+    ReminderSchedulerService.initialize();
+
+    // Initialize compliance tracking service
+    // Monitors pharmacy performance and auto-suspends non-compliant agreements
+    await ComplianceTrackingService.initialize();
     
     app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
@@ -162,6 +172,10 @@ startServer();
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing HTTP server');
+  
+  // Stop reminder scheduler
+  ReminderSchedulerService.stop();
+  
   pool.end(() => {
     console.log('Database pool closed');
   });

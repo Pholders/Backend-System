@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const Pharmacy = require('../models/Pharmacy');
+const PharmacyGroup = require('../models/PharmacyGroup');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -287,6 +288,20 @@ class PharmacyController {
         // Activate the pharmacy account
         await Pharmacy.update(pharmacy.id, { status: 'active' });
 
+        // Auto-assign to Basic group tier
+        try {
+          const basicGroup = await PharmacyGroup.getDefaultGroup();
+          if (basicGroup) {
+            await PharmacyGroup.addPharmacy(basicGroup.id, pharmacy.id, true);
+            console.log(`✅ Pharmacy ${pharmacy.id} assigned to Basic tier group ${basicGroup.id}`);
+          } else {
+            console.warn(`⚠️ Basic tier group not found for pharmacy ${pharmacy.id}`);
+          }
+        } catch (groupError) {
+          console.error('❌ Error assigning pharmacy to group:', groupError);
+          // Continue with signup even if group assignment fails
+        }
+
         await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'signup_verified', 'success');
 
         delete pharmacy.password_hash;
@@ -296,6 +311,7 @@ class PharmacyController {
           message: 'Email verified successfully! Your pharmacy account is now active. You can now log in.',
           data: {
             pharmacy: pharmacy,
+            tier: 'Basic',
             nextStep: 'Use /api/users/pharmacy/login with your email and password'
           }
         });

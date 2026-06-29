@@ -5,6 +5,8 @@ const UserController = require('../controllers/userController');
 const DoctorController = require('../controllers/doctorController');
 const PharmacyController = require('../controllers/pharmacyController');
 const AdminController = require('../controllers/adminController');
+const PharmacyPartnershipController = require('../controllers/pharmacyPartnershipController');
+const PharmacyClaimRoutingController = require('../controllers/pharmacyClaimRoutingController');
 const PatientProfileController = require('../controllers/patientProfileController');
 const EnhancedProfileController = require('../controllers/enhancedProfileController');
 const AppointmentController = require('../controllers/appointmentController');
@@ -258,6 +260,36 @@ router.get('/doctor/test-static', (req, res) => {
 // Doctor: Accept appointment (acknowledge before consultation)
 router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
 
+// Doctor: Mark appointment as completed after consultation
+router.post('/appointments/:appointmentId/complete', authMiddleware, requireRole('doctor'), AppointmentController.completeAppointment);
+
+/**
+ * Appointment Reminder Routes
+ */
+// Set or update reminder for an appointment
+router.post('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.setAppointmentReminder);
+
+// Get reminder for a specific appointment
+router.get('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentReminder);
+
+// Update reminder settings
+router.put('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.updateAppointmentReminder);
+
+// Toggle reminder on/off
+router.patch('/appointments/:appointmentId/reminders/toggle', authMiddleware, requireRole('patient'), AppointmentController.toggleAppointmentReminder);
+
+// Delete reminder
+router.delete('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.deleteAppointmentReminder);
+
+// Get all reminders for patient
+router.get('/reminders', authMiddleware, requireRole('patient'), AppointmentController.getPatientReminders);
+
+// Get upcoming reminders (within 24 hours)
+router.get('/reminders/upcoming', authMiddleware, requireRole('patient'), AppointmentController.getUpcomingReminders);
+
+// Get notification history for appointment
+router.get('/appointments/:appointmentId/notification-history', authMiddleware, requireRole('patient'), AppointmentController.getNotificationHistory);
+
 /**
  * Doctor Reviews & Ratings Routes
  */
@@ -373,5 +405,53 @@ router.get('/phr/:patientId', authMiddleware, requireRole('doctor'), PHRControll
 router.get('/phr/:patientId/personal-card', authMiddleware, requireRole('doctor'), PHRController.viewPatientPersonalCard);
 router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.viewPatientVitals);
 router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'), PHRController.viewPatientMedications);
+
+/**
+ * Pharmacy Partnership Management Routes (Admin)
+ */
+// Pharmacy Groups
+router.post('/partnerships/groups', authMiddleware, requireRole('admin'), PharmacyPartnershipController.createGroup);
+router.get('/partnerships/groups', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAllGroups);
+router.get('/partnerships/groups/:groupId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getGroupById);
+router.put('/partnerships/groups/:groupId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.updateGroup);
+router.post('/partnerships/groups/:groupId/pharmacies', authMiddleware, requireRole('admin'), PharmacyPartnershipController.addPharmacyToGroup);
+router.delete('/partnerships/groups/:groupId/pharmacies/:pharmacyId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.removePharmacyFromGroup);
+router.get('/partnerships/groups/search', authMiddleware, requireRole('admin'), PharmacyPartnershipController.searchGroups);
+
+// Partnership Agreements
+router.post('/partnerships/agreements', authMiddleware, requireRole('admin'), PharmacyPartnershipController.createAgreement);
+router.get('/partnerships/agreements', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAllAgreements);
+router.get('/partnerships/agreements/:agreementId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAgreementById);
+router.put('/partnerships/agreements/:agreementId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.updateAgreement);
+router.post('/partnerships/agreements/:agreementId/activate', authMiddleware, requireRole('admin'), PharmacyPartnershipController.activateAgreement);
+router.post('/partnerships/agreements/:agreementId/suspend', authMiddleware, requireRole('admin'), PharmacyPartnershipController.suspendAgreement);
+router.get('/partnerships/agreements/expiring', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getExpiringAgreements);
+
+// Compliance & Reporting
+router.get('/partnerships/compliance/dashboard', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getComplianceDashboard);
+router.get('/partnerships/compliance/pharmacy/:pharmacyId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getPharmacyCompliance);
+router.get('/partnerships/compliance/report', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getComplianceReport);
+
+// Pharmacy Tier Management
+router.post('/pharmacy/upgrade-tier', authMiddleware, requireRole('pharmacy'), PharmacyPartnershipController.upgradePharmacyTier);
+router.get('/pharmacy/current-tier', authMiddleware, requireRole('pharmacy'), PharmacyPartnershipController.getCurrentTier);
+
+/**
+ * Prescription Claim Routing Routes (Patient & Pharmacy)
+ */
+// Patient: Route prescription
+router.post('/prescriptions/:prescriptionId/route', authMiddleware, requireRole('patient'), PharmacyClaimRoutingController.routePrescription);
+router.get('/prescriptions/:prescriptionId/routing-history', authMiddleware, requireRole('patient'), PharmacyClaimRoutingController.getRoutingHistory);
+
+// Pharmacy: Get pending claims
+router.get('/pharmacy/claims/pending', authMiddleware, requireRole('pharmacy'), PharmacyClaimRoutingController.getPendingClaims);
+router.post('/pharmacy/claims/:routingId/accept', authMiddleware, requireRole('pharmacy'), PharmacyClaimRoutingController.acceptClaim);
+router.post('/pharmacy/claims/:routingId/reject', authMiddleware, requireRole('pharmacy'), PharmacyClaimRoutingController.rejectClaim);
+router.get('/pharmacy/performance/routing', authMiddleware, requireRole('pharmacy'), PharmacyClaimRoutingController.getPharmacyRoutingPerformance);
+
+// Admin: Routing statistics
+router.get('/partnerships/routing/candidates', authMiddleware, requireRole('admin'), PharmacyClaimRoutingController.getCandidatePharmacies);
+router.get('/partnerships/routing/statistics', authMiddleware, requireRole('admin'), PharmacyClaimRoutingController.getRoutingStatistics);
+router.get('/partnerships/routing/by-tier', authMiddleware, requireRole('admin'), PharmacyClaimRoutingController.getRoutingByTier);
 
 module.exports = router;

@@ -3,6 +3,10 @@ const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
 const Appointment = require('../models/Appointment');
+const AppointmentReminder = require('../models/AppointmentReminder');
+const PharmacyGroup = require('../models/PharmacyGroup');
+const PharmacyAgreement = require('../models/PharmacyAgreement');
+const AgreementCompliance = require('../models/AgreementCompliance');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
 const Session = require('../models/Session');
@@ -12,6 +16,11 @@ const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppoin
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
+const addAppointmentReminders = require('./addAppointmentReminders');
+const addPharmacyPartnerships = require('./addPharmacyPartnerships');
+const addPharmacyTierFeatures = require('./addPharmacyTierFeatures');
+const updatePharmacyTierConstraint = require('./updatePharmacyTierConstraint');
+const initializePharmacyGroups = require('./initPharmacyGroups');
 
 /**
  * Initialize Database Tables
@@ -63,6 +72,25 @@ const initializeDatabase = async () => {
 
     // Add pharmacy dispensing support
     await addPharmacyDispensingSupport();
+
+    // Create appointment reminders tables
+    await AppointmentReminder.createTable();
+    await AppointmentReminder.createNotificationHistoryTable();
+
+    // Run appointment reminders migration
+    await addAppointmentReminders();
+
+    // Create pharmacy partnership tables
+    await addPharmacyPartnerships();
+
+    // Add pharmacy tier features columns
+    await addPharmacyTierFeatures();
+
+    // Update tier constraint to include 'enterprise'
+    await updatePharmacyTierConstraint();
+
+    // Initialize default pharmacy groups and tiers
+    await initializePharmacyGroups();
     
     console.log('✅ Database initialization completed successfully');
     return true;

@@ -3,6 +3,7 @@ const PrescriptionItem = require('../models/PrescriptionItem');
 const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
 const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
@@ -64,6 +65,28 @@ class PrescriptionController {
 
       const prescription = await Prescription.create(prescriptionData);
 
+      // Update payment status to completed when prescription is created
+      // (confirms that consultation happened and cash payment was received)
+      let paymentFinalized = false;
+      try {
+        const payment = await Payment.getByAppointmentId(appointmentId);
+        console.log('💳 Payment record for appointment', appointmentId, ':', payment);
+        if (payment) {
+          console.log('📊 Payment status:', payment.payment_status, '| Method:', payment.payment_method);
+          if (payment.payment_status === 'pending') {
+            const updatedPayment = await Payment.updatePaymentStatus(payment.id, 'completed');
+            console.log('✅ Payment updated to completed:', updatedPayment);
+            paymentFinalized = true;
+          } else {
+            console.log('⏭️ Payment already', payment.payment_status, ', skipping update');
+          }
+        } else {
+          console.warn('❌ No payment record found for appointment', appointmentId);
+        }
+      } catch (paymentError) {
+        console.error('❌ Error updating payment status:', paymentError);
+      }
+
       res.status(201).json({
         success: true,
         message: 'Prescription created successfully',
@@ -71,7 +94,8 @@ class PrescriptionController {
           prescriptionId: prescription.id,
           prescriptionNumber: prescription.prescription_number,
           status: prescription.signature_status,
-          createdAt: prescription.created_at
+          createdAt: prescription.created_at,
+          paymentFinalized
         }
       });
     } catch (error) {
