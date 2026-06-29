@@ -8,6 +8,8 @@ const Prescription = require('./Prescription');
 const PrescriptionItem = require('./PrescriptionItem');
 const PHR = require('./PHR');
 const PHRAccess = require('./PHRAccess');
+const Order = require('./Order');
+const OrderStatusHistory = require('./OrderStatusHistory');
 
 module.exports = {
   User,
@@ -20,4 +22,6 @@ module.exports = {
   PrescriptionItem,
   PHR,
   PHRAccess,
+  Order,
+  OrderStatusHistory,
 };

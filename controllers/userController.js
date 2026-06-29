@@ -13,6 +13,7 @@ const emailService = require('../services/emailService');
 const SecurityAlertService = require('../services/securityAlertService');
 const GeolocationService = require('../services/geolocationService');
 const PasswordResetToken = require('../models/PasswordResetToken');
+const NotificationPreferences = require('../models/NotificationPreferences');
 
 /**
  * User Controller
@@ -115,6 +116,14 @@ class UserController {
 
       // Log successful signup
       await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'signup', 'success');
+
+      // Create default notification preferences so the preference check
+      // never fails on the first notification a patient should receive.
+      try {
+        await NotificationPreferences.ensureForPatient(newUser.id);
+      } catch (prefsError) {
+        console.error('⚠️ Failed to create notification preferences:', prefsError.message);
+      }
 
       // Generate email verification OTP (15-min expiry) and send it
       let verificationEmailSent = false;
@@ -220,6 +229,16 @@ class UserController {
         return res.status(403).json({
           success: false,
           message: 'Account is inactive. Please contact support.'
+        });
+      }
+
+      // 🧊 Account-frozen gate 
+      if (user.account_frozen === true) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'failed', 'Account frozen');
+        return res.status(423).json({
+          success: false,
+          code: 'ACCOUNT_FROZEN',
+          message: 'Your account is frozen. Please use the unfreeze link sent to your email to restore access.'
         });
       }
 
@@ -491,6 +510,7 @@ class UserController {
         data: {
           user,
           tokens: {
+            token,
             accessToken,
             refreshToken: refreshTokenData.token,
             expiresIn: 28800 // 8 hours (28800 seconds)
@@ -1482,6 +1502,7 @@ class UserController {
 
         // Build redirect URL with tokens
         const redirectUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth-callback`);
+        redirectUrl.searchParams.append('token', token);
         redirectUrl.searchParams.append('accessToken', accessToken);
         redirectUrl.searchParams.append('refreshToken', refreshTokenData.token);
         redirectUrl.searchParams.append('userId', user.id);

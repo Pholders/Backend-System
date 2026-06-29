@@ -107,10 +107,10 @@ class PharmacyController {
       const otpCode = otpRecord.otp_code;
 
       // Send OTP email
-      await emailService.sendOTPEmail(email, otpCode, `${first_name} ${last_name}`, 'pharmacy');
+      await emailService.sendOTP(email, otpCode, first_name);
 
       // Log signup initiation
-      await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup_initiated', 'success', 'OTP sent for verification');
+      await AuditLog.logSecurityEvent(req, null, 'pharmacy', email, 'signup', 'success', 'OTP sent for verification');
 
       res.status(200).json({
         success: true,

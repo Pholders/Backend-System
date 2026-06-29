@@ -2,6 +2,15 @@ const User = require('../models/User');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
+const ActionToken = require('../models/ActionToken');
+const Notification = require('../models/Notification');
+const NotificationPreferences = require('../models/NotificationPreferences');
+const DeviceToken = require('../models/DeviceToken');
+const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
+const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
+const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
+const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
 const PharmacyGroup = require('../models/PharmacyGroup');
@@ -9,6 +18,7 @@ const PharmacyAgreement = require('../models/PharmacyAgreement');
 const AgreementCompliance = require('../models/AgreementCompliance');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
+const Prescription = require('../models/Prescription');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
@@ -43,6 +53,27 @@ const initializeDatabase = async () => {
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
 
+    // Action tokens (generic single-use tokens: email change, account unfreeze, 2FA enable)
+    await ActionToken.createTable();
+
+    // Add profile/security columns to patients (avatar_url, suburb, id_number_encrypted,
+    // password_changed_at, password_strength, biometric/2FA flags, account_frozen)
+    await addProfileSecurityColumns();
+
+    // Linked services (connected_doctors, connected_pharmacies, family_dependents)
+    await createLinkedServicesTables();
+
+    // Medical aid (medical_aid_schemes, medical_aid_claims, invoices)
+    await createMedicalAidTables();
+
+    // Support tickets
+    await createSupportTicketsTable();
+
+    // Notifications stack
+    await Notification.createTable();
+    await NotificationPreferences.createTable();
+    await DeviceToken.createTable();
+    await DeviceToken.addDeviceTokenColumns();
     // Create Appointments table
     await Appointment.createTable();
 
@@ -64,6 +95,10 @@ const initializeDatabase = async () => {
     // Add payment_status and payment_method columns to appointments
     await addPaymentColumnsToAppointments();
 
+    // Create Prescription tables (required by PHR + session-based signatures + pharmacy dispensing)
+    await Prescription.createTable();
+    
+
     // Create PHR tables (health vitals, documents, access control)
     await createPHRTables();
 
@@ -72,6 +107,9 @@ const initializeDatabase = async () => {
 
     // Add pharmacy dispensing support
     await addPharmacyDispensingSupport();
+
+    // Orders v1 (orders table, status history, link claims to orders, add 'order' notification type)
+    await createOrdersTables();
 
     // Create appointment reminders tables
     await AppointmentReminder.createTable();

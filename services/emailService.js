@@ -139,6 +139,18 @@ Thank you for trusting Pholders Healthcare for your medical needs!
       console.log('✅ OTP email sent:', info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
+      // Dev-mode fallback: SMTP unavailable (e.g. broken Gmail creds).
+      // Log the OTP to the server console so local testing isn't blocked.
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('⚠️  SMTP send failed, falling back to console (dev mode):', error.message);
+        console.log('────────────────────────────────────────────');
+        console.log('🔐 Development OTP Code');
+        console.log('   To:    ', email);
+        console.log('   Name:  ', firstName);
+        console.log('   Code:  ', otpCode);
+        console.log('────────────────────────────────────────────');
+        return { success: true, devMode: true };
+      }
       console.error('❌ Email sending failed:', error);
       throw error;
     }
@@ -887,6 +899,200 @@ Pholders Healthcare Security Team
     } catch (error) {
       console.error('❌ Email service configuration error:', error);
       return false;
+    }
+  }
+
+  /**
+   * Send email-change verification link to the NEW address.
+   * The patient must click it before the email column is updated.
+   */
+  async sendEmailChangeVerification(newEmail, firstName, verifyLink) {
+    const mailOptions = {
+      from: `"Pholders Healthcare" <${process.env.EMAIL_USER}>`,
+      to: newEmail,
+      subject: 'Confirm your new email address',
+      html: `
+        <div style="font-family: Segoe UI, Tahoma, sans-serif; max-width: 600px; margin: 20px auto; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.08); overflow: hidden;">
+          <div style="background:#6DD0D8; color:#fff; padding:24px; text-align:center;">
+            <h1 style="margin:0;">Confirm Your New Email</h1>
+          </div>
+          <div style="padding:24px;">
+            <p>Hi ${firstName || ''},</p>
+            <p>We received a request to change the email on your Pholders Healthcare account to this address.</p>
+            <p>Click the button below within 60 minutes to confirm. Your current email will keep working until you do.</p>
+            <p style="text-align:center; margin: 24px 0;">
+              <a href="${verifyLink}" style="display:inline-block; padding:12px 24px; background:#6DD0D8; color:#fff; text-decoration:none; border-radius:4px; font-weight:bold;">Confirm New Email</a>
+            </p>
+            <p style="color:#666; font-size:13px;">If you didn't request this change, ignore this email.</p>
+          </div>
+        </div>
+      `,
+      text: `Hi ${firstName || ''},\n\nConfirm your new email by visiting:\n${verifyLink}\n\nLink expires in 60 minutes. If you didn't request this, ignore this email.`
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Email-change verification sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Email-change verification failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify patient their account has been frozen.
+   */
+  async sendAccountFreezeConfirmation(email, firstName, unfreezeLink) {
+    const mailOptions = {
+      from: `"Pholders Security" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: '🔒 Your account has been frozen',
+      html: `
+        <div style="font-family: Segoe UI, Tahoma, sans-serif; max-width: 600px; margin: 20px auto; background:#fff; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.08); overflow:hidden;">
+          <div style="background:#d32f2f; color:#fff; padding:24px; text-align:center;">
+            <h1 style="margin:0;">Account Frozen</h1>
+          </div>
+          <div style="padding:24px;">
+            <p>Hi ${firstName || ''},</p>
+            <p>Your Pholders Healthcare account has been frozen at your request. All active sessions have been logged out.</p>
+            <p>If you didn't do this, or you want to unfreeze your account, click below within 7 days:</p>
+            <p style="text-align:center; margin: 24px 0;">
+              <a href="${unfreezeLink}" style="display:inline-block; padding:12px 24px; background:#6DD0D8; color:#fff; text-decoration:none; border-radius:4px; font-weight:bold;">Unfreeze Account</a>
+            </p>
+            <p style="color:#666; font-size:13px;">For help, contact our support team.</p>
+          </div>
+        </div>
+      `,
+      text: `Hi ${firstName || ''},\n\nYour account has been frozen and all sessions logged out.\n\nUnfreeze: ${unfreezeLink}\nLink expires in 7 days.`
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Freeze confirmation sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Freeze confirmation failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Alias for clarity — same content as freeze confirmation but called separately
+   * if you want to re-send the unfreeze link without resending the freeze notice.
+   */
+  async sendAccountUnfreezeLink(email, firstName, unfreezeLink) {
+    return this.sendAccountFreezeConfirmation(email, firstName, unfreezeLink);
+  }
+
+  /**
+   * Email the compiled security audit log (CSV) to the patient.
+   */
+  async sendSecurityAuditLog(email, firstName, csvContent) {
+    const mailOptions = {
+      from: `"Pholders Healthcare" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Your Pholders Healthcare security audit log',
+      html: `
+        <div style="font-family: Segoe UI, Tahoma, sans-serif; max-width: 600px; margin: 20px auto; background:#fff; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.08); overflow:hidden;">
+          <div style="background:#6DD0D8; color:#fff; padding:24px; text-align:center;">
+            <h1 style="margin:0;">Security Audit Log</h1>
+          </div>
+          <div style="padding:24px;">
+            <p>Hi ${firstName || ''},</p>
+            <p>Attached is the security audit log you requested. It includes recent login activity, password changes, and device sessions.</p>
+            <p style="color:#666; font-size:13px;">If you didn't request this export, please change your password immediately and contact support.</p>
+          </div>
+        </div>
+      `,
+      text: `Hi ${firstName || ''},\n\nAttached is your requested security audit log.`,
+      attachments: [
+        {
+          filename: `security-audit-${new Date().toISOString().split('T')[0]}.csv`,
+          content: csvContent,
+          contentType: 'text/csv'
+        }
+      ]
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Security audit log emailed:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Audit log email failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Forward a support ticket to the support inbox.
+   */
+  async sendSupportTicket(ticket, patient) {
+    const supportInbox = process.env.SUPPORT_EMAIL || process.env.EMAIL_USER;
+    const mailOptions = {
+      from: `"Pholders Support" <${process.env.EMAIL_USER}>`,
+      to: supportInbox,
+      replyTo: patient?.email,
+      subject: `[Support][${ticket.type}] ${ticket.subject || 'New ticket'}`,
+      html: `
+        <div style="font-family: Segoe UI, Tahoma, sans-serif; max-width: 640px; margin: 20px auto;">
+          <h2>New ${ticket.type} ticket</h2>
+          <p><strong>From:</strong> ${patient?.first_name || ''} ${patient?.last_name || ''} (${patient?.email || ''})</p>
+          <p><strong>Patient ID:</strong> ${patient?.id || ''}</p>
+          <p><strong>Subject:</strong> ${ticket.subject || '(none)'}</p>
+          <hr>
+          <pre style="white-space: pre-wrap; font-family: inherit;">${ticket.body || ''}</pre>
+          <hr>
+          <p style="color:#888; font-size:12px;">Ticket ID: ${ticket.id || 'n/a'} • Created: ${ticket.created_at || new Date().toISOString()}</p>
+        </div>
+      `,
+      text: `New ${ticket.type} ticket\nFrom: ${patient?.email}\nSubject: ${ticket.subject}\n\n${ticket.body}`
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Support ticket forwarded:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Support ticket forward failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Forward a suspicious-activity report to the security inbox.
+   */
+  async sendSuspiciousActivityReport(report, patient) {
+    const securityInbox = process.env.SECURITY_EMAIL || process.env.SUPPORT_EMAIL || process.env.EMAIL_USER;
+    const mailOptions = {
+      from: `"Pholders Security" <${process.env.EMAIL_USER}>`,
+      to: securityInbox,
+      replyTo: patient?.email,
+      subject: `[Security] Suspicious activity report — ${patient?.email || 'unknown'}`,
+      html: `
+        <div style="font-family: Segoe UI, Tahoma, sans-serif; max-width: 640px; margin: 20px auto;">
+          <h2 style="color:#d32f2f;">Patient-reported suspicious activity</h2>
+          <p><strong>Patient:</strong> ${patient?.first_name || ''} ${patient?.last_name || ''} (${patient?.email || ''})</p>
+          <p><strong>Patient ID:</strong> ${patient?.id || ''}</p>
+          <p><strong>Subject:</strong> ${report.subject || '(none)'}</p>
+          <p><strong>Related session ID:</strong> ${report.related_session_id || 'n/a'}</p>
+          <hr>
+          <pre style="white-space: pre-wrap; font-family: inherit;">${report.body || ''}</pre>
+          <hr>
+          <p style="color:#888; font-size:12px;">Ticket ID: ${report.id || 'n/a'} • Reported: ${report.created_at || new Date().toISOString()}</p>
+        </div>
+      `,
+      text: `Suspicious activity report\nFrom: ${patient?.email}\n${report.subject}\n\n${report.body}`
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Suspicious activity report forwarded:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Suspicious activity report forward failed:', error);
+      return { success: false, error: error.message };
     }
   }
 }

@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-06-01",
+  "categories": [
+    {
+      "id": "account",
+      "title": "Account & Security",
+      "items": [
+        {
+          "q": "How do I change my password?",
+          "a": "Go to Profile > Security > Change Password. You will need to provide your current password."
+        },
+        {
+          "q": "How do I enable two-factor authentication?",
+          "a": "Go to Profile > Security > Two-Factor Authentication and choose email or authenticator app."
+        },
+        {
+          "q": "I think my account was hacked. What do I do?",
+          "a": "Use Profile > Security > Freeze Account immediately, then contact support."
+        }
+      ]
+    },
+    {
+      "id": "medical_aid",
+      "title": "Medical Aid",
+      "items": [
+        {
+          "q": "How do I add my medical aid details?",
+          "a": "Go to Profile > Medical Aid and fill in your scheme, plan and member number."
+        },
+        {
+          "q": "Where can I see my claims?",
+          "a": "Profile > Medical Aid > Claims."
+        }
+      ]
+    },
+    {
+      "id": "billing",
+      "title": "Billing",
+      "items": [
+        {
+          "q": "Where are my receipts?",
+          "a": "Profile > Billing > Transactions; tap any transaction to download the receipt."
+        }
+      ]
+    }
+  ]
+}
