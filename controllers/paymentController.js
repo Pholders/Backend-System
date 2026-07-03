@@ -2,6 +2,7 @@ const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const AuditLog = require('../models/AuditLog');
+const notificationService = require('../services/notificationService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 
 class PaymentController {
@@ -221,6 +222,15 @@ class PaymentController {
             `Stripe payment confirmed for appointment ${payment.appointment_id}`
           );
 
+          // Notify patient of confirmed payment — fire-and-forget
+          notificationService.sendToPatient({
+            patientId,
+            type: 'appointment',
+            title: 'Payment Confirmed — Appointment Scheduled',
+            body: `Your payment of R${payment.amount} has been confirmed. Your appointment is now scheduled.`,
+            data: { appointmentId: payment.appointment_id, paymentId: payment.id }
+          }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
           return res.status(200).json({
             success: true,
             message: 'Payment confirmed successfully',
@@ -329,6 +339,15 @@ class PaymentController {
         `Cash on arrival payment confirmed for appointment ${payment.appointment_id}`
       );
 
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Confirmed — Pay on Arrival',
+        body: `Your appointment is confirmed. Please bring R${payment.amount} on the day of your visit.`,
+        data: { appointmentId: payment.appointment_id, paymentId: payment.id }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       return res.status(200).json({
         success: true,
         message: 'Cash payment confirmed. You will pay during the appointment.',
@@ -426,6 +445,15 @@ class PaymentController {
         'success',
         `Medical aid payment confirmed - Provider: ${medicalAidProvider}`
       );
+
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Medical Aid Claim Submitted',
+        body: `Your medical aid claim has been submitted to ${medicalAidProvider}. Your appointment is confirmed.`,
+        data: { appointmentId: payment.appointment_id, paymentId }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       return res.status(200).json({
         success: true,

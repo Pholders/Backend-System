@@ -3,6 +3,7 @@ const Doctor = require('../models/Doctor');
 const DoctorReview = require('../models/DoctorReview');
 const User = require('../models/User');
 const Payment = require('../models/Payment');
+const notificationService = require('../services/notificationService');
 
 /**
  * Appointment Controller
@@ -333,6 +334,15 @@ class AppointmentController {
         reason_for_visit: reasonForVisit || null
       });
 
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Booked',
+        body: `Your appointment with Dr. ${doctor.first_name} ${doctor.last_name} on ${appointmentDate} at ${timeSlot} has been booked. Please complete payment to confirm.`,
+        data: { appointmentId: appointment.id, status: 'pending_payment' }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       res.status(201).json({
         success: true,
         message: 'Appointment booked successfully',
@@ -485,6 +495,15 @@ class AppointmentController {
 
       const cancelledAppointment = await Appointment.cancel(appointmentId);
 
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Cancelled',
+        body: `Your appointment on ${new Date(appointment.appointment_date).toDateString()} at ${appointment.time_slot} has been cancelled.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       res.json({
         success: true,
         message: 'Appointment cancelled successfully',
@@ -590,6 +609,15 @@ class AppointmentController {
         newTimePeriod,
         newTimeSlot
       );
+
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Rescheduled',
+        body: `Your appointment has been rescheduled to ${newDate} at ${newTimeSlot}.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       res.json({
         success: true,
@@ -833,6 +861,15 @@ class AppointmentController {
       const result = await query(updateQuery, [doctorNotes, appointmentId]);
       const updatedAppointment = result.rows[0];
 
+      // Notify patient that the doctor has accepted — fire-and-forget
+      notificationService.sendToPatient({
+        patientId: appointment.patient_id,
+        type: 'appointment',
+        title: 'Doctor Accepted Your Appointment',
+        body: `Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name} has accepted your appointment on ${appointment.appointment_date} at ${appointment.time_slot}.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       res.status(200).json({
         success: true,
         message: 'Appointment accepted successfully',
@@ -900,6 +937,15 @@ class AppointmentController {
       if (payment && payment.payment_status !== 'completed') {
         await Payment.updatePaymentStatus(payment.id, 'completed');
       }
+
+      // Notify patient that consultation is complete — fire-and-forget
+      notificationService.sendToPatient({
+        patientId: appointment.patient_id,
+        type: 'appointment',
+        title: 'Consultation Completed',
+        body: `Your consultation with Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name} has been marked as completed.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       res.status(200).json({
         success: true,

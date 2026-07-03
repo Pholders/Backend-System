@@ -80,8 +80,10 @@ const runMigration = async () => {
       ALTER TABLE audit_logs
         ADD CONSTRAINT audit_logs_event_type_check
         CHECK (event_type IN (
-          'signup', 'login', 'logout', 'login_failed',
-          'password_change', 'password_changed', 'password_reset',
+          'signup', 'signup_verified',
+          'login', 'logout', 'login_failed',
+          'google_login', 'oauth_profile_completed',
+          'password_change', 'password_changed', 'password_reset', 'reset_password',
           'otp_generated', 'otp_verified', 'otp_failed',
           'session_created', 'session_revoked', 'sessions_revoked_others',
           'profile_updated', 'account_updated', 'avatar_updated',
@@ -96,6 +98,12 @@ const runMigration = async () => {
           'doctor_linked', 'doctor_unlinked',
           'pharmacy_linked', 'pharmacy_unlinked',
           'dependent_added', 'dependent_updated', 'dependent_removed',
+          'medical_aid_updated', 'medical_aid_card_uploaded',
+          'medical_aid_document_downloaded',
+          'support_ticket_submitted', 'contact_message_submitted',
+          'account_deletion_requested', 'account_deleted', 'delete_account_request',
+          'payment_init', 'payment_confirm', 'payment_cash', 'payment_medical_aid',
+          'security_alert_reviewed', 'security_alerts_bulk_updated',
           'email_verification_sent', 'email_verification', 'email_verification_resend'
         ));
     `);
