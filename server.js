@@ -12,6 +12,10 @@ const userRoutes = require('./routes/userRoutes');
 // Import Passport config
 require('./config/passport');
 
+// Import Swagger config
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./config/swagger');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -38,6 +42,9 @@ app.use(session({
 // Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Swagger UI middleware
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // Routes
 app.use('/api/users', userRoutes);
@@ -92,13 +99,14 @@ async function startServer() {
     // Initialize Redis cache
     await cache.initialize();
     
-    app.listen(PORT, () => {
+        app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
       console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
       console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
       console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
       console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+      console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
