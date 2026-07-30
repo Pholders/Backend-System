@@ -56,9 +56,9 @@ const initializeDatabase = async () => {
     // Action tokens (generic single-use tokens: email change, account unfreeze, 2FA enable)
     await ActionToken.createTable();
 
-    // Add profile/security columns to patients (avatar_url, suburb, id_number_encrypted,
-    // password_changed_at, password_strength, biometric/2FA flags, account_frozen)
-    await addProfileSecurityColumns();
+    // Create Sessions and Audit Logs early — many migrations alter audit_logs constraints
+    await Session.createTable();
+    await AuditLog.createTable();
 
     // Linked services (connected_doctors, connected_pharmacies, family_dependents)
     await createLinkedServicesTables();
@@ -83,11 +83,8 @@ const initializeDatabase = async () => {
     // Create Payments table
     await Payment.createTable();
 
-    // Create Sessions table (for session tracking)
-    await Session.createTable();
-
-    // Create Audit Logs table
-    await AuditLog.createTable();
+    // Add profile/security columns to patients
+    await addProfileSecurityColumns();
 
     // Add pending_payment status to appointments
     await addPendingPaymentStatus();

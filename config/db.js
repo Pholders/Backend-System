@@ -8,6 +8,8 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  // Render requires SSL; rejectUnauthorized:false accepts their self-signed cert
+  ssl: process.env.DB_HOST?.includes('render.com') ? { rejectUnauthorized: false } : false,
 });
 
 // Test the database connection
