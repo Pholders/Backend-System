@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const OTP = require('../models/OTP');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
@@ -49,6 +50,9 @@ const initializeDatabase = async () => {
     
     // Create Pharmacies table
     await Pharmacy.createTable();
+
+    // Create OTP table
+    await OTP.createTable();
 
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
