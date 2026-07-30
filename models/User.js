@@ -11,6 +11,13 @@ class User {
    * Create the users table
    */
   static async createTable() {
+    // Check if table already exists
+    const checkTableQuery = `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'patients');`;
+    const result = await query(checkTableQuery);
+    if (result.rows[0].exists) {
+      return; // Table exists, skip creation and logging
+    }
+
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS patients (
         id SERIAL PRIMARY KEY,
@@ -102,21 +109,24 @@ class User {
   /**
    * Find user by email
    */
-  static async findByEmail(email) {
+  static async findByEmail(email, options = {}) {
+    const { skipCache = false } = options;
     const cacheKey = `user:email:${email}`;
     
     // Check cache first
-    let user = await cache.get(cacheKey);
-    if (user) {
-      return user;
+    if (!skipCache) {
+      const cachedUser = await cache.get(cacheKey);
+      if (cachedUser) {
+        return cachedUser;
+      }
     }
 
     // Query database
     const result = await query('SELECT * FROM patients WHERE email = $1', [email]);
-    user = result.rows[0];
+    const user = result.rows[0];
 
     // Cache the result (30 minutes)
-    if (user) {
+    if (user && !skipCache) {
       await cache.set(cacheKey, user, 1800);
     }
 
@@ -201,9 +211,9 @@ class User {
         blood_type, allergies, medical_history, 
         emergency_contact_name, emergency_contact_phone,
         oauth_provider, oauth_provider_id, oauth_profile_picture,
-        status, role
+        status, role, email_verified, email_verified_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'active', 'patient', true, CURRENT_TIMESTAMP)
       RETURNING *
     `;
 
@@ -268,6 +278,32 @@ class User {
   }
 
   /**
+   * Mark a patient's email as verified.
+   * Sets email_verified = true and stamps email_verified_at = NOW().
+   * Invalidates the user cache so subsequent reads see the updated flag.
+   */
+  static async markEmailVerified(id) {
+    const result = await query(
+      `UPDATE patients
+       SET email_verified = true,
+           email_verified_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    const updatedUser = result.rows[0];
+
+    if (updatedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${updatedUser.email}`);
+    }
+
+    return updatedUser;
+  }
+
+  /**
    * Delete user (soft delete by updating status)
    */
   static async delete(id) {
@@ -275,7 +311,14 @@ class User {
       'UPDATE patients SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       ['inactive', id]
     );
-    return result.rows[0];
+    const deletedUser = result.rows[0];
+
+    if (deletedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${deletedUser.email}`);
+    }
+
+    return deletedUser;
   }
 }
 

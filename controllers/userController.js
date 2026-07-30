@@ -13,6 +13,7 @@ const emailService = require('../services/emailService');
 const SecurityAlertService = require('../services/securityAlertService');
 const GeolocationService = require('../services/geolocationService');
 const PasswordResetToken = require('../models/PasswordResetToken');
+const NotificationPreferences = require('../models/NotificationPreferences');
 
 /**
  * User Controller
@@ -79,7 +80,7 @@ class UserController {
       }
 
       // Check if email already exists
-      const existingUserByEmail = await User.findByEmail(email);
+      const existingUserByEmail = await User.findByEmail(email, { skipCache: true });
       if (existingUserByEmail) {
         await AuditLog.logSecurityEvent(req, null, 'patient', email, 'signup', 'failed', 'Email already registered');
         return res.status(409).json({
@@ -102,7 +103,7 @@ class UserController {
       const saltRounds = 10;
       const password_hash = await bcrypt.hash(password, saltRounds);
 
-      // Create new user
+      // Create new user (email_verified defaults to false via DB default)
       const newUser = await User.create({
         first_name,
         last_name,
@@ -116,16 +117,62 @@ class UserController {
       // Log successful signup
       await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'signup', 'success');
 
+      // Create default notification preferences so the preference check
+      // never fails on the first notification a patient should receive.
+      try {
+        await NotificationPreferences.ensureForPatient(newUser.id);
+      } catch (prefsError) {
+        console.error('⚠️ Failed to create notification preferences:', prefsError.message);
+      }
+
+      // Generate email verification OTP (15-min expiry) and send it
+      let verificationEmailSent = false;
+      let devVerificationCode = null;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      try {
+        const otpRecord = await OTP.create(newUser.id, 'email_verification', 'patient', 15);
+        await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'email_verification_sent', 'success');
+
+        try {
+          await emailService.sendVerificationOTP(email, otpRecord.otp_code, first_name);
+          verificationEmailSent = true;
+          console.log('✅ Email verification code sent');
+        } catch (emailError) {
+          console.error('❌ Failed to send verification email:', emailError.message);
+          await AuditLog.logSecurityEvent(req, newUser.id, 'patient', email, 'email_verification_sent', 'failed', `Email error: ${emailError.message}`);
+
+          if (isDevelopment) {
+            devVerificationCode = otpRecord.otp_code;
+            console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+          }
+        }
+      } catch (otpError) {
+        console.error('❌ Failed to create verification OTP:', otpError.message);
+      }
+
       // Remove password_hash from response
       delete newUser.password_hash;
 
-      res.status(201).json({
+      const response = {
         success: true,
-        message: 'User registered successfully. Please log in.',
+        message: verificationEmailSent
+          ? 'Account created. Please check your email for a verification code to activate your account.'
+          : 'Account created, but we could not send the verification email. Please request a new code.',
         data: {
-          user: newUser
+          user: newUser,
+          requiresEmailVerification: true,
+          email: newUser.email,
+          expiresIn: '15 minutes'
         }
-      });
+      };
+
+      if (isDevelopment && devVerificationCode) {
+        response.data.verification_code = devVerificationCode;
+        response.data.dev_note = 'Verification code included in response (development mode only)';
+      }
+
+      res.status(201).json(response);
 
     } catch (error) {
       console.error('Signup error:', error);
@@ -142,9 +189,10 @@ class UserController {
    */
   static async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const { email, password, skipOTP } = req.body;
 
       const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
 
       // Validate required fields
       if (!email || !password) {
@@ -184,8 +232,20 @@ class UserController {
         });
       }
 
+      // 🧊 Account-frozen gate 
+      if (user.account_frozen === true) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'failed', 'Account frozen');
+        return res.status(423).json({
+          success: false,
+          code: 'ACCOUNT_FROZEN',
+          message: 'Your account is frozen. Please use the unfreeze link sent to your email to restore access.'
+        });
+      }
+
       // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      console.log(`[LOGIN DEBUG] Password check - Provided: "${password}" (${password.length} chars), Hash from DB: ${user.password_hash.substring(0, 50)}...`);
+      console.log(`[LOGIN DEBUG] bcrypt.compare result: ${isPasswordValid}`);
       if (!isPasswordValid) {
         await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login_failed', 'failed', 'Invalid password');
         return res.status(401).json({
@@ -194,52 +254,64 @@ class UserController {
         });
       }
 
-      // Generate and send OTP
-      const otpRecord = await OTP.create(user.id, 'login', 'patient');
-      
-      // Log OTP generation
-      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_generated', 'success');
-      
-      // Send OTP email
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      let emailSent = false;
-      
-      try {
-        await emailService.sendOTP(user.email, otpRecord.otp_code, user.first_name);
-        emailSent = true;
-        console.log('✅ OTP email sent successfully');
-      } catch (emailError) {
-        console.error('❌ Failed to send OTP email:', emailError.message);
-        
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send OTP email. Please try again.'
-          });
-        }
-        
-        console.log('⚠️  Development mode: Skipping email requirement');
-      }
+      // ✅ Password verified - Return tokens directly (no OTP on login)
+      delete user.password_hash;
 
-      const response = {
-        success: true,
-        message: emailSent 
-          ? 'OTP sent to your email. Please verify to complete login.'
-          : 'OTP generated. Check server logs for code (development mode).',
-        data: {
+      // Generate access token (24 hours)
+      const accessToken = jwt.sign(
+        { 
+          id: user.id, 
           email: user.email,
-          expiresIn: '10 minutes'
-        }
+          role: 'patient'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      // Create session with accessToken hash
+      const tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+      
+      const deviceInfo = {
+        userAgent: userAgent,
+        ipAddress: ipAddress,
+        timestamp: new Date().toISOString()
       };
       
-      if (isDevelopment && !emailSent) {
-        response.data.otp_code = otpRecord.otp_code;
-        response.data.dev_note = 'OTP included in response (development mode only)';
-        console.log(`\n🔐 Development OTP Code: ${otpRecord.otp_code}\n`);
-      }
+      const session = await Session.create(
+        user.id,
+        'patient',
+        tokenHash,
+        ipAddress,
+        userAgent,
+        deviceInfo
+      );
 
-      res.status(200).json(response);
+      // Generate refresh token
+      const refreshTokenData = await RefreshToken.create(
+        user.id, 
+        'patient',
+        userAgent
+      );
+
+      // Log successful login
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login', 'success', null);
+
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        data: {
+          user,
+          tokens: {
+            accessToken,
+            refreshToken: refreshTokenData.token,
+            expiresIn: 86400 // 24 hours
+          },
+          session: {
+            id: session.id,
+            expiresAt: session.expires_at
+          }
+        }
+      });
 
     } catch (error) {
       console.error('Login error:', error);
@@ -280,6 +352,16 @@ class UserController {
         });
       }
 
+      // 🛡️  Email verification gate (defense in depth)
+      if (user.email_verified === false) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_verified', 'failed', 'Email not verified');
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email before logging in.'
+        });
+      }
+
       // Verify OTP
       const isOTPValid = await OTP.verify(user.id, otp_code, 'login', 'patient');
       if (!isOTPValid || !isOTPValid.valid) {
@@ -293,7 +375,7 @@ class UserController {
       // Remove password_hash from response
       delete user.password_hash;
 
-      // Generate JWT token
+      // Generate JWT token (24 hours)
       const token = jwt.sign(
         { 
           id: user.id, 
@@ -302,7 +384,7 @@ class UserController {
           type: 'patient'
         },
         process.env.JWT_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '24h' }
       );
 
       // Create session
@@ -404,7 +486,7 @@ class UserController {
         console.error('❌ Security alert error (non-blocking):', alertError.message);
       }
 
-      // Generate access token (shorter expiration)
+      // Generate access token (8 hours - matches doctor session duration)
       const accessToken = jwt.sign(
         { 
           id: user.id, 
@@ -412,7 +494,7 @@ class UserController {
           type: 'user' // or 'patient'
         },
         process.env.JWT_SECRET,
-        { expiresIn: '15m' } // Shorter expiration
+        { expiresIn: '8h' } // 8 hours for consistent session duration
       );
 
       // Generate refresh token
@@ -428,9 +510,10 @@ class UserController {
         data: {
           user,
           tokens: {
+            token,
             accessToken,
             refreshToken: refreshTokenData.token,
-            expiresIn: 900 // 15 minutes in seconds
+            expiresIn: 28800 // 8 hours (28800 seconds)
           },
           session: {
             id: session.id,
@@ -471,7 +554,7 @@ class UserController {
   static async logout(req, res) {
     try {
       const userId = req.user.id;
-      const sessionId = req.session?.id;
+      const sessionId = req.authSession?.id;
 
       if (sessionId) {
         await Session.revoke(sessionId, 'User logout');
@@ -1050,8 +1133,8 @@ class UserController {
         // Clear user's cache if using cache service
         const cache = require('../services/cacheService');
         try {
-          await cache.delete(`user:id:${userId}`);
-          await cache.delete(`user:email:${userEmail}`);
+          await cache.del(`user:id:${userId}`);
+          await cache.del(`user:email:${userEmail}`);
         } catch (cacheError) {
           console.warn('Warning: Cache cleanup failed:', cacheError.message);
         }
@@ -1173,6 +1256,148 @@ class UserController {
   }
 
   /**
+   * Verify Email (Account Activation)
+   * Confirms the user owns the email address provided at signup.
+   * On success, flips email_verified = true so login is permitted.
+   */
+  static async verifyEmail(req, res) {
+    try {
+      const { email, otp_code } = req.body;
+
+      if (!email || !otp_code) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'email_verification', 'failed', 'Missing email or code');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and verification code are required'
+        });
+      }
+
+      const user = await User.findByEmail(email);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'email_verification', 'failed', 'User not found');
+        // Generic response to prevent account enumeration
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      // Idempotent: already verified
+      if (user.email_verified === true) {
+        return res.status(200).json({
+          success: true,
+          message: 'Email is already verified. You can log in.',
+          data: { email: user.email, alreadyVerified: true }
+        });
+      }
+
+      const otpResult = await OTP.verify(user.id, otp_code, 'email_verification', 'patient');
+      if (!otpResult || !otpResult.valid) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification', 'failed', 'Invalid or expired code');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired verification code'
+        });
+      }
+
+      await User.markEmailVerified(user.id);
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. You can now log in.',
+        data: {
+          email: user.email,
+          email_verified: true
+        }
+      });
+    } catch (error) {
+      console.error('Verify email error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error verifying email',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Resend Email Verification Code
+   * Generates a fresh OTP and emails it. Rate-limited to one request per 60 seconds
+   * per account to prevent abuse. Returns generic responses to avoid account enumeration.
+   */
+  static async resendVerificationEmail(req, res) {
+    try {
+      const { email } = req.body;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is required'
+        });
+      }
+
+      const genericResponse = {
+        success: true,
+        message: 'If an unverified account exists for this email, a new verification code has been sent.'
+      };
+
+      const user = await User.findByEmail(email);
+
+      // Don't reveal whether the account exists or its verification state
+      if (!user || user.email_verified === true) {
+        return res.status(200).json(genericResponse);
+      }
+
+      // Rate-limit: reject if a code was issued in the last 60 seconds
+      const latest = await OTP.getLatest(user.id, 'email_verification', 'patient');
+      if (latest) {
+        const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
+        if (ageSeconds < 60) {
+          await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification_resend', 'failed', 'Rate limited');
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${Math.ceil(60 - ageSeconds)} seconds before requesting another code.`
+          });
+        }
+      }
+
+      const otpRecord = await OTP.create(user.id, 'email_verification', 'patient', 15);
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'email_verification_resend', 'success');
+
+      try {
+        await emailService.sendVerificationOTP(user.email, otpRecord.otp_code, user.first_name);
+      } catch (emailError) {
+        console.error('❌ Failed to resend verification email:', emailError.message);
+        if (!isDevelopment) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send verification email. Please try again.'
+          });
+        }
+        console.log(`\n🔐 Development Email Verification Code: ${otpRecord.otp_code}\n`);
+      }
+
+      const response = { ...genericResponse };
+      if (isDevelopment) {
+        response.data = {
+          verification_code: otpRecord.otp_code,
+          dev_note: 'Verification code included in response (development mode only)'
+        };
+      }
+      return res.status(200).json(response);
+    } catch (error) {
+      console.error('Resend verification error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error resending verification code',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Google OAuth - Initiate Login/Signup
    * Redirects to Google OAuth consent screen
    */
@@ -1258,7 +1483,7 @@ class UserController {
           { userAgent, ipAddress, timestamp: new Date().toISOString() }
         );
 
-        // Generate access token
+        // Generate access token (8 hours - matches doctor session duration)
         const accessToken = jwt.sign(
           { 
             id: user.id, 
@@ -1266,7 +1491,7 @@ class UserController {
             type: 'user'
           },
           process.env.JWT_SECRET,
-          { expiresIn: '15m' }
+          { expiresIn: '8h' }
         );
 
         // Generate refresh token
@@ -1277,6 +1502,7 @@ class UserController {
 
         // Build redirect URL with tokens
         const redirectUrl = new URL(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth-callback`);
+        redirectUrl.searchParams.append('token', token);
         redirectUrl.searchParams.append('accessToken', accessToken);
         redirectUrl.searchParams.append('refreshToken', refreshTokenData.token);
         redirectUrl.searchParams.append('userId', user.id);

@@ -11,14 +11,14 @@ const runMigration = async () => {
   try {
     // Add id_passport_number column if it doesn't exist
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ADD COLUMN IF NOT EXISTS id_passport_number VARCHAR(50) UNIQUE;
     `);
     console.log('✅ Added id_passport_number column');
 
     // Create index for id_passport_number
     await query(`
-      CREATE INDEX IF NOT EXISTS idx_users_id_passport ON users(id_passport_number);
+      CREATE INDEX IF NOT EXISTS idx_users_id_passport ON patients(id_passport_number);
     `);
     console.log('✅ Created index for id_passport_number');
 
@@ -27,7 +27,7 @@ const runMigration = async () => {
     // Uncomment the following if you want to make phone required:
     /*
     await query(`
-      ALTER TABLE users 
+      ALTER TABLE patients 
       ALTER COLUMN phone SET NOT NULL;
     `);
     console.log('✅ Made phone column required');

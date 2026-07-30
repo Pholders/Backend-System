@@ -8,6 +8,8 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  // Render requires SSL; rejectUnauthorized:false accepts their self-signed cert
+  ssl: process.env.DB_HOST?.includes('render.com') ? { rejectUnauthorized: false } : false,
 });
 
 // Test the database connection
@@ -26,7 +28,7 @@ const query = async (text, params) => {
   try {
     const res = await pool.query(text, params);
     const duration = Date.now() - start;
-    console.log('Executed query', { text, duration, rows: res.rowCount });
+    // console.log('Executed query', { text, duration, rows: res.rowCount });
     return res;
   } catch (error) {
     console.error('Database query error:', error);

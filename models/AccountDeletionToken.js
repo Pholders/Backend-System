@@ -13,6 +13,15 @@ class AccountDeletionToken {
    */
   static async createTable() {
     try {
+      // Check if table already exists
+      const checkResult = await query(`
+        SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'account_deletion_tokens');
+      `);
+      
+      if (checkResult.rows[0].exists) {
+        return; // Table exists, skip creation and logging
+      }
+
       await query(`
         CREATE TABLE IF NOT EXISTS account_deletion_tokens (
           id SERIAL PRIMARY KEY,
@@ -27,13 +36,13 @@ class AccountDeletionToken {
           cancelled BOOLEAN DEFAULT FALSE,
           cancelled_at TIMESTAMP,
           reason_cancelled TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          
-          INDEX idx_user_id (user_id),
-          INDEX idx_email (email),
-          INDEX idx_deletion_token (deletion_token),
-          INDEX idx_confirmed (confirmed)
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_user_id ON account_deletion_tokens(user_id);
+        CREATE INDEX IF NOT EXISTS idx_email ON account_deletion_tokens(email);
+        CREATE INDEX IF NOT EXISTS idx_deletion_token ON account_deletion_tokens(deletion_token);
+        CREATE INDEX IF NOT EXISTS idx_confirmed ON account_deletion_tokens(confirmed);
       `);
       console.log('✅ Account deletion tokens table created');
     } catch (error) {
