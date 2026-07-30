@@ -23,6 +23,8 @@ class EmailService {
       transportConfig.host = process.env.EMAIL_HOST;
       transportConfig.port = port;
       transportConfig.secure = process.env.EMAIL_SECURE === 'true' || port === 465;
+      // Allow self-signed certs on custom mail servers
+      transportConfig.tls = { rejectUnauthorized: false };
     }
 
     this.transporter = nodemailer.createTransport(transportConfig);
