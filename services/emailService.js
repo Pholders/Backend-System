@@ -8,6 +8,41 @@ const path = require('path');
 
 class EmailService {
   constructor() {
+    // Use Resend HTTP API when configured — bypasses SMTP port blocking on cloud hosts
+    if (process.env.RESEND_API_KEY || process.env.EMAIL_USER === 'resend') {
+      const apiKey = process.env.RESEND_API_KEY || process.env.EMAIL_PASSWORD;
+      this.transporter = {
+        sendMail: async (opts) => {
+          const abort = new AbortController();
+          const timer = setTimeout(() => abort.abort(), 10_000);
+          let res;
+          try {
+            res = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                from: opts.from,
+                to: Array.isArray(opts.to) ? opts.to : [opts.to],
+                subject: opts.subject,
+                html: opts.html,
+                text: opts.text,
+              }),
+              signal: abort.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || `Resend API error ${res.status}`);
+          return { messageId: data.id };
+        },
+      };
+      return;
+    }
+
     const service = process.env.EMAIL_SERVICE;
     const port = parseInt(process.env.EMAIL_PORT, 10) || 465;
     const transportConfig = {
@@ -23,6 +58,8 @@ class EmailService {
       transportConfig.host = process.env.EMAIL_HOST;
       transportConfig.port = port;
       transportConfig.secure = process.env.EMAIL_SECURE === 'true' || port === 465;
+      // Allow self-signed certs on custom mail servers
+      transportConfig.tls = { rejectUnauthorized: false };
     }
 
     this.transporter = nodemailer.createTransport(transportConfig);

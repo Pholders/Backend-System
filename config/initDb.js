@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const OTP = require('../models/OTP');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
@@ -26,6 +27,7 @@ const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppoin
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
+const { migrate: addUserTypeToOTP } = require('./addUserTypeToOTP');
 const addAppointmentReminders = require('./addAppointmentReminders');
 const addPharmacyPartnerships = require('./addPharmacyPartnerships');
 const addPharmacyTierFeatures = require('./addPharmacyTierFeatures');
@@ -49,6 +51,10 @@ const initializeDatabase = async () => {
     
     // Create Pharmacies table
     await Pharmacy.createTable();
+
+    // Create OTP table
+    await OTP.createTable();
+    await addUserTypeToOTP();
 
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
