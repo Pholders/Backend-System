@@ -109,21 +109,24 @@ class User {
   /**
    * Find user by email
    */
-  static async findByEmail(email) {
+  static async findByEmail(email, options = {}) {
+    const { skipCache = false } = options;
     const cacheKey = `user:email:${email}`;
     
     // Check cache first
-    let user = await cache.get(cacheKey);
-    if (user) {
-      return user;
+    if (!skipCache) {
+      const cachedUser = await cache.get(cacheKey);
+      if (cachedUser) {
+        return cachedUser;
+      }
     }
 
     // Query database
     const result = await query('SELECT * FROM patients WHERE email = $1', [email]);
-    user = result.rows[0];
+    const user = result.rows[0];
 
     // Cache the result (30 minutes)
-    if (user) {
+    if (user && !skipCache) {
       await cache.set(cacheKey, user, 1800);
     }
 
@@ -308,7 +311,14 @@ class User {
       'UPDATE patients SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       ['inactive', id]
     );
-    return result.rows[0];
+    const deletedUser = result.rows[0];
+
+    if (deletedUser) {
+      await cache.del(`user:id:${id}`);
+      await cache.del(`user:email:${deletedUser.email}`);
+    }
+
+    return deletedUser;
   }
 }
 

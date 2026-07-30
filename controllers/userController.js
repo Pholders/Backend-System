@@ -80,7 +80,7 @@ class UserController {
       }
 
       // Check if email already exists
-      const existingUserByEmail = await User.findByEmail(email);
+      const existingUserByEmail = await User.findByEmail(email, { skipCache: true });
       if (existingUserByEmail) {
         await AuditLog.logSecurityEvent(req, null, 'patient', email, 'signup', 'failed', 'Email already registered');
         return res.status(409).json({
@@ -1133,8 +1133,8 @@ class UserController {
         // Clear user's cache if using cache service
         const cache = require('../services/cacheService');
         try {
-          await cache.delete(`user:id:${userId}`);
-          await cache.delete(`user:email:${userEmail}`);
+          await cache.del(`user:id:${userId}`);
+          await cache.del(`user:email:${userEmail}`);
         } catch (cacheError) {
           console.warn('Warning: Cache cleanup failed:', cacheError.message);
         }
