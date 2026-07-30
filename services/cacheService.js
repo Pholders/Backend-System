@@ -15,30 +15,39 @@ class CacheService {
    * Initialize Redis connection
    */
   async initialize() {
-    // Track whether we've already logged a connection error so we don't
-    // spam the console on every reconnection attempt.
+    // Skip Redis entirely if no URL or host is configured
+    if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
+      console.warn('⚠️  No Redis URL configured — continuing without cache.');
+      return;
+    }
+
     let errorLogged = false;
     const MAX_RETRIES = 5;
 
     try {
-      this.client = redis.createClient({
-        host: process.env.REDIS_HOST || 'localhost',
-        port: process.env.REDIS_PORT || 6379,
+      const clientOptions = {
         socket: {
-          // Stop reconnecting after MAX_RETRIES attempts so the app doesn't
-          // retry forever when Redis isn't available locally.
           reconnectStrategy: (retries) => {
             if (retries >= MAX_RETRIES) {
               if (!errorLogged) {
                 console.warn(`⚠️  Redis unavailable after ${MAX_RETRIES} retries. Continuing without cache.`);
                 errorLogged = true;
               }
-              return false; // stop retrying
+              return false;
             }
             return Math.min(retries * 50, 500);
           }
         }
-      });
+      };
+
+      if (process.env.REDIS_URL) {
+        clientOptions.url = process.env.REDIS_URL;
+      } else {
+        clientOptions.socket.host = process.env.REDIS_HOST;
+        clientOptions.socket.port = parseInt(process.env.REDIS_PORT) || 6379;
+      }
+
+      this.client = redis.createClient(clientOptions);
 
       this.client.on('error', (err) => {
         // Log only the first error to avoid console spam during reconnect loops.
