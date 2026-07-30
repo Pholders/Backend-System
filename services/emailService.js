@@ -13,20 +13,28 @@ class EmailService {
       const apiKey = process.env.RESEND_API_KEY || process.env.EMAIL_PASSWORD;
       this.transporter = {
         sendMail: async (opts) => {
-          const res = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              from: opts.from,
-              to: Array.isArray(opts.to) ? opts.to : [opts.to],
-              subject: opts.subject,
-              html: opts.html,
-              text: opts.text,
-            }),
-          });
+          const abort = new AbortController();
+          const timer = setTimeout(() => abort.abort(), 10_000);
+          let res;
+          try {
+            res = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                from: opts.from,
+                to: Array.isArray(opts.to) ? opts.to : [opts.to],
+                subject: opts.subject,
+                html: opts.html,
+                text: opts.text,
+              }),
+              signal: abort.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || `Resend API error ${res.status}`);
           return { messageId: data.id };
