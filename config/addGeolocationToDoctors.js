@@ -47,11 +47,16 @@ async function addGeolocationToDoctors() {
     console.log('✅ Added longitude validation constraint');
 
     console.log('✅ Migration completed successfully!');
-    process.exit(0);
   } catch (error) {
-    console.error('❌ Migration failed:', error);
-    process.exit(1);
+    throw error;
   }
 }
 
-addGeolocationToDoctors();
+if (require.main === module) {
+  addGeolocationToDoctors().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = addGeolocationToDoctors;

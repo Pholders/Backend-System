@@ -29,15 +29,19 @@ const runMigration = async () => {
     `);
     console.log('✅ Created indexes on refresh_tokens table');
 
-    // Add foreign key constraints (these might fail if referenced tables don't exist, that's OK)
-    try {
+    // Skip if constraint already exists (idempotent)
+    const constraintExists = await query(`
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE table_name = 'refresh_tokens' AND constraint_name = 'chk_valid_user_type'
+    `);
+    if (constraintExists.rows.length === 0) {
       await query(`
         ALTER TABLE refresh_tokens 
         ADD CONSTRAINT chk_valid_user_type 
         CHECK (user_type IN ('patient', 'doctor', 'pharmacy', 'admin'));
       `);
       console.log('✅ Added check constraint for user_type');
-    } catch (error) {
+    } else {
       console.log('ℹ️  Check constraint already exists or not needed');
     }
 

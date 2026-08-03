@@ -35,12 +35,16 @@ async function setupPatientProfileTables() {
     console.log('   ✓ Advanced directives support');
     console.log('   ✓ Medication & vaccination tracking');
     console.log('   ✓ Lifestyle monitoring');
-    
-    process.exit(0);
   } catch (error) {
-    console.error('❌ Migration error:', error.message);
-    process.exit(1);
+    throw error;
   }
 }
 
-setupPatientProfileTables();
+if (require.main === module) {
+  setupPatientProfileTables().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration error:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = setupPatientProfileTables;

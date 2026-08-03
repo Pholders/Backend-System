@@ -19,12 +19,16 @@ async function migrate() {
     console.log('   - Session tracking and management');
     console.log('   - Audit logging for all security events');
     console.log('   - Device tracking and login activity monitoring\n');
-
-    process.exit(0);
   } catch (error) {
-    console.error('\n❌ Migration failed:', error);
-    process.exit(1);
+    throw error;
   }
 }
 
-migrate();
+if (require.main === module) {
+  migrate().then(() => process.exit(0)).catch(err => {
+    console.error('\n❌ Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = migrate;
