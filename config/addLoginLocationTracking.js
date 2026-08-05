@@ -6,18 +6,18 @@ const LoginLocation = require('../models/LoginLocation');
  */
 
 async function migrate() {
-  try {
-    console.log('🔄 Running migration: Add login_locations table...');
-    
-    // Create table
-    await LoginLocation.createTable();
-    
-    console.log('✅ Migration completed successfully');
-    process.exit(0);
-  } catch (error) {
-    console.error('❌ Migration failed:', error);
-    process.exit(1);
-  }
+  console.log('🔄 Running migration: Add login_locations table...');
+  await LoginLocation.createTable();
+  console.log('✅ Migration completed successfully');
 }
 
-migrate();
+if (require.main === module) {
+  migrate().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = migrate;
+
+module.exports = migrate;
