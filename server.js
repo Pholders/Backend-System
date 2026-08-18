@@ -42,9 +42,46 @@ const PORT = process.env.PORT || 3000;
 // ============================================================================
 
 // CORS configuration
+const allowedOrigins = [
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000' || '"http://localhost:57763",',
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const isLocalhost =
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:');
+
+    const isProductionOrigin =
+      allowedOrigins.includes(origin);
+
+    if (isLocalhost || isProductionOrigin) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked: ${origin}`));
+  },
+
+  credentials: true,
+
+  methods: [
+    'GET',
+    'HEAD',
+    'PUT',
+    'PATCH',
+    'POST',
+    'DELETE',
+    'OPTIONS'
+  ],
+
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization'
+  ]
 }));
 
 // Body parsing
