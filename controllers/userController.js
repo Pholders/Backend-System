@@ -788,14 +788,81 @@ class UserController {
   }
 
   /**
+   * Verify Password Reset OTP
+   * No authentication required
+   */
+  static async verifyPasswordResetOTP(req, res) {
+    try {
+      const { email, otp, otp_code } = req.body;
+      const submittedOtp = otp || otp_code;
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+
+      if (!email || !submittedOtp) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'password_reset_otp_verify', 'failed', 'Missing email or OTP');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and OTP code are required'
+        });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'password_reset_otp_verify', 'failed', 'Invalid email format');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid email format'
+        });
+      }
+
+      const user = await User.findByEmail(email);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'password_reset_otp_verify', 'failed', 'User not found');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired password reset code. Please request a new one.'
+        });
+      }
+
+      const otpVerification = await OTP.verify(user.id, submittedOtp, 'password_reset', 'patient');
+      if (!otpVerification.valid) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'password_reset_otp_verify', 'failed', otpVerification.message);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired password reset code. Please request a new one.'
+        });
+      }
+
+      await PasswordResetToken.invalidateAllUserTokens(user.id);
+      const resetTokenData = await PasswordResetToken.create(user.id, user.email, ipAddress, userAgent, 15);
+
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'password_reset_otp_verify', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Password reset code verified successfully.',
+        data: {
+          reset_token: resetTokenData.token,
+          expires_in: '15 minutes'
+        }
+      });
+    } catch (error) {
+      console.error('Verify password reset OTP error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error verifying password reset code',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Reset Password - Verify Token and Update Password
    * No authentication required
    */
   static async resetPassword(req, res) {
     try {
       const {
-        email,
-        otp,
         token,
         new_password,
         confirm_password,
@@ -808,20 +875,17 @@ class UserController {
 
       const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
 
-      const hasOtpResetPayload = Boolean(email && otp);
-      const hasLegacyTokenPayload = Boolean(token);
-
       // Validate required fields
-      if ((!hasOtpResetPayload && !hasLegacyTokenPayload) || !normalizedNewPassword || !normalizedConfirmPassword) {
+      if (!token || !normalizedNewPassword || !normalizedConfirmPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Email and OTP or reset token, plus new password and password confirmation, are required'
+          message: 'Verified reset token, new password, and password confirmation are required'
         });
       }
 
       // Verify passwords match
       if (normalizedNewPassword !== normalizedConfirmPassword) {
-        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'reset_password', 'failed', 'Passwords do not match');
+        await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', 'Passwords do not match');
         return res.status(400).json({
           success: false,
           message: 'Passwords do not match'
@@ -831,7 +895,7 @@ class UserController {
       // Validate password strength
       const passwordValidation = PasswordValidator.validate(normalizedNewPassword);
       if (!passwordValidation.valid) {
-        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'reset_password', 'failed', `Weak password: ${passwordValidation.errors.join(', ')}`);
+        await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', `Weak password: ${passwordValidation.errors.join(', ')}`);
         return res.status(400).json({
           success: false,
           message: 'Password does not meet security requirements',
@@ -840,54 +904,22 @@ class UserController {
         });
       }
 
-      let user;
-      let legacyResetToken = null;
+      const resetToken = await PasswordResetToken.findByToken(token);
+      if (!resetToken) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', 'Invalid or expired reset token');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired password reset token. Please verify your OTP and try again.'
+        });
+      }
 
-      if (hasOtpResetPayload) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-          await AuditLog.logSecurityEvent(req, null, 'patient', email, 'reset_password', 'failed', 'Invalid email format');
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid email format'
-          });
-        }
-
-        user = await User.findByEmail(email);
-        if (!user) {
-          await AuditLog.logSecurityEvent(req, null, 'patient', email, 'reset_password', 'failed', 'User not found');
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid or expired password reset code. Please request a new one.'
-          });
-        }
-
-        const otpVerification = await OTP.verify(user.id, otp, 'password_reset', 'patient');
-        if (!otpVerification.valid) {
-          await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'reset_password', 'failed', otpVerification.message);
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid or expired password reset code. Please request a new one.'
-          });
-        }
-      } else {
-        legacyResetToken = await PasswordResetToken.findByToken(token);
-        if (!legacyResetToken) {
-          await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', 'Invalid or expired reset token');
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid or expired password reset token. Please request a new one.'
-          });
-        }
-
-        user = await User.findById(legacyResetToken.user_id);
-        if (!user) {
-          await AuditLog.logSecurityEvent(req, legacyResetToken.user_id, 'patient', legacyResetToken.email, 'reset_password', 'failed', 'User not found');
-          return res.status(404).json({
-            success: false,
-            message: 'User not found'
-          });
-        }
+      const user = await User.findById(resetToken.user_id);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, resetToken.user_id, 'patient', resetToken.email, 'reset_password', 'failed', 'User not found');
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
       }
 
       // Hash new password
@@ -897,12 +929,9 @@ class UserController {
       // Update user password
       await User.update(user.id, { password_hash });
 
-      // Mark token as used when the request comes from the legacy link flow.
-      if (legacyResetToken) {
-        await PasswordResetToken.markAsUsed(legacyResetToken.id);
-      }
+      await PasswordResetToken.markAsUsed(resetToken.id);
 
-      // Invalidate all legacy unused reset tokens for this user.
+      // Invalidate all other unused reset tokens for this user.
       await PasswordResetToken.invalidateAllUserTokens(user.id);
 
       // Invalidate all sessions for this user (force re-login)

@@ -57,6 +57,7 @@ router.post('/auth/complete-profile', authMiddleware, requireRole('patient'), Us
 
 // Password Reset Routes (No authentication required)
 router.post('/forgot-password', UserController.forgotPassword);
+router.post('/verify-password-reset-otp', UserController.verifyPasswordResetOTP);
 router.post('/reset-password', UserController.resetPassword);
 
 // Account Deletion Routes

@@ -75,7 +75,53 @@ The password reset feature allows patients to securely reset their forgotten pas
 
 ---
 
-### 2. Reset Password with OTP
+### 2. Verify Password Reset OTP
+
+**Endpoint:** `POST /api/auth/verify-password-reset-otp`
+
+**Authentication:** Not required
+
+**Request Body:**
+```json
+{
+  "email": "patient@example.com",
+  "otp": "123456"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Password reset code verified successfully.",
+  "data": {
+    "reset_token": "verified-reset-token",
+    "expires_in": "15 minutes"
+  }
+}
+```
+
+**Error Responses:**
+
+400 - Missing Fields:
+```json
+{
+  "success": false,
+  "message": "Email and OTP code are required"
+}
+```
+
+401 - Invalid or Expired OTP:
+```json
+{
+  "success": false,
+  "message": "Invalid or expired password reset code. Please request a new one."
+}
+```
+
+---
+
+### 3. Reset Password with Verified Token
 
 **Endpoint:** `POST /api/auth/reset-password`
 
@@ -84,17 +130,7 @@ The password reset feature allows patients to securely reset their forgotten pas
 **Request Body:**
 ```json
 {
-  "email": "patient@example.com",
-  "otp": "123456",
-  "new_password": "SecurePassword123!",
-  "confirm_password": "SecurePassword123!"
-}
-```
-
-Legacy transition support:
-```json
-{
-  "token": "legacy-reset-token",
+  "token": "verified-reset-token",
   "new_password": "SecurePassword123!",
   "confirm_password": "SecurePassword123!"
 }
@@ -114,7 +150,7 @@ Legacy transition support:
 ```json
 {
   "success": false,
-  "message": "Email and OTP or reset token, plus new password and password confirmation, are required"
+  "message": "Verified reset token, new password, and password confirmation are required"
 }
 ```
 
@@ -139,11 +175,11 @@ Legacy transition support:
 }
 ```
 
-401 - Invalid or Expired OTP:
+401 - Invalid or Expired Token:
 ```json
 {
   "success": false,
-  "message": "Invalid or expired password reset code. Please request a new one."
+  "message": "Invalid or expired password reset token. Please verify your OTP and try again."
 }
 ```
 
@@ -193,18 +229,20 @@ POST /forgot-password (email)
 User receives email with reset OTP
     |
     v
-User enters email, OTP, and new password in frontend
+POST /verify-password-reset-otp (email, otp)
     |
     v
-POST /reset-password (email, otp, new_password)
+Backend verifies OTP and returns short-lived reset token
+  |
+  v
+POST /reset-password (token, new_password)
     |
-  ├─ Resolve user by email
-  ├─ Compare submitted OTP against stored hash
+  ├─ Validate reset token
     ├─ Validate password strength
     ├─ Hash new password (bcrypt, 10 rounds)
     ├─ Update user password
-  ├─ Mark OTP as used
-  ├─ Invalidate all legacy reset tokens for user
+  ├─ Mark reset token as used
+  ├─ Invalidate all other reset tokens for user
     ├─ Invalidate all sessions (force re-login)
     ├─ Send confirmation email
     └─ Log success (security audit)
@@ -227,15 +265,13 @@ User can now log in with new password
 - OTP hashes are stored in the shared `otps` table
 - Password reset records use the `password_reset` purpose value
 - Expiration is enforced at verification time
-- Each token includes:
-  - User ID (linked via foreign key)
-  - Email (for audit)
-  - Expiration time (24 hours)
-  - Used flag (prevents reuse)
-  - IP address and user agent (audit trail)
-  - Created/Updated timestamps
 
-### 3. Password Security
+### 3. Verified Reset Token
+- After a successful OTP verification, the backend issues a cryptographically secure reset token
+- The reset token is short-lived and required for the password change step
+- Reset tokens are marked used after a successful password change
+
+### 4. Password Security
 - Passwords hashed with bcrypt (10 salt rounds)
 - Password strength validation enforced
 - Old password not required (can help account takeover recovery)

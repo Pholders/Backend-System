@@ -38,14 +38,34 @@ Response: 200 OK
 }
 ```
 
+### Verify Reset OTP
+```
+POST /api/auth/verify-password-reset-otp
+Content-Type: application/json
+
+{
+  "email": "patient@example.com",
+  "otp": "123456"
+}
+
+Response: 200 OK
+{
+  "success": true,
+  "message": "Password reset code verified successfully.",
+  "data": {
+    "reset_token": "verified-reset-token",
+    "expires_in": "15 minutes"
+  }
+}
+```
+
 ### Reset Password
 ```
 POST /api/auth/reset-password
 Content-Type: application/json
 
 {
-  "email": "patient@example.com",
-  "otp": "123456",
+  "token": "verified-reset-token",
   "new_password": "NewPassword123!",
   "confirm_password": "NewPassword123!"
 }
@@ -93,12 +113,21 @@ curl -X POST http://localhost:3000/api/auth/forgot-password \
 
 # Check logs or email for OTP, then:
 
-# 2. Reset password
-curl -X POST http://localhost:3000/api/auth/reset-password \
+# 2. Verify OTP
+curl -X POST http://localhost:3000/api/auth/verify-password-reset-otp \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "otp": "123456",
+    "otp": "123456"
+  }'
+
+# Copy reset_token from the response, then:
+
+# 3. Reset password
+curl -X POST http://localhost:3000/api/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "VERIFIED_RESET_TOKEN_HERE",
     "new_password": "NewPassword123!",
     "confirm_password": "NewPassword123!"
   }'

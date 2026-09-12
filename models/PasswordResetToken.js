@@ -10,13 +10,13 @@ class PasswordResetToken {
   /**
    * Create a password reset token
    */
-  static async create(userId, email, ipAddress, userAgent) {
+  static async create(userId, email, ipAddress, userAgent, expiryMinutes = 24 * 60) {
     try {
       // Generate unique reset token
       const resetToken = crypto.randomBytes(32).toString('hex');
       
-      // Token expires in 24 hours
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      // Token expires after the requested interval.
+      const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
       const insertQuery = `
         INSERT INTO password_reset_tokens (

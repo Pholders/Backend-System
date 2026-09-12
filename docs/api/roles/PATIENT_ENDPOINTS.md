@@ -239,15 +239,35 @@ Request a password reset code.
 ---
 
 ### POST `/users/reset-password`
-Reset password using the email and OTP from the reset email.
+Verify the OTP first, then reset the password using the verified reset token.
+
+**OTP Verification Request Body**
+```json
+{
+  "email": "jane@example.com",
+  "otp": "123456"
+}
+```
+
+**Password Reset Request Body**
+```json
+{
+  "token": "verified-reset-token",
+  "new_password": "NewSecurePass456!",
+  "confirm_password": "NewSecurePass456!"
+}
+```
+
+---
+
+### POST `/users/verify-password-reset-otp`
+Verify the password reset OTP and receive a short-lived reset token.
 
 **Request Body**
 ```json
 {
   "email": "jane@example.com",
-  "otp": "123456",
-  "new_password": "NewSecurePass456!",
-  "confirm_password": "NewSecurePass456!"
+  "otp": "123456"
 }
 ```
 
@@ -255,7 +275,11 @@ Reset password using the email and OTP from the reset email.
 ```json
 {
   "success": true,
-  "message": "Password reset successfully. You can now log in with your new password."
+  "message": "Password reset code verified successfully.",
+  "data": {
+    "reset_token": "verified-reset-token",
+    "expires_in": "15 minutes"
+  }
 }
 ```
 
