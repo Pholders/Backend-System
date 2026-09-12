@@ -112,6 +112,7 @@ app.use(passport.session());
 // ============================================================================
 
 app.use('/api/users', userRoutes);
+app.use('/api/auth', userRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
