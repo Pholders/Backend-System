@@ -799,7 +799,7 @@ class UserController {
       const userAgent = req.headers['user-agent'];
 
       if (!email || !submittedOtp) {
-        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'password_reset_otp_verify', 'failed', 'Missing email or OTP');
+        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'otp_failed', 'failed', 'Missing email or OTP');
         return res.status(400).json({
           success: false,
           message: 'Email and OTP code are required'
@@ -808,7 +808,7 @@ class UserController {
 
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
-        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'password_reset_otp_verify', 'failed', 'Invalid email format');
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'otp_failed', 'failed', 'Invalid email format');
         return res.status(400).json({
           success: false,
           message: 'Invalid email format'
@@ -817,7 +817,7 @@ class UserController {
 
       const user = await User.findByEmail(email);
       if (!user) {
-        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'password_reset_otp_verify', 'failed', 'User not found');
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'otp_failed', 'failed', 'User not found');
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired password reset code. Please request a new one.'
@@ -826,7 +826,7 @@ class UserController {
 
       const otpVerification = await OTP.verify(user.id, submittedOtp, 'password_reset', 'patient');
       if (!otpVerification.valid) {
-        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'password_reset_otp_verify', 'failed', otpVerification.message);
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_failed', 'failed', otpVerification.message);
         return res.status(401).json({
           success: false,
           message: 'Invalid or expired password reset code. Please request a new one.'
@@ -836,7 +836,7 @@ class UserController {
       await PasswordResetToken.invalidateAllUserTokens(user.id);
       const resetTokenData = await PasswordResetToken.create(user.id, user.email, ipAddress, userAgent, 15);
 
-      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'password_reset_otp_verify', 'success');
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_verified', 'success');
 
       return res.status(200).json({
         success: true,
