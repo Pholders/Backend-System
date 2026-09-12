@@ -219,7 +219,7 @@ Complete profile after OAuth signup (first-time Google login).
 ---
 
 ### POST `/users/forgot-password`
-Request a password reset email.
+Request a password reset code.
 
 **Request Body**
 ```json
@@ -232,20 +232,22 @@ Request a password reset email.
 ```json
 {
   "success": true,
-  "message": "If an account with this email exists, a password reset link has been sent to your email. Please check your inbox and spam folder."
+  "message": "If an account with this email exists, a password reset code has been sent to your email. Please check your inbox and spam folder."
 }
 ```
 
 ---
 
 ### POST `/users/reset-password`
-Reset password using the token from the reset email.
+Reset password using the email and OTP from the reset email.
 
 **Request Body**
 ```json
 {
-  "token": "abc123resettoken",
-  "newPassword": "NewSecurePass456!"
+  "email": "jane@example.com",
+  "otp": "123456",
+  "new_password": "NewSecurePass456!",
+  "confirm_password": "NewSecurePass456!"
 }
 ```
 

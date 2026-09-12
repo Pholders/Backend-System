@@ -361,6 +361,87 @@ Security reminders:
   }
 
   /**
+   * Send password reset OTP email
+   */
+  async sendPasswordResetOTP(email, otpCode, firstName) {
+    const mailOptions = {
+      from: `"Pholders" <${this.getAuthFromAddress()}>`,
+      to: email,
+      subject: 'Your Password Reset Code - Pholders Healthcare',
+      html: `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:32px 16px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);">
+  <tr><td style="background:#1C2B4B;padding:28px 40px;">
+    <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px;">PHOLDERS</span><span style="color:#6DD0D8;font-size:18px;font-weight:300;"> HEALTHCARE</span>
+  </td></tr>
+  <tr><td style="background:#6DD0D8;height:3px;font-size:0;">&nbsp;</td></tr>
+  <tr><td style="padding:40px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:600;color:#1C2B4B;">Password Reset Code</h2>
+    <p style="margin:0 0 8px;font-size:14px;color:#6c7a89;">Hello, ${firstName}</p>
+    <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#3d4852;">We received a request to reset the password for your Pholders Healthcare account. Use the code below to continue in the app.</p>
+    <div style="text-align:center;margin:0 0 28px;">
+      <div style="display:inline-block;background:#f0f9fa;border:1px solid #b2e4e8;border-radius:6px;padding:18px 48px;">
+        <span style="font-size:34px;font-weight:700;letter-spacing:10px;color:#1C2B4B;font-family:'Courier New',monospace;">${otpCode}</span>
+      </div>
+    </div>
+    <div style="background:#fff8f0;border-left:3px solid #e65100;padding:14px 18px;border-radius:0 4px 4px 0;margin:0 0 24px;">
+      <p style="margin:0;font-size:13px;color:#3d4852;line-height:1.6;">This code expires in <strong>15 minutes</strong>. If you did not request a password reset, you can safely ignore this email.</p>
+    </div>
+    <p style="margin:0;font-size:13px;color:#6c7a89;line-height:1.6;">For your security, never share this code with anyone.</p>
+  </td></tr>
+  <tr><td style="background:#f8f9fb;border-top:1px solid #e8edf2;padding:20px 40px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#9aa3ae;">&copy; 2026 Pholders Healthcare. All rights reserved.</p>
+    <p style="margin:4px 0 0;font-size:12px;color:#9aa3ae;">This is an automated message — please do not reply to this email.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`,
+      text: `Hello ${firstName},
+
+We received a request to reset the password for your Pholders Healthcare account.
+
+Your password reset code: ${otpCode}
+
+This code expires in 15 minutes. If you did not request a password reset, you can safely ignore this email.
+
+For your security, never share this code with anyone.`,
+      attachments: [
+        {
+          filename: 'logo.png',
+          path: path.join(__dirname, '..', 'images', 'PHolders 2.png'),
+          cid: 'logo'
+        }
+      ]
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Password reset OTP email sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('⚠️  Password reset OTP send failed, falling back to console (dev mode):', error.message);
+        console.log('────────────────────────────────────────────');
+        console.log('🔐 Development Password Reset OTP');
+        console.log('   To:    ', email);
+        console.log('   Name:  ', firstName);
+        console.log('   Code:  ', otpCode);
+        console.log('────────────────────────────────────────────');
+        return { success: true, devMode: true };
+      }
+
+      console.error('❌ Password reset OTP email sending failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Send password reset confirmation email
    */
   async sendPasswordResetConfirmation(email, firstName) {

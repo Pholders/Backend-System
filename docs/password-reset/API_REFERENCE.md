@@ -6,14 +6,14 @@ The password reset feature allows patients to securely reset their forgotten pas
 
 ## Features
 
-✅ **Email-based Password Reset** - Secure token-based password reset via email
+✅ **Email-based Password Reset** - Secure OTP-based password reset via email
 ✅ **No Authentication Required** - Users can reset password without logging in
-✅ **Token Expiration** - Reset tokens expire after 24 hours
+✅ **OTP Expiration** - Reset codes expire after 15 minutes
 ✅ **Security Logging** - All password reset attempts are logged for audit trails
 ✅ **Session Invalidation** - All existing sessions are invalidated after password reset
 ✅ **Email Confirmations** - Users receive confirmation emails for security awareness
 ✅ **Rate Limiting Ready** - Architecture supports adding rate limiting
-✅ **Development Mode** - Token and links available in development for testing
+✅ **Development Mode** - OTP available in server logs if mail delivery falls back locally
 
 ---
 
@@ -36,18 +36,7 @@ The password reset feature allows patients to securely reset their forgotten pas
 ```json
 {
   "success": true,
-  "message": "Password reset link has been sent to your email. The link will expire in 24 hours."
-}
-```
-
-**Development Mode Response:**
-```json
-{
-  "success": true,
-  "message": "Password reset token generated. Check server logs (development mode only).",
-  "dev_token": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
-  "dev_link": "http://localhost:3000/reset-password?token=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
-  "dev_note": "Token and link included in response (development mode only)"
+  "message": "If an account with this email exists, a password reset code has been sent to your email. Please check your inbox and spam folder."
 }
 ```
 
@@ -80,13 +69,13 @@ The password reset feature allows patients to securely reset their forgotten pas
 
 **Security Notes:**
 - Returns 200 even if email doesn't exist (for security - prevents email enumeration)
-- IP address and user agent are logged
-- Token is cryptographically generated (32 random bytes)
-- Tokens are stored with expiration time (24 hours)
+- OTP is generated with a cryptographically secure flow and stored hashed
+- Only the email recipient ever receives the plain OTP
+- The reset OTP expires after 15 minutes
 
 ---
 
-### 2. Reset Password with Token
+### 2. Reset Password with OTP
 
 **Endpoint:** `POST /api/auth/reset-password`
 
@@ -95,7 +84,17 @@ The password reset feature allows patients to securely reset their forgotten pas
 **Request Body:**
 ```json
 {
-  "token": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+  "email": "patient@example.com",
+  "otp": "123456",
+  "new_password": "SecurePassword123!",
+  "confirm_password": "SecurePassword123!"
+}
+```
+
+Legacy transition support:
+```json
+{
+  "token": "legacy-reset-token",
   "new_password": "SecurePassword123!",
   "confirm_password": "SecurePassword123!"
 }
@@ -115,7 +114,7 @@ The password reset feature allows patients to securely reset their forgotten pas
 ```json
 {
   "success": false,
-  "message": "Token, new password, and password confirmation are required"
+  "message": "Email and OTP or reset token, plus new password and password confirmation, are required"
 }
 ```
 
@@ -140,11 +139,11 @@ The password reset feature allows patients to securely reset their forgotten pas
 }
 ```
 
-401 - Invalid or Expired Token:
+401 - Invalid or Expired OTP:
 ```json
 {
   "success": false,
-  "message": "Invalid or expired password reset token. Please request a new one."
+  "message": "Invalid or expired password reset code. Please request a new one."
 }
 ```
 
@@ -184,30 +183,28 @@ POST /forgot-password (email)
     |
     ├─ Validate email format
     ├─ Check if user exists
-    ├─ Generate reset token (32 random bytes)
-    ├─ Create password_reset_tokens record
-    ├─ Send email with reset link
+  ├─ Generate secure 6-digit OTP
+  ├─ Hash OTP before storing it
+  ├─ Store OTP with 15-minute expiry
+  ├─ Send email with reset code
     └─ Log attempt (security audit)
     |
     v
-User receives email with reset link
+User receives email with reset OTP
     |
     v
-User clicks link: /reset-password?token=TOKEN
+User enters email, OTP, and new password in frontend
     |
     v
-User submits new password
+POST /reset-password (email, otp, new_password)
     |
-    v
-POST /reset-password (token, new_password)
-    |
-    ├─ Validate token format
-    ├─ Find valid, non-expired token
+  ├─ Resolve user by email
+  ├─ Compare submitted OTP against stored hash
     ├─ Validate password strength
     ├─ Hash new password (bcrypt, 10 rounds)
     ├─ Update user password
-    ├─ Mark token as used
-    ├─ Invalidate all other reset tokens for user
+  ├─ Mark OTP as used
+  ├─ Invalidate all legacy reset tokens for user
     ├─ Invalidate all sessions (force re-login)
     ├─ Send confirmation email
     └─ Log success (security audit)
@@ -221,13 +218,15 @@ User can now log in with new password
 
 ## Security Implementation
 
-### 1. Token Generation
-- Uses `crypto.randomBytes(32)` - cryptographically secure
-- Tokens are hexadecimal strings (64 characters)
-- Each token is unique and database-constrained
+### 1. OTP Generation
+- Uses a one-time code that is stored only as a bcrypt hash
+- The plain OTP is available only at creation time for email delivery
+- Each new reset request invalidates any previous unused reset OTP for that user
 
-### 2. Token Storage
-- Tokens stored in separate table (not in users table)
+### 2. OTP Storage
+- OTP hashes are stored in the shared `otps` table
+- Password reset records use the `password_reset` purpose value
+- Expiration is enforced at verification time
 - Each token includes:
   - User ID (linked via foreign key)
   - Email (for audit)

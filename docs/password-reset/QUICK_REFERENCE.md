@@ -34,7 +34,7 @@ Content-Type: application/json
 Response: 200 OK
 {
   "success": true,
-  "message": "Password reset link has been sent to your email..."
+  "message": "If an account with this email exists, a password reset code has been sent to your email..."
 }
 ```
 
@@ -44,7 +44,8 @@ POST /api/auth/reset-password
 Content-Type: application/json
 
 {
-  "token": "reset-token-from-email",
+  "email": "patient@example.com",
+  "otp": "123456",
   "new_password": "NewPassword123!",
   "confirm_password": "NewPassword123!"
 }
@@ -75,11 +76,11 @@ Response: 200 OK
 
 ## Testing in Development
 
-### Get Reset Token from Logs
-When you call `/forgot-password` in development, check the server logs:
+### Get Reset OTP from Logs
+When you call `/forgot-password` in development and mail delivery falls back locally, check the server logs:
 ```
-🔐 Development Reset Token: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
-🔗 Development Reset Link: http://localhost:3000/reset-password?token=a1b2c3d4...
+🔐 Development Password Reset OTP
+  Code:   123456
 ```
 
 ### Quick Test with cURL
@@ -90,13 +91,14 @@ curl -X POST http://localhost:3000/api/auth/forgot-password \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com"}'
 
-# Check logs for token, then:
+# Check logs or email for OTP, then:
 
 # 2. Reset password
 curl -X POST http://localhost:3000/api/auth/reset-password \
   -H "Content-Type: application/json" \
   -d '{
-    "token": "YOUR_TOKEN_HERE",
+    "email": "test@example.com",
+    "otp": "123456",
     "new_password": "NewPassword123!",
     "confirm_password": "NewPassword123!"
   }'
@@ -106,11 +108,11 @@ curl -X POST http://localhost:3000/api/auth/reset-password \
 
 ## Security Features
 
-🔒 **Token Security**
-- Cryptographically secure random tokens (32 bytes)
-- 24-hour expiration
+🔒 **OTP Security**
+- One-time reset codes stored as bcrypt hashes
+- 15-minute expiration
 - Single-use only
-- Unique constraint in database
+- Previous unused reset OTPs are invalidated on each new request
 
 🔒 **Password Security**
 - bcrypt hashing (10 rounds)
