@@ -1562,9 +1562,9 @@ Reorder categories.
 ---
 
 ### GET `/users/doctors`
-List doctors with optional filtering and geolocation.
+List active doctors. By default this returns all active doctors. Patients can then narrow the list with text-based location filtering or add coordinates for distance-based results.
 
-**Query Params:** `lat`, `lng`, `radius_km`, `specialty`, `max_fee`, `page` (default 1), `limit` (default 20)
+**Query Params:** `location`, `specialty`, `max_fee`, `page` (default 1), `limit` (default 20), optional `lat`, `lng`, `radius_km`
 
 **Response `200`**
 ```json
@@ -1574,19 +1574,38 @@ List doctors with optional filtering and geolocation.
     "doctors": [
       {
         "id": 5,
-        "firstName": "John",
-        "lastName": "Smith",
+        "first_name": "John",
+        "last_name": "Smith",
+        "display_name": "Dr John Smith",
         "specialization": "General Practitioner",
-        "clinicName": "City Clinic",
+        "clinic_name": "City Clinic",
         "city": "Cape Town",
-        "consultationFee": 550,
-        "rating": { "averageRating": 4.7, "totalReviews": 23 }
+        "province": "Western Cape",
+        "consultation_fee": 550,
+        "distance_km": 2.3
       }
     ],
-    "total": 1, "page": 1, "limit": 20
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "total_pages": 1,
+      "has_next": false,
+      "has_prev": false
+    },
+    "filters": {
+      "lat": -33.9249,
+      "lng": 18.4241,
+      "location": "Cape Town",
+      "radius_km": 5,
+      "specialty": null,
+      "max_fee": null
+    }
   }
 }
 ```
+
+If `lat` and `lng` are omitted, the endpoint still returns active doctors, but `distance_km` is not included and `radius_km` is returned as `null`.
 
 ---
 

@@ -677,14 +677,15 @@ class DoctorController {
    * GET /doctors
    *
    * Public doctor listing for the patient "Find doctors near you" screen.
-   * Patient sends their current GPS coordinates as query params and we
-   * return active doctors sorted by distance, with optional specialty,
-   * max-fee and radius filters plus pagination.
+   * Returns active doctors for patient discovery. Coordinates are optional:
+   * when present we compute distance and optionally apply a radius filter;
+   * otherwise we return all active doctors subject to text/fee filters.
    *
    * Query params:
-   *   lat         (required, number)  - patient latitude
-   *   lng         (required, number)  - patient longitude
-   *   radius_km   (optional, number)  - default 5, max 100
+   *   lat         (optional, number)  - patient latitude
+   *   lng         (optional, number)  - patient longitude
+   *   radius_km   (optional, number)  - default 5, max 100, only used with lat/lng
+   *   location    (optional, string)  - matches city/province/clinic name/address
    *   specialty   (optional, string)  - matches doctors.specialization
    *   max_fee     (optional, number)  - max consultation_fee (inclusive)
    *   page        (optional, int)     - default 1
@@ -692,34 +693,38 @@ class DoctorController {
    */
   static async listDoctors(req, res) {
     try {
-      const lat = parseFloat(req.query.lat);
-      const lng = parseFloat(req.query.lng);
+      const hasLat = req.query.lat !== undefined && req.query.lat !== '';
+      const hasLng = req.query.lng !== undefined && req.query.lng !== '';
+      const lat = hasLat ? parseFloat(req.query.lat) : null;
+      const lng = hasLng ? parseFloat(req.query.lng) : null;
+      const hasCoordinates = hasLat || hasLng;
       const radiusKm = req.query.radius_km !== undefined ? parseFloat(req.query.radius_km) : 5;
+      const location = req.query.location ? String(req.query.location).trim() : null;
       const specialty = req.query.specialty ? String(req.query.specialty).trim() : null;
       const maxFee = req.query.max_fee !== undefined ? parseFloat(req.query.max_fee) : null;
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-      // Validate coordinates
-      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      // Validate coordinates only when the client sends them.
+      if (hasCoordinates && (!hasLat || !hasLng || Number.isNaN(lat) || Number.isNaN(lng))) {
         return res.status(400).json({
           success: false,
-          message: 'lat and lng query parameters are required and must be numbers'
+          message: 'lat and lng must both be provided as valid numbers when using distance filters'
         });
       }
-      if (lat < -90 || lat > 90) {
+      if (hasCoordinates && (lat < -90 || lat > 90)) {
         return res.status(400).json({
           success: false,
           message: 'lat must be between -90 and 90'
         });
       }
-      if (lng < -180 || lng > 180) {
+      if (hasCoordinates && (lng < -180 || lng > 180)) {
         return res.status(400).json({
           success: false,
           message: 'lng must be between -180 and 180'
         });
       }
-      if (Number.isNaN(radiusKm) || radiusKm < 1 || radiusKm > 100) {
+      if (req.query.radius_km !== undefined && (Number.isNaN(radiusKm) || radiusKm < 1 || radiusKm > 100)) {
         return res.status(400).json({
           success: false,
           message: 'radius_km must be a number between 1 and 100'
@@ -732,14 +737,21 @@ class DoctorController {
         });
       }
 
-      // Fetch a generous batch of active doctors with location data and
-      // filter/sort in memory. We do not enable PostGIS so distance must be
-      // computed in app code via the Haversine formula. The DB-side
-      // specialty/fee filter keeps the working set small.
+      // Fetch active doctors and apply DB-side text/fee filters first.
       const params = ['active'];
-      let whereSql = `WHERE status = $1
-        AND latitude IS NOT NULL
-        AND longitude IS NOT NULL`;
+      let whereSql = `WHERE status = $1`;
+
+      if (location) {
+        params.push(`%${location}%`);
+        whereSql += `
+        AND (
+          city ILIKE $${params.length}
+          OR province ILIKE $${params.length}
+          OR clinic_name ILIKE $${params.length}
+          OR clinic_address ILIKE $${params.length}
+          OR address ILIKE $${params.length}
+        )`;
+      }
 
       if (specialty) {
         params.push(specialty);
@@ -755,33 +767,49 @@ class DoctorController {
         params
       );
 
-      // Compute distance and apply radius filter
-      const withinRadius = [];
+      // When coordinates are present, compute distance and optionally apply
+      // the radius filter; otherwise return the filtered set as-is.
+      const visibleDoctors = [];
       for (const doctor of result.rows) {
-        const distance = GeolocationService.calculateDistance(
-          lat,
-          lng,
-          parseFloat(doctor.latitude),
-          parseFloat(doctor.longitude)
-        );
-        if (distance <= radiusKm) {
-          delete doctor.password_hash;
-          withinRadius.push({
-            ...doctor,
-            display_name: buildDisplayName(doctor),
-            distance_km: parseFloat(distance.toFixed(2))
-          });
+        delete doctor.password_hash;
+
+        const doctorData = {
+          ...doctor,
+          display_name: buildDisplayName(doctor)
+        };
+
+        if (hasCoordinates) {
+          const hasDoctorCoordinates = doctor.latitude !== null && doctor.longitude !== null;
+          if (!hasDoctorCoordinates) {
+            continue;
+          }
+
+          const distance = GeolocationService.calculateDistance(
+            lat,
+            lng,
+            parseFloat(doctor.latitude),
+            parseFloat(doctor.longitude)
+          );
+
+          if (distance > radiusKm) {
+            continue;
+          }
+
+          doctorData.distance_km = parseFloat(distance.toFixed(2));
         }
+
+        visibleDoctors.push(doctorData);
       }
 
-      // Sort by distance (closest first)
-      withinRadius.sort((a, b) => a.distance_km - b.distance_km);
+      if (hasCoordinates) {
+        visibleDoctors.sort((a, b) => a.distance_km - b.distance_km);
+      }
 
       // Paginate
-      const total = withinRadius.length;
+      const total = visibleDoctors.length;
       const totalPages = Math.max(1, Math.ceil(total / limit));
       const offset = (page - 1) * limit;
-      const pageItems = withinRadius.slice(offset, offset + limit);
+      const pageItems = visibleDoctors.slice(offset, offset + limit);
 
       res.status(200).json({
         success: true,
@@ -798,7 +826,8 @@ class DoctorController {
           filters: {
             lat,
             lng,
-            radius_km: radiusKm,
+            location,
+            radius_km: hasCoordinates ? radiusKm : null,
             specialty: specialty || null,
             max_fee: maxFee
           }
