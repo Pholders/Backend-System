@@ -249,8 +249,9 @@ class User {
     values.push(id);
 
     const updateQuery = `
-      UPDATE patients 
-      WHERE id = $${paramCount}
+        UPDATE patients
+        SET ${fields.join(', ')}
+        WHERE id = $${paramCount}
       RETURNING *
     `;
 
