@@ -23,6 +23,7 @@ const {
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
@@ -113,6 +114,7 @@ app.use(passport.session());
 
 app.use('/api/users', userRoutes);
 app.use('/api/auth', userRoutes);
+app.use('/api', bookingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
