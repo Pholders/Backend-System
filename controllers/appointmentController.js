@@ -169,30 +169,32 @@ class AppointmentController {
       const maxDate = new Date();
       maxDate.setDate(maxDate.getDate() + 90); // Allow booking up to 90 days in advance
 
+      const defaultDoctorSchedule = { opens_at: '09:00', closes_at: '17:00' };
+
       const timePeriods = [
         {
           name: 'morning',
           label: 'Morning',
-          timeRange: '08:00 - 11:30',
-          slots: Appointment.getTimeSlots('morning')
+          timeRange: '09:00 - 11:30',
+          slots: Appointment.getTimeSlots('morning', defaultDoctorSchedule)
         },
         {
           name: 'afternoon',
           label: 'Afternoon',
           timeRange: '12:00 - 15:30',
-          slots: Appointment.getTimeSlots('afternoon')
+          slots: Appointment.getTimeSlots('afternoon', defaultDoctorSchedule)
         },
         {
           name: 'evening',
           label: 'Evening',
           timeRange: '16:00 - 18:30',
-          slots: Appointment.getTimeSlots('evening')
+          slots: Appointment.getTimeSlots('evening', defaultDoctorSchedule)
         },
         {
           name: 'night',
           label: 'Night',
           timeRange: '19:00 - 21:00',
-          slots: Appointment.getTimeSlots('night')
+          slots: Appointment.getTimeSlots('night', defaultDoctorSchedule)
         }
       ];
 
@@ -249,7 +251,7 @@ class AppointmentController {
         });
       }
 
-      const validSlots = Appointment.getTimeSlots(timePeriod);
+      const validSlots = Appointment.getTimeSlots(timePeriod, doctor, appointmentDate);
       if (!validSlots.includes(timeSlot)) {
         return res.status(400).json({
           success: false,
@@ -579,7 +581,15 @@ class AppointmentController {
       }
 
       // Validate time slot
-      const validSlots = Appointment.getTimeSlots(newTimePeriod);
+      const doctor = await Doctor.findById(appointment.doctor_id);
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      const validSlots = Appointment.getTimeSlots(newTimePeriod, doctor, newDate);
       if (!validSlots.includes(newTimeSlot)) {
         return res.status(400).json({
           success: false,

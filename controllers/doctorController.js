@@ -522,6 +522,50 @@ class DoctorController {
       delete updateData.hpcsa_number;
       delete updateData.created_at;
 
+      const timeRegex = /^\d{2}:\d{2}$/;
+      if (updateData.opens_at && !timeRegex.test(updateData.opens_at)) {
+        return res.status(400).json({
+          success: false,
+          message: 'opens_at must use HH:MM format'
+        });
+      }
+
+      if (updateData.closes_at && !timeRegex.test(updateData.closes_at)) {
+        return res.status(400).json({
+          success: false,
+          message: 'closes_at must use HH:MM format'
+        });
+      }
+
+      if (updateData.opens_at && updateData.closes_at && updateData.closes_at <= updateData.opens_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'closes_at must be later than opens_at'
+        });
+      }
+
+      if (updateData.availability !== undefined) {
+        const weekdayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        const isValidAvailability =
+          updateData.availability &&
+          typeof updateData.availability === 'object' &&
+          !Array.isArray(updateData.availability) &&
+          Object.entries(updateData.availability).every(([day, windows]) => {
+            if (!weekdayKeys.includes(day) || !Array.isArray(windows)) {
+              return false;
+            }
+
+            return windows.every((window) => typeof window === 'string' && /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(window));
+          });
+
+        if (!isValidAvailability) {
+          return res.status(400).json({
+            success: false,
+            message: 'availability must be an object like { monday: ["09:00-12:00", "13:00-17:00"] }'
+          });
+        }
+      }
+
       const updatedDoctor = await Doctor.update(doctorId, updateData);
       if (!updatedDoctor) {
         return res.status(404).json({

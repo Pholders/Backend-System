@@ -1,11 +1,141 @@
 const { query } = require('../config/db');
 
+const DEFAULT_OPEN_TIME = '09:00';
+const DEFAULT_CLOSE_TIME = '17:00';
+const SLOT_INTERVAL_MINUTES = 30;
+const PERIOD_RANGES = {
+  morning: { start: '05:00', end: '11:59' },
+  afternoon: { start: '12:00', end: '15:59' },
+  evening: { start: '16:00', end: '18:59' },
+  night: { start: '19:00', end: '23:59' },
+};
+
 /**
  * Appointment Model
  * Handles all database operations for doctor appointments
  */
 
 class Appointment {
+  static parseTimeToMinutes(timeValue) {
+    if (typeof timeValue !== 'string') {
+      return null;
+    }
+
+    const match = timeValue.match(/^(\d{2}):(\d{2})$/);
+    if (!match) {
+      return null;
+    }
+
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) {
+      return null;
+    }
+
+    return hours * 60 + minutes;
+  }
+
+  static formatMinutes(totalMinutes) {
+    const hours = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+    const minutes = String(totalMinutes % 60).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  }
+
+  static getWeekdayKey(appointmentDate) {
+    const date = new Date(appointmentDate);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return date.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toLowerCase();
+  }
+
+  static normalizeAvailabilityIntervals(rawIntervals) {
+    if (!Array.isArray(rawIntervals)) {
+      return [];
+    }
+
+    return rawIntervals
+      .map((interval) => {
+        if (typeof interval !== 'string') {
+          return null;
+        }
+
+        const [start, end] = interval.split('-').map((value) => value && value.trim());
+        const startMinutes = this.parseTimeToMinutes(start);
+        const endMinutes = this.parseTimeToMinutes(end);
+
+        if (startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+          return null;
+        }
+
+        return { startMinutes, endMinutes };
+      })
+      .filter(Boolean);
+  }
+
+  static buildSlotsFromIntervals(intervals) {
+    const slots = [];
+
+    intervals.forEach(({ startMinutes, endMinutes }) => {
+      for (
+        let currentMinutes = startMinutes;
+        currentMinutes + SLOT_INTERVAL_MINUTES <= endMinutes;
+        currentMinutes += SLOT_INTERVAL_MINUTES
+      ) {
+        slots.push(this.formatMinutes(currentMinutes));
+      }
+    });
+
+    return [...new Set(slots)].sort();
+  }
+
+  static getDefaultIntervals(doctor = {}) {
+    const openMinutes = this.parseTimeToMinutes(doctor.opens_at || DEFAULT_OPEN_TIME) ?? this.parseTimeToMinutes(DEFAULT_OPEN_TIME);
+    const closeMinutes = this.parseTimeToMinutes(doctor.closes_at || DEFAULT_CLOSE_TIME) ?? this.parseTimeToMinutes(DEFAULT_CLOSE_TIME);
+
+    if (closeMinutes <= openMinutes) {
+      return [{ startMinutes: this.parseTimeToMinutes(DEFAULT_OPEN_TIME), endMinutes: this.parseTimeToMinutes(DEFAULT_CLOSE_TIME) }];
+    }
+
+    return [{ startMinutes: openMinutes, endMinutes: closeMinutes }];
+  }
+
+  static getIntervalsForDoctor(doctor, appointmentDate) {
+    const weekdayKey = this.getWeekdayKey(appointmentDate);
+    const rawAvailability = doctor && typeof doctor.availability === 'object' ? doctor.availability : null;
+
+    if (weekdayKey && rawAvailability && Object.prototype.hasOwnProperty.call(rawAvailability, weekdayKey)) {
+      const parsedIntervals = this.normalizeAvailabilityIntervals(rawAvailability[weekdayKey]);
+      return parsedIntervals;
+    }
+
+    return this.getDefaultIntervals(doctor);
+  }
+
+  static isTimeInPeriod(timeValue, timePeriod) {
+    const range = PERIOD_RANGES[timePeriod];
+    const minutes = this.parseTimeToMinutes(timeValue);
+    if (!range || minutes == null) {
+      return false;
+    }
+
+    const startMinutes = this.parseTimeToMinutes(range.start);
+    const endMinutes = this.parseTimeToMinutes(range.end);
+    return minutes >= startMinutes && minutes <= endMinutes;
+  }
+
+  static getTimeSlots(time_period, doctor = {}, appointmentDate = null) {
+    const intervals = this.getIntervalsForDoctor(doctor, appointmentDate);
+    const allDoctorSlots = this.buildSlotsFromIntervals(intervals);
+
+    if (!time_period) {
+      return allDoctorSlots;
+    }
+
+    return allDoctorSlots.filter((slot) => this.isTimeInPeriod(slot, time_period));
+  }
+
   /**
    * Create the appointments table
    */
@@ -259,6 +389,17 @@ class Appointment {
    * Reserves slot during pending_payment to prevent double-booking
    */
   static async isTimeSlotAvailable(doctor_id, appointment_date, time_period, time_slot) {
+    const Doctor = require('./Doctor');
+    const doctor = await Doctor.findById(doctor_id);
+    if (!doctor) {
+      return false;
+    }
+
+    const validSlots = this.getTimeSlots(time_period, doctor, appointment_date);
+    if (!validSlots.includes(time_slot)) {
+      return false;
+    }
+
     const result = await query(
       `SELECT COUNT(*) as count FROM appointments 
        WHERE doctor_id = $1 
@@ -276,6 +417,12 @@ class Appointment {
    * Reserves slots during pending_payment to prevent double-booking
    */
   static async getAvailableSlots(doctor_id, appointment_date, time_period) {
+    const Doctor = require('./Doctor');
+    const doctor = await Doctor.findById(doctor_id);
+    if (!doctor) {
+      return [];
+    }
+
     const bookedSlots = await query(
       `SELECT time_slot FROM appointments 
        WHERE doctor_id = $1 
@@ -286,7 +433,7 @@ class Appointment {
     );
 
     const bookedSlotsList = bookedSlots.rows.map(slot => slot.time_slot);
-    const allSlots = Appointment.getTimeSlots(time_period);
+    const allSlots = Appointment.getTimeSlots(time_period, doctor, appointment_date);
     const availableSlots = allSlots.filter(slot => !bookedSlotsList.includes(slot));
 
     return availableSlots;
@@ -295,19 +442,6 @@ class Appointment {
   /**
    * Generate time slots based on time period
    * Returns array of time slot strings
-   */
-  static getTimeSlots(time_period) {
-    const slots = {
-      morning: ['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30'],
-      afternoon: ['12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30'],
-      evening: ['16:00', '16:30', '17:00', '17:30', '18:00', '18:30'],
-      night: ['19:00', '19:30', '20:00', '20:30', '21:00']
-    };
-    return slots[time_period] || [];
-  }
-
-  /**
-   * Get all available doctors for a specific date and time period
    */
   static async getAvailableDoctors(appointment_date, time_period) {
     const result = await query(
@@ -366,6 +500,12 @@ class Appointment {
    */
   static async getDayAvailability(doctor_id, appointment_date) {
     try {
+      const Doctor = require('./Doctor');
+      const doctor = await Doctor.findById(doctor_id);
+      if (!doctor) {
+        return null;
+      }
+
       const timePeriods = ['morning', 'afternoon', 'evening', 'night'];
       const availability = {};
 
