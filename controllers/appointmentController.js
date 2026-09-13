@@ -251,14 +251,6 @@ class AppointmentController {
         });
       }
 
-      const validSlots = Appointment.getTimeSlots(timePeriod, doctor, appointmentDate);
-      if (!validSlots.includes(timeSlot)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid time slot for the selected time period'
-        });
-      }
-
       // Validate appointment date
       const selectedDate = new Date(appointmentDate);
       const today = new Date();
@@ -294,6 +286,14 @@ class AppointmentController {
         return res.status(400).json({
           success: false,
           message: 'Doctor is not available for appointments'
+        });
+      }
+
+      const validSlots = Appointment.getTimeSlots(timePeriod, doctor, appointmentDate);
+      if (!validSlots.includes(timeSlot)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid time slot for the selected time period'
         });
       }
 
