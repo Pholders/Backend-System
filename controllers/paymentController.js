@@ -200,13 +200,25 @@ class PaymentController {
       }
 
       try {
-        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+        const expectedPaymentIntentId = payment.stripe_payment_intent_id || payment.stripe_transaction_id;
+        if (expectedPaymentIntentId && expectedPaymentIntentId !== stripePaymentIntentId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Stripe Payment Intent does not match this payment'
+          });
+        }
+
+        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
+          expand: ['latest_charge']
+        });
 
         if (intent.status === 'succeeded') {
+          const charge = intent.latest_charge;
+
           // Update payment status to completed
           const updatedPayment = await Payment.updatePaymentStatus(paymentId, 'completed', {
-            stripe_transaction_id: intent.charges.data[0].id,
-            receipt_url: intent.charges.data[0].receipt_url
+            stripe_transaction_id: typeof charge === 'string' ? charge : charge?.id || null,
+            receipt_url: typeof charge === 'string' ? null : charge?.receipt_url || null
           });
 
           // Confirm payment and change appointment status from pending_payment to scheduled
