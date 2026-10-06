@@ -159,6 +159,50 @@ For your security, never share this code with anyone.`,
   }
 
   /**
+   * Send a plain email that the caller has already composed.
+   *
+   * Callers that build their own subject and body — sharing a prescription,
+   * notifying a revoke — need this rather than one of the templated senders
+   * above. Both call sites in prescriptionController have always invoked it;
+   * it was simply never written, so sharing a script and revoking one both
+   * returned 500 after doing their work.
+   */
+  async sendEmail({ to, subject, html, text, from, attachments }) {
+    if (!to || !subject || (!html && !text)) {
+      throw new Error('sendEmail requires `to`, `subject` and `html` or `text`');
+    }
+
+    const mailOptions = {
+      from: from || `"Pholders Healthcare" <${this.getNotificationFromAddress()}>`,
+      to,
+      subject,
+      ...(html ? { html } : {}),
+      ...(text ? { text } : {}),
+      ...(attachments ? { attachments } : {}),
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Email sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      // Same dev-mode fallback as the OTP senders: without it a missing SMTP
+      // config fails the whole request for work that already succeeded.
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('⚠️  SMTP send failed, falling back to console (dev mode):', error.message);
+        console.log('────────────────────────────────────────────');
+        console.log('📧 Development Email');
+        console.log('   To:     ', to);
+        console.log('   Subject:', subject);
+        console.log('────────────────────────────────────────────');
+        return { success: true, devMode: true };
+      }
+      console.error('❌ Email sending failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Send email verification OTP (for signup activation)
    * Visually identical to the login OTP, but with a distinct subject and copy
    * so users understand they're verifying ownership of the email address.

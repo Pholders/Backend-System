@@ -21,7 +21,7 @@ class ReviewController {
       }
 
       // Validate doctor exists
-      const doctor = await Doctor.getById(doctorId);
+      const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({
           success: false,
@@ -89,7 +89,7 @@ class ReviewController {
       const offset = parseInt(req.query.offset) || 0;
 
       // Validate doctor exists
-      const doctor = await Doctor.getById(doctorId);
+      const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({
           success: false,
@@ -151,7 +151,7 @@ class ReviewController {
       const { doctorId } = req.params;
 
       // Validate doctor exists
-      const doctor = await Doctor.getById(doctorId);
+      const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({
           success: false,

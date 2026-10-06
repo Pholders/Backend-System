@@ -268,7 +268,8 @@ class Prescription {
   static async getByDoctorId(doctorId, limit = 50, offset = 0) {
     const getQuery = `
       SELECT id, prescription_number, diagnosis, signature_status, created_at,
-             patient_name, patient_id, is_revoked, appointment_id
+             patient_name, patient_id, is_revoked, revoke_reason, appointment_id,
+             is_dispensed, dispensed_at, dispensed_by_pharmacy_name
       FROM prescriptions
       WHERE doctor_id = $1
       ORDER BY created_at DESC

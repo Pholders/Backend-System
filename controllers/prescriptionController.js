@@ -973,9 +973,20 @@ class PrescriptionController {
             id: p.id,
             prescriptionNumber: p.prescription_number,
             patient: p.patient_name,
+            // The doctor UI needs the patient to open a record from a script,
+            // and the revoke/dispense state to show it. All of this was
+            // already queried and then dropped here.
+            patientId: p.patient_id,
+            appointmentId: p.appointment_id,
             diagnosis: p.diagnosis,
             status: p.signature_status,
-            createdAt: p.created_at
+            createdAt: p.created_at,
+            isRevoked: p.is_revoked,
+            revokeReason: p.revoke_reason,
+            // Doctors display dispensing, they do not perform it.
+            isDispensed: p.is_dispensed,
+            dispensedAt: p.dispensed_at,
+            dispensedByPharmacyName: p.dispensed_by_pharmacy_name
           }))
         }
       });
