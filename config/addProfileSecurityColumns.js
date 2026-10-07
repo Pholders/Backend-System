@@ -73,7 +73,11 @@ const runMigration = async () => {
           'account_deletion_requested', 'account_deleted', 'delete_account_request',
           'payment_init', 'payment_confirm', 'payment_cash', 'payment_medical_aid',
           'security_alert_reviewed', 'security_alerts_bulk_updated',
-          'email_verification_sent', 'email_verification', 'email_verification_resend'
+          'email_verification_sent', 'email_verification', 'email_verification_resend',
+          -- reviewController writes these on every review write. They were
+          -- missing, so the insert succeeded and then the audit log violated
+          -- this constraint, surfacing as a 500 that hid the real cause.
+          'review_submitted', 'review_update', 'review_delete'
         ));
     `);
     console.log('✅ Extended audit_logs event_type CHECK');
