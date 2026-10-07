@@ -27,6 +27,9 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const legalRoutes = require('./routes/legalRoutes');
+const supportRoutes = require('./routes/supportRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -118,6 +121,15 @@ app.use('/api', bookingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
+
+// These three were written but never mounted, so every route in them 404'd.
+// The prefixes are the ones their own controllers document. Most visibly this
+// is what lets a patient record their medical aid at all — without it
+// medical_aid_schemes could never be written, and a doctor search filtered by
+// cover could never match anybody.
+app.use('/api/profile', profileRoutes);
+app.use('/api/legal', legalRoutes);
+app.use('/api/support', supportRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS
