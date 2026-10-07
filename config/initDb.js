@@ -10,6 +10,7 @@ const DeviceToken = require('../models/DeviceToken');
 const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
+const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
@@ -71,6 +72,10 @@ const initializeDatabase = async () => {
 
     // Medical aid (medical_aid_schemes, medical_aid_claims, invoices)
     await createMedicalAidTables();
+
+    // Which medical aids a doctor accepts, so patients can filter on cover.
+    // Runs after the doctors table exists.
+    await addDoctorMedicalAids();
 
     // Support tickets
     await createSupportTicketsTable();

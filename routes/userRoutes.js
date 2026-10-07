@@ -127,6 +127,9 @@ router.post('/doctor/verify-otp', preventAuthenticated, DoctorController.verifyO
 router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
 router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
 
+// Medical aid catalogue — doctors pick from it, patients read the names.
+router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
+
 router.get('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.getProfile);
 router.put('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.updateProfile);
 
