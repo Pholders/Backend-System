@@ -606,6 +606,60 @@ class DoctorController {
         }
       }
 
+      // Re-geocode when the practice moves. Signup geocodes the address, but
+      // this endpoint used to write clinic_address and leave the coordinates
+      // alone, so a doctor who relocated stayed discoverable at their old
+      // position — which works directly against "find doctor nearest to them".
+      //
+      // Unlike signup this never fails the save. The geocoder resolves place
+      // names far more reliably than street addresses, so refusing the whole
+      // profile update over it would block a doctor from correcting their own
+      // details. The city is tried as a fallback, and the response says
+      // whether the pin actually moved.
+      let locationUpdated = false;
+      let locationWarning = null;
+
+      const movedPractice =
+        updateData.clinic_address !== undefined ||
+        updateData.city !== undefined ||
+        updateData.province !== undefined;
+
+      if (movedPractice && updateData.latitude === undefined) {
+        const existing = await Doctor.findById(doctorId);
+        const address = updateData.clinic_address ?? (existing && existing.clinic_address);
+        const city = updateData.city ?? (existing && existing.city);
+        const province = updateData.province ?? (existing && existing.province);
+
+        // Most precise first, then progressively coarser.
+        const candidates = [
+          address,
+          [city, province, 'South Africa'].filter(Boolean).join(', '),
+        ].filter((value) => value && String(value).trim());
+
+        for (const candidate of candidates) {
+          try {
+            const result = await GeocodingService.processLocation({
+              clinic_address: candidate
+            });
+            if (result.success) {
+              updateData.latitude = result.latitude;
+              updateData.longitude = result.longitude;
+              locationUpdated = true;
+              break;
+            }
+          } catch (geoError) {
+            console.error('Geocoding error on profile update:', geoError);
+          }
+        }
+
+        if (!locationUpdated) {
+          locationWarning =
+            'The practice address could not be placed on the map, so your '
+            + 'location is unchanged. Patients will still find you at your '
+            + 'previous address.';
+        }
+      }
+
       // Saving only the scheme list is legitimate, and Doctor.update builds
       // no valid statement from an empty object.
       const updatedDoctor = Object.keys(updateData).length > 0
@@ -630,6 +684,8 @@ class DoctorController {
       res.status(200).json({
         success: true,
         message: 'Profile updated successfully',
+        location_updated: locationUpdated,
+        ...(locationWarning ? { location_warning: locationWarning } : {}),
         data: updatedDoctor
       });
 
