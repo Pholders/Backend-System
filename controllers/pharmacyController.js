@@ -878,6 +878,15 @@ class PharmacyController {
       }
 
       await Pharmacy.markEmailVerified(pharmacy.id);
+
+      // This endpoint told the pharmacy "you can now log in" while leaving
+      // status inactive, so the next login was refused. Both OTP paths prove
+      // the same thing — that they own the address — so verifying the email
+      // activates the account, as verify-otp already did.
+      if (pharmacy.status !== 'active') {
+        await Pharmacy.update(pharmacy.id, { status: 'active' });
+      }
+
       await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'success');
 
       return res.status(200).json({
@@ -885,7 +894,8 @@ class PharmacyController {
         message: 'Email verified successfully. You can now log in.',
         data: {
           email: pharmacy.email,
-          email_verified: true
+          email_verified: true,
+          status: 'active'
         }
       });
     } catch (error) {
@@ -921,13 +931,23 @@ class PharmacyController {
 
       const pharmacy = await Pharmacy.findByEmail(email);
 
-      // Don't reveal whether the account exists or its verification state
-      if (!pharmacy || pharmacy.email_verified === true) {
+      // A pharmacy that is not active still needs activating, and only a
+      // `signup` OTP does that — `verify-otp` rejects every other purpose and
+      // is the sole path that sets status = 'active'. Issuing
+      // `email_verification` here left an account that could never be
+      // activated once its signup email went astray.
+      const needsActivation = pharmacy && pharmacy.status !== 'active';
+      const purpose = needsActivation ? 'signup' : 'email_verification';
+
+      // Don't reveal whether the account exists or its verification state.
+      // An inactive pharmacy still gets a code even once its email is
+      // verified, otherwise it is stuck with nothing left to try.
+      if (!pharmacy || (pharmacy.email_verified === true && !needsActivation)) {
         return res.status(200).json(genericResponse);
       }
 
       // Rate-limit: reject if a code was issued in the last 60 seconds
-      const latest = await OTP.getLatest(pharmacy.id, 'email_verification', 'pharmacy');
+      const latest = await OTP.getLatest(pharmacy.id, purpose, 'pharmacy');
       if (latest) {
         const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
         if (ageSeconds < 60) {
@@ -939,7 +959,7 @@ class PharmacyController {
         }
       }
 
-      const otpRecord = await OTP.create(pharmacy.id, 'email_verification', 'pharmacy', 15);
+      const otpRecord = await OTP.create(pharmacy.id, purpose, 'pharmacy', 15);
       await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification_resend', 'success');
 
       try {
