@@ -474,6 +474,64 @@ class PharmacyController {
   /**
    * Get Pharmacy Profile
    */
+  /**
+   * Active pharmacies a patient can claim a prescription at.
+   *
+   * Claiming requires a pharmacyId, and nothing patient-callable listed
+   * pharmacies, so a patient had no way to choose one and no script ever
+   * reached a pharmacy. Only active pharmacies are returned, and only the
+   * fields needed to pick one — never credentials or licence details.
+   */
+  static async listForPatients(req, res) {
+    try {
+      const { latitude, longitude, radiusKm = 25, city, limit = 100 } = req.query;
+
+      let pharmacies;
+      if (latitude !== undefined && longitude !== undefined) {
+        pharmacies = await Pharmacy.findNearby(
+          parseFloat(latitude),
+          parseFloat(longitude),
+          parseFloat(radiusKm)
+        );
+      } else if (city) {
+        pharmacies = await Pharmacy.findByCity(city);
+      } else {
+        pharmacies = await Pharmacy.findAll(parseInt(limit), 0);
+      }
+
+      const active = pharmacies.filter((p) => p.status === 'active');
+
+      res.status(200).json({
+        success: true,
+        message: 'Pharmacies retrieved',
+        data: {
+          total: active.length,
+          pharmacies: active.map((p) => ({
+            id: p.id,
+            name: p.pharmacy_name,
+            address: p.address,
+            city: p.city,
+            province: p.province,
+            phone: p.phone,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            deliveryAvailable: p.delivery_available === true,
+            ...(p.distance !== undefined
+              ? { distanceKm: parseFloat(Number(p.distance).toFixed(2)) }
+              : {})
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('List pharmacies for patients error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching pharmacies',
+        error: error.message
+      });
+    }
+  }
+
   static async getProfile(req, res) {
     try {
       const pharmacyId = req.user.id;

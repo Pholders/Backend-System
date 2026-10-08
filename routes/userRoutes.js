@@ -151,6 +151,10 @@ router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patie
 /**
  * Pharmacy Routes
  */
+// Pharmacies a patient can claim a prescription at. Claiming needs a
+// pharmacyId and nothing patient-callable listed them.
+router.get('/pharmacies', authMiddleware, requireRole('patient'), PharmacyController.listForPatients);
+
 router.post('/pharmacy/signup', preventAuthenticated, PharmacyController.signup);
 router.post('/pharmacy/login', preventAuthenticated, PharmacyController.login);
 router.post('/pharmacy/verify-otp', preventAuthenticated, PharmacyController.verifyOTP);
