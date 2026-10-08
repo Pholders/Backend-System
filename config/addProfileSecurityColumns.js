@@ -78,7 +78,13 @@ const runMigration = async () => {
           -- missing, so the insert succeeded and then the audit log violated
           -- this constraint, surfacing as a 500 that hid the real cause.
           'review_submitted', 'review_update', 'review_delete',
-          'pharmacy_status_changed'
+          'pharmacy_status_changed',
+          -- Each of these is written by live code and was missing, so the
+          -- request did its work and then died on this constraint with a
+          -- message about audit_logs. nearby_doctors_search is the worst of
+          -- them: it fires on every signed-in patient's doctor search, so
+          -- that search has been returning 500 for as long as it has existed.
+          'nearby_doctors_search', 'delete_account_cancelled', 'tier_upgrade'
         ));
     `);
     console.log('✅ Extended audit_logs event_type CHECK');
