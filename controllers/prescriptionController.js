@@ -307,8 +307,22 @@ class PrescriptionController {
         [session.id]
       );
 
-      // Generate QR code
+      // Generate the QR code and STORE its token. Without the store the
+      // token exists only in this response: GET /prescriptions/qr/:token
+      // looks it up in prescription_qr_access and finds nothing, so every
+      // link and QR issued before this was dead the moment it was minted.
       const qrCodeData = QRCodeService.generateQRCodeData(prescription);
+
+      let qrStored = false;
+      try {
+        await Prescription.generateQRCodeAccess(prescriptionId, qrCodeData.qrToken);
+        qrStored = true;
+      } catch (qrError) {
+        // The signature is the part that matters legally, so a QR failure
+        // does not fail the signing — but a code that cannot be redeemed is
+        // not returned either, rather than handing out a dead link.
+        console.error('❌ Could not store QR access token:', qrError.message);
+      }
 
       res.status(200).json({
         success: true,
@@ -320,8 +334,11 @@ class PrescriptionController {
           signatureTimestamp: timestamp,
           signatureMethod: 'RSA-SHA256',
           signatureFingerprint: signatureFingerprint,
-          qrCode: qrCodeData.qrString,
-          accessLink: qrCodeData.accessLink,
+          qrAvailable: qrStored,
+          ...(qrStored ? {
+            qrCode: qrCodeData.qrString,
+            accessLink: qrCodeData.accessLink,
+          } : {}),
           medicineCount: prescription.items.length,
           auditTrail: {
             signedBy: prescription.prescriber_name,

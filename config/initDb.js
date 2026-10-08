@@ -12,6 +12,7 @@ const { runMigration: createLinkedServicesTables } = require('./createLinkedServ
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
 const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
 const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
+const { runMigration: addQRCodeOneTimeUse } = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
@@ -130,6 +131,11 @@ const initializeDatabase = async () => {
     // In-app reminders. Runs after patients and appointments exist, since it
     // references both.
     await createInAppNotifications();
+
+    // prescription_qr_access, which every prescription QR link depends on.
+    // The migration existed and was never registered here, so the table was
+    // never created and no QR token could be stored.
+    await addQRCodeOneTimeUse();
 
     // Create pharmacy partnership tables
     await addPharmacyPartnerships();
