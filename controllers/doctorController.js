@@ -705,7 +705,10 @@ class DoctorController {
    */
   static async getNearbyDoctors(req, res) {
     try {
-      const { latitude, longitude, radius = 15, coveredByMyMedicalAid } = req.body;
+      // The patient app sends radius_km; earlier callers send radius. Taking
+      // only one of them silently ignored whatever the patient chose.
+      const { latitude, longitude, coveredByMyMedicalAid } = req.body;
+      const radius = req.body.radius ?? req.body.radius_km ?? 15;
       const userId = req.user ? req.user.id : null;
 
       // Validate required location parameters
