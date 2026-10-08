@@ -77,7 +77,8 @@ const runMigration = async () => {
           -- reviewController writes these on every review write. They were
           -- missing, so the insert succeeded and then the audit log violated
           -- this constraint, surfacing as a 500 that hid the real cause.
-          'review_submitted', 'review_update', 'review_delete'
+          'review_submitted', 'review_update', 'review_delete',
+          'pharmacy_status_changed'
         ));
     `);
     console.log('✅ Extended audit_logs event_type CHECK');
