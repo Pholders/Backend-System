@@ -11,6 +11,7 @@ const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurit
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
 const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
+const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
@@ -125,6 +126,10 @@ const initializeDatabase = async () => {
 
     // Run appointment reminders migration
     await addAppointmentReminders();
+
+    // In-app reminders. Runs after patients and appointments exist, since it
+    // references both.
+    await createInAppNotifications();
 
     // Create pharmacy partnership tables
     await addPharmacyPartnerships();
