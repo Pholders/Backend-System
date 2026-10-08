@@ -12,7 +12,8 @@ const { runMigration: createLinkedServicesTables } = require('./createLinkedServ
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
 const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
 const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
-const { runMigration: addQRCodeOneTimeUse } = require('./addQRCodeOneTimeUse');
+// Exports the function directly, unlike the { runMigration } modules above.
+const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
