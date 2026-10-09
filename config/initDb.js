@@ -15,6 +15,7 @@ const { runMigration: createInAppNotifications } = require('./createInAppNotific
 // Exports the function directly, unlike the { runMigration } modules above.
 const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
@@ -82,6 +83,7 @@ const initializeDatabase = async () => {
 
     // Support tickets
     await createSupportTicketsTable();
+    await createChecklistTables();
 
     // Notifications stack
     await Notification.createTable();

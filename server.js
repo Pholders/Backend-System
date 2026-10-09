@@ -30,6 +30,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const legalRoutes = require('./routes/legalRoutes');
 const supportRoutes = require('./routes/supportRoutes');
+const checklistRoutes = require('./routes/checklistRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -44,6 +45,12 @@ const PORT = process.env.PORT || 3000;
 // ============================================================================
 // MIDDLEWARE CONFIGURATION
 // ============================================================================
+
+// The testing checklist carries its own CORS policy and body parser, so it is
+// mounted ahead of the global ones. It is team tooling called from a Claude
+// artifact, whose origin is per-artifact and cannot be put on an allow-list;
+// the policy below would reject it before the router saw the request.
+app.use('/api/checklist', checklistRoutes);
 
 // CORS configuration
 const allowedOrigins = [
