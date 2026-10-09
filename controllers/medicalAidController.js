@@ -1,16 +1,12 @@
-const fs = require('fs');
 const path = require('path');
 const { query } = require('../config/db');
+const storage = require('../services/storage');
 const AuditLog = require('../models/AuditLog');
 const { encrypt, decryptAndMask } = require('../utils/encryption');
 const { sign: signUrl, verify: verifyUrl } = require('../utils/signedUrl');
 
-const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads');
-const CARD_DIR = path.join(UPLOAD_ROOT, 'medical-aid');
-
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
+// Where medical aid cards live within the store, whichever driver backs it.
+const CARD_FOLDER = 'medical-aid';
 
 function buildSchemeResponse(row) {
   if (!row) return null;
@@ -29,15 +25,6 @@ function buildSchemeResponse(row) {
     has_card_back: !!row.card_back_path,
     updated_at: row.updated_at
   };
-}
-
-function relativeFromAbsolute(absPath) {
-  // Storage path stored relative to uploads/ for portability
-  return path.relative(UPLOAD_ROOT, absPath).split(path.sep).join('/');
-}
-
-function absoluteFromRelative(relPath) {
-  return path.join(UPLOAD_ROOT, relPath);
 }
 
 // SCHEME
@@ -171,14 +158,10 @@ async function uploadCard(req, res) {
       });
     }
 
-    ensureDir(CARD_DIR);
-
-    const writeFile = (file, side) => {
+    const storeCard = (file, side) => {
       const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
       const filename = `patient_${patientId}_${side}_${Date.now()}${ext}`;
-      const abs = path.join(CARD_DIR, filename);
-      fs.writeFileSync(abs, file.buffer);
-      return relativeFromAbsolute(abs);
+      return storage.put(file, CARD_FOLDER, filename);
     };
 
     const fields = [];
@@ -186,11 +169,11 @@ async function uploadCard(req, res) {
     let i = 1;
     if (front) {
       fields.push(`card_front_path = $${i++}`);
-      values.push(writeFile(front, 'front'));
+      values.push(await storeCard(front, 'front'));
     }
     if (back) {
       fields.push(`card_back_path = $${i++}`);
-      values.push(writeFile(back, 'back'));
+      values.push(await storeCard(back, 'back'));
     }
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(patientId);
@@ -409,13 +392,20 @@ async function downloadFile(req, res) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const abs = absoluteFromRelative(payload.path);
-    // Path-traversal guard
-    if (!abs.startsWith(UPLOAD_ROOT)) {
+    // The key came out of a signed token, but it is still screened: a driver
+    // must never be handed a key that climbs out of its store.
+    if (!storage.isSafeKey(payload.path)) {
       return res.status(400).json({ success: false, message: 'Invalid path' });
     }
-    if (!fs.existsSync(abs)) {
-      return res.status(404).json({ success: false, message: 'File not found' });
+
+    let stored;
+    try {
+      stored = await storage.get(payload.path);
+    } catch (err) {
+      if (err && err.code === 'STORAGE_NOT_FOUND') {
+        return res.status(404).json({ success: false, message: 'File not found' });
+      }
+      throw err;
     }
 
     // Best-effort audit (no req.user here)
@@ -428,7 +418,12 @@ async function downloadFile(req, res) {
       );
     } catch (_) { /* swallow */ }
 
-    res.download(abs);
+    res.setHeader('Content-Type', stored.contentType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${path.basename(payload.path)}"`
+    );
+    res.send(stored.buffer);
   } catch (error) {
     console.error('downloadFile error:', error);
     res.status(500).json({ success: false, message: 'Failed to download file' });

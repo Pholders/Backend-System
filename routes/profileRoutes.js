@@ -53,6 +53,10 @@ router.get('/email/verify', ProfileController.verifyEmailChange);
 router.get('/',          authMiddleware, requireRole('patient'), ProfileController.getProfile);
 router.put('/personal',  authMiddleware, requireRole('patient'), ProfileController.updatePersonal);
 router.put('/account',   authMiddleware, requireRole('patient'), ProfileController.updateAccount);
+// Public: avatar URLs are embedded in pages, so this is unauthenticated.
+// The filename carries random bytes, which is what keeps it unguessable.
+router.get('/avatars/:filename', ProfileController.serveAvatar);
+
 router.put('/avatar',    authMiddleware, requireRole('patient'), avatarUpload.single('avatar'), ProfileController.updateAvatar);
 
 // ===== Sprint 2 — Security settings =====

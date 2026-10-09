@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const storage = require('../services/storage');
 const bcrypt = require('bcrypt'); // not needed here; kept import-free below
 const { query } = require('../config/db');
 const cache = require('../services/cacheService');
@@ -23,10 +25,8 @@ const { encrypt, decryptAndMask } = require('../utils/encryption');
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
-const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
-if (!fs.existsSync(AVATARS_DIR)) {
-  fs.mkdirSync(AVATARS_DIR, { recursive: true });
-}
+// Where avatars live within the store, whichever driver backs it.
+const AVATAR_FOLDER = 'avatars';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^\+?[0-9\s\-()]{7,20}$/;
@@ -42,8 +42,9 @@ async function invalidateUserCache(userId, email) {
 }
 
 function buildAvatarUrl(req, filename) {
-  // Served by static route mounted in server.js
-  return `${req.protocol}://${req.get('host')}/uploads/avatars/${filename}`;
+  // Served by serveAvatar below. The previous URL pointed at /uploads, which
+  // nothing ever served, so every stored avatar URL 404'd.
+  return `${req.protocol}://${req.get('host')}/api/profile/avatars/${filename}`;
 }
 
 class ProfileController {
@@ -286,6 +287,41 @@ class ProfileController {
   }
 
   /**
+   * GET /api/profile/avatars/:filename
+   *
+   * Serves an avatar from the store. Unauthenticated on purpose — the URL is
+   * embedded in pages and emails — which is why the filename carries random
+   * bytes rather than being guessable from a patient id.
+   */
+  static async serveAvatar(req, res) {
+    try {
+      const { filename } = req.params;
+      const key = `${AVATAR_FOLDER}/${filename}`;
+
+      if (!storage.isSafeKey(key)) {
+        return res.status(400).json({ success: false, message: 'Invalid path' });
+      }
+
+      let stored;
+      try {
+        stored = await storage.get(key);
+      } catch (err) {
+        if (err && err.code === 'STORAGE_NOT_FOUND') {
+          return res.status(404).json({ success: false, message: 'Avatar not found' });
+        }
+        throw err;
+      }
+
+      res.setHeader('Content-Type', stored.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.send(stored.buffer);
+    } catch (error) {
+      console.error('Serve avatar error:', error);
+      return res.status(500).json({ success: false, message: 'Error loading avatar' });
+    }
+  }
+
+  /**
    * Task 4: PUT /api/profile/avatar
    * Accepts an image upload, stores it, saves URL to patient record, returns the URL.
    * Multer is configured in routes/profileRoutes.js (memory storage, image MIME only).
@@ -298,10 +334,12 @@ class ProfileController {
       }
 
       const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
-      const filename = `patient_${userId}_${Date.now()}${ext}`;
-      const fullPath = path.join(AVATARS_DIR, filename);
+      // A random suffix as well as the timestamp: the URL is unauthenticated,
+      // so a guessable name would expose one patient's photo to another.
+      const suffix = crypto.randomBytes(8).toString('hex');
+      const filename = `patient_${userId}_${Date.now()}_${suffix}${ext}`;
 
-      await fs.promises.writeFile(fullPath, req.file.buffer);
+      await storage.put(req.file, AVATAR_FOLDER, filename);
 
       const url = buildAvatarUrl(req, filename);
 
