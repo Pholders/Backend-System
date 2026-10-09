@@ -364,6 +364,10 @@
     flex: 0 1 200px;
   }
   .ident input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ident input.wanted {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
   .ident-note {
     font-size: 12.5px;
     color: var(--ink-faint);
@@ -745,6 +749,21 @@
 
   function canWrite() { return me.trim().length > 0; }
 
+  var needName = false;
+
+  /**
+   * Called when someone tries to record something without saying who they
+   * are. Says so where they are looking, and puts the caret in the box.
+   */
+  function askForName() {
+    needName = true;
+    render();
+    try {
+      whoEl.focus();
+      whoEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch (e) { /* not fatal */ }
+  }
+
   function readLocal(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
@@ -917,7 +936,7 @@
   // ── writing ────────────────────────────────────────────────────
 
   function setStatus(storyId, status) {
-    if (!canWrite()) { whoEl.focus(); return; }
+    if (!canWrite()) { askForName(); return; }
     var mine = me.trim();
 
     queue = queue.filter(function (q) {
@@ -933,7 +952,7 @@
   }
 
   function addNote(storyId, text) {
-    if (!canWrite()) { whoEl.focus(); return; }
+    if (!canWrite()) { askForName(); return; }
     queue.push({
       kind: "note", tmpId: "q" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
       storyId: storyId, tester: me.trim(), text: text,
@@ -962,7 +981,15 @@
       }
     }
 
-    if (!canWrite()) add("Type your name above to start ticking. ", true);
+    if (!canWrite()) {
+      add(needName
+        ? "Your name first — that is what everyone sees against your ticks. "
+        : "Type your name above, then tick away. ", true);
+      if (needName) {
+        identNoteEl.style.color = "var(--blocked)";
+        return;
+      }
+    }
 
     var waiting = unsentCount();
 
@@ -1069,11 +1096,8 @@
     form.className = "composer";
     var input = document.createElement("input");
     input.type = "text";
-    input.placeholder = canWrite()
-      ? "Add a note — what you saw, or why it is blocked"
-      : "Type your name at the top first";
+    input.placeholder = "Add a note — what you saw, or why it is blocked";
     input.autocomplete = "off";
-    input.disabled = !canWrite();
 
     // A redraw used to wipe whatever was half-typed in here. The text is held
     // outside the DOM now, so rebuilding the row cannot lose it.
@@ -1087,7 +1111,6 @@
     var send = document.createElement("button");
     send.type = "submit";
     send.textContent = "Post";
-    send.disabled = !canWrite();
     form.appendChild(input);
     form.appendChild(send);
     form.addEventListener("submit", function (e) {
@@ -1099,7 +1122,7 @@
     host.appendChild(form);
 
     // Put the caret back where it was, if this is the box being typed in.
-    if (focusedStory === story.id && !input.disabled) {
+    if (focusedStory === story.id) {
       try {
         input.focus();
         var end = input.value.length;
@@ -1157,7 +1180,6 @@
       b.textContent = st.label;
       var pressed = mine ? mine.status === st.key : st.key === "notrun";
       b.setAttribute("aria-pressed", canWrite() && pressed ? "true" : "false");
-      b.disabled = !canWrite();
       b.addEventListener("click", function () { setStatus(story.id, st.key); });
       controls.appendChild(b);
     });
@@ -1249,8 +1271,16 @@
   whoEl.addEventListener("input", function () {
     me = whoEl.value;
     writeLocal(NAME_KEY, me);
+    if (canWrite()) needName = false;
+    whoEl.className = canWrite() ? "" : "wanted";
     render();
   });
+
+  // Nothing can be recorded until this is filled in, so start the caret here.
+  if (!canWrite()) {
+    whoEl.className = "wanted";
+    try { whoEl.focus(); } catch (e) { /* not fatal */ }
+  }
 
   render();
   flush();
