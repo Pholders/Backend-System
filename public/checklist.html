@@ -249,6 +249,24 @@
     text-align: right;
     white-space: nowrap;
   }
+  .pill {
+    display: inline-block;
+    font-family: var(--body);
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-right: 7px;
+    vertical-align: 1px;
+  }
+  .p-pass { background: var(--pass); }
+  .p-fail { background: var(--fail); }
+  .p-blocked { background: var(--blocked); }
+
+  .row.v-pass { box-shadow: inset 3px 0 0 var(--pass); }
+  .row.v-fail { box-shadow: inset 3px 0 0 var(--fail); }
+  .row.v-blocked { box-shadow: inset 3px 0 0 var(--blocked); }
 
   .controls {
     display: flex;
@@ -517,6 +535,9 @@
     { key: "blocked", label: "Blocked" },
     { key: "notrun",  label: "Not run" }
   ];
+
+  var STATUS_LABEL = Object.create(null);
+  STATUSES.forEach(function (s) { STATUS_LABEL[s.key] = s.label; });
 
   var GROUPS = [
     {
@@ -1165,9 +1186,21 @@
     var meta = document.createElement("div");
     meta.className = "rmeta";
     var newest = latestRun(story.id);
-    meta.textContent = newest ? (newest.tester || "Someone") + " · " + fmtWhen(newest.at) : "";
+    var overall = statusOf(story.id);
+    if (newest) {
+      var pill = document.createElement("span");
+      pill.className = "pill p-" + overall;
+      pill.textContent = STATUS_LABEL[overall] || overall;
+      meta.appendChild(pill);
+      meta.appendChild(document.createTextNode(
+        (newest.tester || "Someone") + " · " + fmtWhen(newest.at)));
+    }
     main.appendChild(meta);
     row.appendChild(main);
+
+    // A stripe down the edge, so a row's state is readable while scrolling
+    // past it rather than only after reading the corner.
+    if (overall !== "notrun") row.className += " v-" + overall;
 
     var controls = document.createElement("div");
     controls.className = "controls";
@@ -1200,7 +1233,7 @@
     // Two people disagreeing about a story is the most interesting state a
     // row can be in, so never hide it behind one headline verdict.
     var everyone = rowsFor(story.id);
-    if (everyone.length > 1) {
+    if (everyone.length > 1 || (everyone.length === 1 && everyone[0].tester !== me.trim())) {
       var vd = document.createElement("div");
       vd.className = "verdicts";
       vd.textContent = everyone.map(function (v) {
