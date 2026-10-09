@@ -1,0 +1,1271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root { color-scheme: light; box-sizing: border-box; }
+  html { scroll-padding-top: 0; }
+  body { margin: 0; padding: 0; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; }
+  img { max-width: 100%; }
+  [hidden]:not([hidden="until-found"]) { display: none !important; }
+</style>
+<title>PHolders Phase 1 Testing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Layout: a status band of four app cards, then journey sections of
+     checklist rows that expand into a comment thread. */
+  :root {
+    --ink: #11201f;
+    --ink-soft: #4a6361;
+    --ink-faint: #7b918f;
+    --ground: #f2f6f5;
+    --card: #ffffff;
+    --line: #dde8e7;
+    --accent: #0f7a80;
+    --accent-soft: #e3f2f1;
+    --pass: #1b7f4b;
+    --fail: #b3261e;
+    --blocked: #a15c00;
+    --idle: #8a9a99;
+
+    --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --body: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e7f0ef;
+      --ink-soft: #a3b8b6;
+      --ink-faint: #748a88;
+      --ground: #0d1716;
+      --card: #142221;
+      --line: #223534;
+      --accent: #45bfc3;
+      --accent-soft: #15322f;
+      --pass: #4cc47f;
+      --fail: #f08b84;
+      --blocked: #e0a955;
+      --idle: #6d8280;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e7f0ef;
+    --ink-soft: #a3b8b6;
+    --ink-faint: #748a88;
+    --ground: #0d1716;
+    --card: #142221;
+    --line: #223534;
+    --accent: #45bfc3;
+    --accent-soft: #15322f;
+    --pass: #4cc47f;
+    --fail: #f08b84;
+    --blocked: #e0a955;
+    --idle: #6d8280;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 32px 72px;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(26px, 4vw, 36px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .lede {
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 28px;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 34px 0 12px;
+  }
+
+  /* ── status band ───────────────────────────────────────────── */
+  .apps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+  }
+  .app {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .app h3 {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 2px;
+  }
+  .app .state {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  .app p {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+
+  .note {
+    margin-top: 14px;
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+  .note strong { color: var(--ink); }
+
+  /* ── progress ──────────────────────────────────────────────── */
+  .progress {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    align-items: baseline;
+    margin-top: 6px;
+  }
+  .tally {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .tally b {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+    display: flex;
+    margin-top: 10px;
+  }
+  .bar span { display: block; height: 100%; }
+
+  /* ── checklist ─────────────────────────────────────────────── */
+  .group { margin-top: 26px; }
+  .group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .group-head h2 { margin: 0 0 8px; }
+  .group-head .count {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+  .group > p.blurb {
+    margin: 0 0 12px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    max-width: 70ch;
+  }
+
+  .rows {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .row {
+    border-top: 1px solid var(--line);
+    padding: 12px 16px;
+  }
+  .row:first-child { border-top: none; }
+  .row.key { background: linear-gradient(90deg, var(--accent-soft), transparent 40%); }
+
+  .row-main {
+    display: grid;
+    grid-template-columns: 54px 1fr auto;
+    gap: 12px;
+    align-items: start;
+  }
+  .rid {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .rtext { min-width: 0; }
+  .rtext .what { font-weight: 600; }
+  .rtext .expect {
+    display: block;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+  }
+  .rtext .how {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+    word-break: break-word;
+  }
+  .rmeta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 0 66px;
+    align-items: center;
+  }
+  @media (max-width: 560px) {
+    .row-main { grid-template-columns: 46px 1fr; }
+    .rmeta { grid-column: 2; text-align: left; margin-top: 4px; }
+    .controls { margin-left: 0; }
+  }
+
+  button {
+    font: inherit;
+    font-size: 12.5px;
+    font-family: var(--body);
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink-soft);
+    border-radius: 999px;
+    padding: 4px 11px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--ink); }
+  button:disabled { cursor: default; opacity: 0.55; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  button[aria-pressed="true"] { color: #fff; border-color: transparent; font-weight: 600; }
+  button.s-pass[aria-pressed="true"] { background: var(--pass); }
+  button.s-fail[aria-pressed="true"] { background: var(--fail); }
+  button.s-blocked[aria-pressed="true"] { background: var(--blocked); }
+  button.s-notrun[aria-pressed="true"] { background: var(--idle); }
+
+  .link {
+    border: none;
+    background: none;
+    color: var(--accent);
+    padding: 4px 2px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; margin-right: 6px; vertical-align: 1px;
+    background: var(--idle);
+  }
+  .dot.pass { background: var(--pass); }
+  .dot.fail { background: var(--fail); }
+  .dot.blocked { background: var(--blocked); }
+
+  /* ── comments ──────────────────────────────────────────────── */
+  .thread { margin: 10px 0 2px 66px; }
+  @media (max-width: 560px) { .thread { margin-left: 0; } }
+  .comment {
+    border-left: 2px solid var(--line);
+    padding: 2px 0 2px 10px;
+    margin-bottom: 8px;
+    font-size: 13.5px;
+  }
+  .comment .who {
+    font-weight: 600;
+    font-size: 12.5px;
+  }
+  .comment .when {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-left: 6px;
+  }
+  .comment p { margin: 1px 0 0; color: var(--ink-soft); }
+
+  .composer { display: flex; gap: 8px; margin-top: 8px; }
+  .composer input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: 13.5px;
+    padding: 7px 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--ground);
+    color: var(--ink);
+  }
+  .composer input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .ident {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 11px 14px;
+  }
+  .ident label {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .ident input {
+    font: inherit;
+    font-size: 13.5px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--ground);
+    color: var(--ink);
+    min-width: 150px;
+    flex: 0 1 200px;
+  }
+  .ident input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ident-note {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin: 7px 0 20px;
+  }
+  .ident-note strong { color: var(--ink-soft); }
+
+  .verdicts {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin: 6px 0 0 66px;
+  }
+  @media (max-width: 560px) { .verdicts { margin-left: 0; } }
+
+  .stamp {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  .known { margin-top: 30px; }
+  .known ul { margin: 0; padding-left: 20px; color: var(--ink-soft); font-size: 13.5px; }
+  .known li { margin-bottom: 4px; }
+
+  footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <h1>PHolders Phase 1 Testing</h1>
+  <p class="lede">
+    Phase 1 is one loop that crosses four apps. Every story below is checked
+    off by a person, with their name and any notes kept against it, so the
+    team can see what has actually been exercised rather than what was built.
+  </p>
+
+  <div class="ident">
+    <label for="who">Your name</label>
+    <input id="who" type="text" placeholder="e.g. Oratile" autocomplete="name" spellcheck="false">
+  </div>
+  <div class="ident-note" id="ident-note"></div>
+
+  <h2>Where each app stands</h2>
+  <div class="apps">
+    <div class="app">
+      <h3>Doctor</h3>
+      <div class="state">CODE COMPLETE</div>
+      <p>All eight obligations the SRS sets out: account, discoverability, bookings, scripts, AES signing, release, medical aid, rating.</p>
+    </div>
+    <div class="app">
+      <h3>Patient</h3>
+      <div class="state">CODE COMPLETE</div>
+      <p>Search, booking, all four payment paths, prescriptions, sending a script to a pharmacy, reviews, reminders.</p>
+    </div>
+    <div class="app">
+      <h3>Pharmacy</h3>
+      <div class="state">API VERIFIED · SCREENS UNTESTED</div>
+      <p>Dispensing queue and the order workflow. Claiming and dispensing are proven through the API; the screens themselves have not been used.</p>
+    </div>
+    <div class="app">
+      <h3>Admin</h3>
+      <div class="state">CODE COMPLETE</div>
+      <p>Pharmacy directory, approve and suspend, groups, agreements, compliance, claim routing.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>The backend is deployed and the loop works end to end.</strong>
+    Proven on the live system: a doctor signs a script, the patient sends it to
+    a pharmacy, the pharmacy dispenses it, and the doctor sees it come back.
+    Also verified — patient doctor search, which used to fail for every
+    signed-in patient; the medical aid cover filter, including a scheme typed
+    differently to the doctor's; the QR code's one-time lifecycle; pharmacy
+    activation; and medical aid encryption.
+    <br><br>
+    <strong>One known gap.</strong> Prescription QR links still carry
+    <code>http://localhost:3000</code>, because the web app that serves them is
+    not deployed yet. The QR itself works — a pharmacy scanning the code is
+    unaffected — but the emailed link will not open. The stories in
+    <em>The prescription QR link</em> are expected to fail until that app ships.
+    <br><br>
+    <strong>New on 9 October.</strong> Downloading a prescription now produces
+    an actual PDF instead of JSON describing one, and claims and invoices
+    accept the supporting document their column was always meant to hold. File
+    storage moved behind a driver so it can point at Firebase instead of a disk
+    that does not survive a deploy. None of this has been exercised by anyone
+    yet, so <em>Documents and PDFs</em> is the newest and least trustworthy
+    section on this page.
+    <br><br>
+    <strong>Least tested:</strong> the pharmacy screens. The queue, claiming and
+    dispensing are all confirmed working through the API, but nobody has clicked
+    through the screens themselves, so that section is the most likely to turn
+    up something real.
+  </div>
+
+  <h2>Progress</h2>
+  <div class="progress" id="tallies">
+    <span class="tally">Loading results…</span>
+  </div>
+  <div class="bar" id="bar"></div>
+
+  <div id="groups"></div>
+
+  <div class="known">
+    <h2>Known, not defects</h2>
+    <ul>
+      <li>SMS and push reminders are console stubs.</li>
+      <li>Uploaded files are erased by the next deploy until <code>STORAGE_DRIVER</code> is set to <code>firebase</code> on Render. The Firebase project has not been created yet.</li>
+      <li>Nothing in the platform creates invoice rows, so an invoice has no document to attach to. Claims are created by the pharmacy order flow and do work.</li>
+      <li>A prescription PDF is generated on each request and never stored, so there is nothing to go stale.</li>
+      <li>Prescription QR links point at localhost until the web app is deployed.</li>
+      <li>Inventory has no backend at all — no routes, controller or model.</li>
+      <li>Refills do not exist as a concept anywhere.</li>
+      <li>Sick notes have no API. The requirement exists (FR-G-020) but is not in phase 1.</li>
+      <li>Doctor billing is out of scope in the SRS, twice.</li>
+      <li>Patient records (PHR) are phase 3.</li>
+      <li>Editing a signed prescription is forbidden by BR-123, by design.</li>
+      <li>Dispensing is not offered in the doctor app; pharmacies dispense, doctors display.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <div id="foot">Anyone with this link can tick and comment — no account needed. Results are shared, so what you mark is what everyone else sees.</div>
+    <div class="stamp">Served by the PHolders backend · results are shared live</div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUSES = [
+    { key: "pass",    label: "Pass" },
+    { key: "fail",    label: "Fail" },
+    { key: "blocked", label: "Blocked" },
+    { key: "notrun",  label: "Not run" }
+  ];
+
+  var GROUPS = [
+    {
+      id: "loop",
+      name: "The phase 1 loop",
+      blurb: "The sentence the SRS opens phase 1 with, end to end. Every step is a different app; the handoffs are the point. L5, L10, L12 and L14 are the four that were broken.",
+      stories: [
+        ["L1",  "Patient", "Search for a doctor nearby", "Doctors listed by distance, each with a fee", false, "Patient app → Find doctors → allow location"],
+        ["L2",  "Patient", "Book a slot", "Appointment created, status pending_payment", false, "Tap a doctor → pick a slot → Book"],
+        ["L3",  "Patient", "Pay — cash, card or medical aid", "Status becomes scheduled", false, "Pay sheet → choose a method → confirm"],
+        ["L4",  "Doctor",  "Open Appointments", "The booking is listed with the patient's name", false, "Doctor web → Appointments"],
+        ["L5",  "Doctor",  "Accept the booking", "It stays in the diary. Before the fix it vanished", true, "Tap the card → Accept → reload the page"],
+        ["L6",  "Doctor",  "Complete the consultation", "Status completed", false, "Same card → Complete"],
+        ["L7",  "Doctor",  "Create a script, add medicines, sign it", "QR and secure link shown once", false, "Prescriptions → New Prescription → pick the consultation → add a medicine → Sign"],
+        ["L8",  "Patient", "Open the prescription", "Listed and readable", false, "Patient app → Prescriptions"],
+        ["L9",  "Patient", "Send it to a pharmacy", "Pharmacy list appears; after confirming it reads claimed", false, "Open it → Send to a pharmacy → pick one → confirm"],
+        ["L10", "Pharmacy","Open the dispensing queue", "The script is there. This handoff has never worked", true, "Pharmacy web → Dispensing Queue"],
+        ["L11", "Pharmacy","Dispense it", "Moves to Dispensed", false, "Row → Dispense → confirm"],
+        ["L12", "Doctor",  "Reopen the prescription list", "Reads Dispensed, naming the pharmacy and date, read-only", true, "Doctor web → Prescriptions → check the row's status and the line under it"],
+        ["L13", "Patient", "Review the doctor", "Accepted", false, "Patient app → the doctor → Reviews tab → rate and write → Submit"],
+        ["L14", "Doctor",  "Open the dashboard", "Reviews tile shows count, stars and average", true, "Doctor web → Dashboard → Reviews tile"]
+      ]
+    },
+    {
+      id: "mustfail",
+      name: "The loop — what must fail",
+      blurb: "Each of these should be refused. A success here is a defect.",
+      stories: [
+        ["F1", "Patient", "Claim the same script at a second pharmacy", "Refused — one pharmacy per script", false, "Patient app → the same script → Send to a pharmacy again"],
+        ["F2", "Pharmacy","Dispense a script claimed elsewhere", "Refused", false, "Sign in as a different pharmacy → try to dispense that script"],
+        ["F3", "Pharmacy","Dispense the same script twice", "Refused", false, "Pharmacy web → Dispensed tab → try to dispense it again"],
+        ["F4", "Doctor",  "Sign a prescription with no medicines", "Refused", false, "Create a prescription, add no medicines, Sign"],
+        ["F5", "Doctor",  "Edit a signed prescription", "No such action exists — revoke is the only withdrawal", false, "Doctor web → a signed script → row menu"],
+        ["F6", "Patient", "Review the same doctor twice", "Refused", false, "Patient app → the same doctor → submit a second review"]
+      ]
+    },
+    {
+      id: "cover",
+      name: "Found by cover",
+      blurb: "\"If under medical aid, doctor that's covered by medical plan.\" Spans three apps and fails silently if any one is wrong.",
+      stories: [
+        ["C1", "Doctor",  "Tick accepted schemes in Professional Details, save", "Persists across a reload", false, "Doctor web → Settings → Account → Professional Details → Medical Aids → Save"],
+        ["C2", "Patient", "Record a medical aid", "Saved on the device and on the server", false, "Patient app → Medical aid → add a scheme → Save"],
+        ["C3", "Patient", "Search with the cover filter on", "Only doctors accepting that scheme", false, "Patient app → Find doctors → turn on the cover filter"],
+        ["C4", "Patient", "Check the response flag", "medical_aid_filter_applied is true", false, "Same search, check medical_aid_filter_applied in the response"],
+        ["C5", "Patient", "Book and pay by medical aid", "Appointment scheduled", false, "Book → pay → choose Medical aid"],
+        ["C6", "Patient", "Record \"Discovery\" where the doctor picked \"Discovery Health Medical Scheme\"", "They still match — both normalise to the same key", true, "Save the scheme as plain \"Discovery\", then search with the filter on"],
+        ["C7", "Patient", "Record a scheme not in the catalogue, then search", "Every doctor returned, flag false. The screen must not say \"covered by your plan\"", true, "Save a scheme the catalogue has no entry for, then search with the filter on"]
+      ]
+    },
+    {
+      id: "network",
+      name: "The pharmacy network",
+      blurb: "Phase 1 bullet 6. All admin, but it decides what the pharmacy app can do at all.",
+      stories: [
+        ["N1", "Admin", "Open the pharmacy directory", "Every pharmacy listed, including any in no group", false, "Admin → Pharmacies"],
+        ["N2", "Admin", "Approve a pending pharmacy", "Status becomes active; it can now sign in", true, "Admin → Pharmacies → a pending one → Approve, then sign in as it"],
+        ["N3", "Admin", "Suspend one", "It can no longer sign in", false, "Admin → Pharmacies → Suspend, then try to sign in as it"],
+        ["N4", "Admin", "Create a group and add pharmacies", "Membership persists", false, "Admin → Partnerships → Groups → New → add pharmacies"],
+        ["N5", "Admin", "Create an agreement and activate it", "Status reflects it", false, "Admin → Partnerships → Agreements → New → Activate"],
+        ["N6", "Admin", "Search groups, list expiring agreements", "Both return results — they were unreachable through a route-ordering fault", true, "Admin → Groups → search; Agreements → Expiring"],
+        ["N7", "Admin", "Open compliance and claim routing", "Dashboards populate", false, "Admin → Compliance, then Claim routing"]
+      ]
+    },
+    {
+      id: "withdraw",
+      name: "Withdrawal",
+      blurb: "What happens when a doctor revokes a script the patient already holds. Crosses three apps and nobody has run it.",
+      stories: [
+        ["W1", "Doctor",  "Revoke a signed, unclaimed script with a reason", "Returns 200, not a 500 for work it did", true, "Doctor web → a signed script → row menu → Revoke → give a reason"],
+        ["W2", "Doctor",  "Check the prescription list", "Reads Revoked, with the reason", false, "Doctor web → Prescriptions → that row"],
+        ["W3", "Patient", "Open that prescription", "Reflects the revoke", false, "Patient app → Prescriptions → that script"],
+        ["W4", "Patient", "Try to send it to a pharmacy", "Refused", false, "Same script → Send to a pharmacy"]
+      ]
+    },
+    {
+      id: "reminders",
+      name: "Reminders",
+      blurb: "R3 is new — the table it writes to did not exist until this deploy, and the insert was caught and logged, so it silently did nothing.",
+      stories: [
+        ["R1", "Patient", "Set a reminder on an upcoming appointment", "Saved", false, "Patient app → an upcoming appointment → Remind me"],
+        ["R2", "—",       "Wait for it to fire", "Email arrives", false, "Wait for the reminder window, then check the inbox"],
+        ["R3", "Patient", "Open notifications", "The in-app reminder is there", true, "Patient app → Notifications"]
+      ]
+    },
+    {
+      id: "doctor",
+      name: "Doctor on its own",
+      blurb: "Needs no other role. Runnable the moment the deploy lands, and will catch most regressions.",
+      stories: [
+        ["D1", "Doctor", "Sign in", "Lands on the dashboard; a reload keeps the session", false, "Doctor web → sign in → reload"],
+        ["D2", "Doctor", "Open a deep link while signed out", "Login screen, not the page", false, "Sign out, then paste /doctor/prescriptions into the address bar"],
+        ["D3", "Doctor", "Edit personal information", "Persists. Email and HPCSA stay read-only", false, "Settings → Account → Personal Information → change a field → Save → reload"],
+        ["D4", "Doctor", "Edit professional details", "Persists, and nothing untouched is blanked", false, "Settings → Account → Professional Details → change one field → Save → reload"],
+        ["D5", "Doctor", "Save the profile of a doctor whose address moved", "Coordinates move with it — the test doctor sits ~10km out", true, "Professional Details → Save with no changes → re-read the profile's coordinates"],
+        ["D6", "Doctor", "Untick every medical aid and save", "Persists as \"accepts none\", not as unchanged", false, "Professional Details → untick every scheme → Save → reload"],
+        ["D7", "Doctor", "Change consulting hours, including closing a day", "Persists. A malformed time is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
+        ["D8", "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"],
+        ["D9", "Doctor", "Open Security", "Recent sign-ins and active sessions listed", false, "Settings → Security → Login Activity and Device Management"]
+      ]
+    },
+    {
+      id: "pharmacy",
+      name: "Pharmacy",
+      blurb: "None of this has ever run. The app called nothing until this week.",
+      stories: [
+        ["P1", "Pharmacy", "Activate a pharmacy and sign in", "Reaches its dashboard", true, "Admin approves the pharmacy, then sign in as it"],
+        ["P2", "Pharmacy", "Recover from a lost signup email", "resend-verification issues a code verify-otp accepts", false, "Pharmacy sign-in → Forgot code → resend, then verify with the new one"],
+        ["P3", "Pharmacy", "Open the orders queue", "Orders listed with patient name and script reference", false, "Pharmacy web → Orders"],
+        ["P4", "Pharmacy", "Accept an order, quoting a total", "Moves to Processing", false, "Orders → a New row → Accept → enter a total"],
+        ["P5", "Pharmacy", "Decline an order with a reason", "Moves to Cancelled; the patient sees the reason", false, "Orders → a New row → Decline → give a reason"],
+        ["P6", "Pharmacy", "Walk an order through to collected", "Each transition sticks", false, "Orders → Accept → Start preparing → Mark ready → Collected"]
+      ]
+    },
+    {
+      id: "new",
+      name: "Newly reachable",
+      blurb: "46 routes returned 404 until this week. The paths resolve and the code loads, but none has run live — treat it as new code.",
+      stories: [
+        ["X1", "Patient", "Record a medical aid through the API", "Saved and readable back", false, "PUT /api/profile/medical-aid, then GET it back"],
+        ["X2", "Any",     "Terms and privacy", "Both return content", false, "GET /api/legal/terms and /api/legal/privacy"],
+        ["X3", "Patient", "Support ticket, contact, FAQ", "All four routes answer", false, "POST /api/support/tickets and /contact; GET /faq and /tickets"],
+        ["X4", "Patient", "Profile, avatar, password, 2FA, biometrics", "Each saves and reads back", false, "Patient app → Profile → each section in turn"],
+        ["X5", "Patient", "Devices and login activity", "Listed; revoke one, revoke others", false, "Patient app → Security → Devices and Login activity"],
+        ["X6", "Patient", "Report suspicious, freeze, unfreeze, audit export", "Each completes", false, "Patient app → Security → Report suspicious, then Freeze"],
+        ["X7", "Patient", "Linked doctors, pharmacies, dependents", "List, link, unlink", false, "Patient app → Linked services → each of the three tabs"],
+        ["X8", "Patient", "Medical aid card upload, claims, invoices, signed download", "Upload works, and the signed link refuses someone else's token", true, "Patient app → Medical aid → upload a card, then open the signed link"]
+      ]
+    },
+    {
+      id: "qr",
+      name: "The prescription QR link",
+      blurb: "Signing mints a one-time code. Until 5d07354 the token was never stored, so every code ever issued was dead — and the link still needs FRONTEND_URL pointed at the web app.",
+      stories: [
+        ["Q1", "Doctor",  "Sign a prescription", "The dialog shows a QR and a link, and qrAvailable is true", true, "Doctor web → Prescriptions → Sign → read the dialog"],
+        ["Q2", "Anyone",  "Open the link before tapping anything", "The page asks first — it does not open the prescription on load", true, "Paste the link in a browser; a link preview must not spend it"],
+        ["Q3", "Anyone",  "Tap Open the prescription", "Medicines, prescriber and signature shown", false, "Same page → Open the prescription"],
+        ["Q4", "Anyone",  "Open the same link again", "Refused — a QR works once", true, "Reload the page"],
+        ["Q5", "Patient", "Email the script to yourself", "It arrives", false, "Patient app → a prescription → Share by email"]
+      ]
+    },
+    {
+      id: "docs",
+      name: "Documents and PDFs",
+      blurb: "Prescription PDFs, and the documents a medical aid asks for. All of it was built on 9 October and none of it has run live. DX12 is expected to fail until Firebase is configured.",
+      stories: [
+        ["DX1",  "Patient", "Download a prescription", "A real PDF opens, not JSON describing one. Prescriber with HPCSA number, patient, diagnosis, a card per medicine with its schedule, and a signature fingerprint", true, "Patient app -> a signed prescription -> Download"],
+        ["DX2",  "Patient", "Print a prescription", "The same document, opened in a viewer to print from rather than dropped in Downloads", false, "Patient app -> a prescription -> Print"],
+        ["DX3",  "Patient", "Download one that is not signed", "It still opens, but every page is watermarked and it banners NOT SIGNED - NOT VALID FOR DISPENSING", true, "Doctor creates a script and does not sign it, then download it as the patient"],
+        ["DX4",  "Patient", "Check the signing time printed on it", "South African time, with SAST after it. A time two hours early means the server timezone is leaking through", true, "Compare the PDF against the time the doctor signed"],
+        ["DX5",  "Patient", "Download another patient's prescription", "Refused, and no bytes come back", false, "Change the id in the download URL to a prescription you do not own"],
+        ["DX6",  "Patient", "Attach a PDF to a claim", "Accepted, with a link to it in the response", true, "POST /api/profile/medical-aid/claims/:id/document, file field named document"],
+        ["DX7",  "Patient", "Open the link it returned", "The document downloads", false, "Open document_url from the upload response"],
+        ["DX8",  "Patient", "Attach a second document to the same claim", "It replaces the first, and replaced_previous comes back true", false, "Upload again to the same claim id"],
+        ["DX9",  "Patient", "Attach a document to someone else's claim", "Refused, and nothing is stored", true, "Use a claim id belonging to another patient"],
+        ["DX10", "Patient", "Attach something that is not a document", "Refused on type, and refused again on size over 10MB", false, "Try an .exe, then try a file larger than 10MB"],
+        ["DX11", "Patient", "Attach a document to an invoice", "Expected to fail: nothing in the platform creates invoice rows, so there is no invoice to attach to", true, "POST .../invoices/:id/document and see that no invoice exists"],
+        ["DX12", "Any",     "Upload a document, redeploy, open it again", "Known failure until STORAGE_DRIVER is firebase. Render wipes the disk on every deploy", true, "Upload a claim document, redeploy the backend, then open the link"]
+      ]
+    },
+    {
+      id: "cross",
+      name: "Cross-cutting",
+      blurb: "Run once, in any journey.",
+      stories: [
+        ["XC1", "Pharmacy", "Sign out, sign in as a different pharmacy", "The previous queue and orders are gone", true, "Sign out of the pharmacy, sign in as another, open Dispensing Queue"],
+        ["XC2", "Doctor",   "Sign out, sign in as a different doctor", "No prescriptions, appointments or rating carried over", true, "Sign out of the doctor, sign in as another, open Prescriptions"],
+        ["XC3", "Doctor",   "Call a pharmacy route with a doctor token", "Refused", false, "Call /prescriptions/pharmacy/claimed with a doctor token"],
+        ["XC4", "Patient",  "Call an admin route with a patient token", "Refused", false, "Call /users/admin/pharmacies with a patient token"],
+        ["XC5", "Any",      "Reload mid-session", "Still signed in, same place", false, "Reload on any inner page"],
+        ["XC6", "Patient",  "Scan a prescription QR", "Opens. Still localhost means FRONTEND_URL was not set", true, "Scan the QR, or open the accessLink from the signing dialog"],
+        ["XC7", "Any",      "Check the deploy log on boot", "Three migrations: schemes catalogue, doctor medical aids, in-app notifications", false, "Render → the service → Logs, at boot"]
+      ]
+    }
+  ];
+
+  var ALL = [];
+  GROUPS.forEach(function (g) {
+    g.stories.forEach(function (s) {
+      ALL.push({ id: s[0], group: g.id, role: s[1], what: s[2], expect: s[3], key: s[4], how: s[5] });
+    });
+  });
+
+  // Results live on the PHolders backend, not in this page.
+  //
+  // The shared store a Claude artifact can declare is internal to one
+  // organization, and the people testing this sign in with their own
+  // accounts, so it could never carry their ticks. The platform's live
+  // channel is restricted the same way. So the results sit where the rest of
+  // the project keeps things, which means a tick is simply visible to
+  // everyone holding the link, with no copying and no accounts.
+  var API = "/api/checklist";
+  var API_KEY = "pholders-phase1-checklist";
+  var POLL_MS = 7000;
+
+  var NAME_KEY = "pholders-phase1-tester";
+  var QUEUE_KEY = "pholders-phase1-queue";
+
+  var me = "";
+
+  // What the server last told us.
+  var serverResults = [];
+  var serverNotes = [];
+
+  // What this tester has done that the server has not confirmed yet. These
+  // are kept separately and always drawn on top, so a tick never disappears
+  // because a poll failed -- which is exactly what it used to do.
+  var queue = [];      // {kind:"result", storyId, tester, status, at, sent}
+                       // {kind:"note", tmpId, storyId, tester, text, at, sent}
+
+  var drafts = Object.create(null);   // half-typed notes, per story
+  var focusedStory = null;            // which note box has the caret
+
+  var openThreads = Object.create(null);
+  var lastSynced = null;
+  var syncError = null;
+  var loaded = false;
+  var flushing = false;
+  // Survives a successful refresh, unlike syncError: a change the server
+  // refused outright is gone for good, and saying so once matters more than
+  // the transient connection state.
+  var dropped = null;
+
+  var groupsEl = document.getElementById("groups");
+  var talliesEl = document.getElementById("tallies");
+  var barEl = document.getElementById("bar");
+  var footEl = document.getElementById("foot");
+  var whoEl = document.getElementById("who");
+  var identNoteEl = document.getElementById("ident-note");
+
+  function canWrite() { return me.trim().length > 0; }
+
+  function readLocal(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function writeLocal(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* fine */ }
+  }
+
+  function saveQueue() {
+    writeLocal(QUEUE_KEY, queue.filter(function (q) { return !q.sent; }));
+  }
+
+  // ── talking to the backend ─────────────────────────────────────
+
+  function request(method, path, body) {
+    var opts = {
+      method: method,
+      headers: { "X-Checklist-Key": API_KEY },
+      cache: "no-store"
+    };
+    if (body) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(API + path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (payload) {
+        if (!res.ok || payload.success === false) {
+          var err = new Error(payload.message || ("the server answered " + res.status));
+          err.status = res.status;
+          throw err;
+        }
+        return payload;
+      });
+    });
+  }
+
+  function refresh() {
+    return request("GET", "").then(function (payload) {
+      serverResults = Array.isArray(payload.results) ? payload.results : [];
+      serverNotes = Array.isArray(payload.notes) ? payload.notes : [];
+      lastSynced = new Date();
+      syncError = null;
+      loaded = true;
+
+      // Anything the server has now confirmed can stop being drawn on top.
+      queue = queue.filter(function (q) { return !q.sent; });
+      saveQueue();
+      render();
+    }, function (err) {
+      // Deliberately keeps serverResults and the queue as they are. Wiping
+      // them here is what made ticks vanish.
+      syncError = (err && err.message) || "the server could not be reached";
+      loaded = true;
+      render();
+    });
+  }
+
+  /**
+   * Send everything waiting, oldest first, and stop at the first failure so
+   * ordering is preserved. Called after every change and on every poll, so a
+   * tick made while the backend was down goes up on its own once it returns.
+   */
+  function flush() {
+    if (flushing) return Promise.resolve();
+    var next = queue.filter(function (q) { return !q.sent; })[0];
+    if (!next) return refresh();
+
+    flushing = true;
+    var send = next.kind === "result"
+      ? request("PUT", "/result", {
+          storyId: next.storyId, tester: next.tester, status: next.status
+        })
+      : request("POST", "/note", {
+          storyId: next.storyId, tester: next.tester, text: next.text
+        });
+
+    return send.then(function () {
+      next.sent = true;
+      saveQueue();
+      flushing = false;
+      return flush();
+    }, function (err) {
+      flushing = false;
+      // A rejection the server will never accept must not block the queue.
+      if (err && err.status >= 400 && err.status < 500 && err.status !== 429) {
+        queue = queue.filter(function (q) { return q !== next; });
+        saveQueue();
+        dropped = err.message;
+        render();
+        return flush();
+      }
+      syncError = (err && err.message) || "the server could not be reached";
+      render();
+    });
+  }
+
+  // ── reading the state ──────────────────────────────────────────
+
+  /** Server rows with this tester's unconfirmed changes laid over the top. */
+  function effectiveResults() {
+    var out = serverResults.slice();
+    queue.forEach(function (q) {
+      if (q.kind !== "result") return;
+      out = out.filter(function (r) {
+        return !(r.storyId === q.storyId && r.tester === q.tester);
+      });
+      if (q.status !== "notrun") {
+        out.push({ storyId: q.storyId, tester: q.tester, status: q.status, at: q.at });
+      }
+    });
+    return out;
+  }
+
+  function rowsFor(storyId) {
+    return effectiveResults().filter(function (r) { return r.storyId === storyId; });
+  }
+
+  function latestRun(storyId) {
+    var best = null;
+    rowsFor(storyId).forEach(function (r) {
+      if (!best || String(r.at) > String(best.at)) best = r;
+    });
+    return best;
+  }
+
+  function statusOf(storyId) {
+    var r = latestRun(storyId);
+    return (r && r.status) || "notrun";
+  }
+
+  function myRun(storyId) {
+    var mine = me.trim();
+    if (!mine) return null;
+    return rowsFor(storyId).filter(function (r) { return r.tester === mine; })[0] || null;
+  }
+
+  function notesFor(storyId) {
+    var pending = queue.filter(function (q) {
+      return q.kind === "note" && q.storyId === storyId;
+    }).map(function (q) {
+      return { id: q.tmpId, storyId: q.storyId, tester: q.tester, text: q.text,
+        at: q.at, waiting: !q.sent };
+    });
+    return serverNotes.filter(function (n) { return n.storyId === storyId; }).concat(pending);
+  }
+
+  function unsentCount() {
+    return queue.filter(function (q) { return !q.sent; }).length;
+  }
+
+  function fmtWhen(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return String(d.getDate()).padStart(2, "0") + " " + months[d.getMonth()] +
+      " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  function fmtClock(d) {
+    if (!d) return "";
+    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  // ── writing ────────────────────────────────────────────────────
+
+  function setStatus(storyId, status) {
+    if (!canWrite()) { whoEl.focus(); return; }
+    var mine = me.trim();
+
+    queue = queue.filter(function (q) {
+      return !(q.kind === "result" && q.storyId === storyId && q.tester === mine && !q.sent);
+    });
+    queue.push({
+      kind: "result", storyId: storyId, tester: mine,
+      status: status, at: new Date().toISOString(), sent: false
+    });
+    saveQueue();
+    render();
+    flush();
+  }
+
+  function addNote(storyId, text) {
+    if (!canWrite()) { whoEl.focus(); return; }
+    queue.push({
+      kind: "note", tmpId: "q" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+      storyId: storyId, tester: me.trim(), text: text,
+      at: new Date().toISOString(), sent: false
+    });
+    delete drafts[storyId];
+    openThreads[storyId] = true;
+    saveQueue();
+    render();
+    flush();
+  }
+
+  // ── rendering ──────────────────────────────────────────────────
+
+  function renderIdentNote() {
+    identNoteEl.textContent = "";
+    identNoteEl.style.color = "";
+
+    function add(text, strong) {
+      if (strong) {
+        var b = document.createElement("strong");
+        b.textContent = text;
+        identNoteEl.appendChild(b);
+      } else {
+        identNoteEl.appendChild(document.createTextNode(text));
+      }
+    }
+
+    if (!canWrite()) add("Type your name above to start ticking. ", true);
+
+    var waiting = unsentCount();
+
+    if (dropped) {
+      add("One change could not be saved and was dropped: " + dropped + ". ", true);
+    }
+
+    if (syncError) {
+      add(waiting
+        ? waiting + (waiting === 1 ? " change is" : " changes are") + " saved here but not shared yet. "
+        : "Not shared yet. ", true);
+      add("The results server is not answering (" + syncError + "). "
+        + "Keep ticking — everything is kept and sent the moment it comes back. "
+        + "If the backend was only just deployed, give it a minute.");
+      identNoteEl.style.color = "var(--blocked)";
+      return;
+    }
+
+    if (!loaded) {
+      add("Loading everyone's results… the server sleeps when idle, so the "
+        + "first load can take up to a minute.");
+      return;
+    }
+
+    if (waiting) {
+      add("Sending " + waiting + (waiting === 1 ? " change" : " changes") + "…");
+      return;
+    }
+
+    add("Everyone with this link sees the same ticks and notes. ");
+    add("Last updated " + fmtClock(lastSynced) + ".");
+    if (dropped) identNoteEl.style.color = "var(--blocked)";
+  }
+
+  function renderTallies() {
+    var counts = { pass: 0, fail: 0, blocked: 0, notrun: 0 };
+    ALL.forEach(function (s) { counts[statusOf(s.id)]++; });
+
+    talliesEl.textContent = "";
+    [["Pass", "pass"], ["Fail", "fail"], ["Blocked", "blocked"], ["Not run", "notrun"]]
+      .forEach(function (pair) {
+        var span = document.createElement("span");
+        span.className = "tally";
+        var dot = document.createElement("span");
+        dot.className = "dot " + (pair[1] === "notrun" ? "" : pair[1]);
+        span.appendChild(dot);
+        var b = document.createElement("b");
+        b.textContent = String(counts[pair[1]]);
+        span.appendChild(b);
+        span.appendChild(document.createTextNode(" " + pair[0]));
+        talliesEl.appendChild(span);
+      });
+
+    var totalSpan = document.createElement("span");
+    totalSpan.className = "tally";
+    totalSpan.textContent = ALL.length + " stories";
+    talliesEl.appendChild(totalSpan);
+
+    barEl.textContent = "";
+    [["pass", "var(--pass)"], ["fail", "var(--fail)"], ["blocked", "var(--blocked)"]]
+      .forEach(function (pair) {
+        if (!counts[pair[0]]) return;
+        var seg = document.createElement("span");
+        seg.style.width = (counts[pair[0]] / ALL.length * 100) + "%";
+        seg.style.background = pair[1];
+        barEl.appendChild(seg);
+      });
+  }
+
+  function renderThread(story, host) {
+    host.textContent = "";
+    var list = notesFor(story.id);
+
+    list.forEach(function (c) {
+      var el = document.createElement("div");
+      el.className = "comment";
+      var head = document.createElement("div");
+      var who = document.createElement("span");
+      who.className = "who";
+      who.textContent = c.tester || "Someone";
+      head.appendChild(who);
+      var when = document.createElement("span");
+      when.className = "when";
+      when.textContent = c.waiting ? "not sent yet" : fmtWhen(c.at);
+      head.appendChild(when);
+      el.appendChild(head);
+      var p = document.createElement("p");
+      p.textContent = c.text;
+      el.appendChild(p);
+      host.appendChild(el);
+    });
+
+    if (!list.length) {
+      var empty = document.createElement("p");
+      empty.className = "comment";
+      empty.style.borderLeftColor = "transparent";
+      empty.style.color = "var(--ink-faint)";
+      empty.style.fontSize = "13px";
+      empty.textContent = "No notes yet.";
+      host.appendChild(empty);
+    }
+
+    var form = document.createElement("form");
+    form.className = "composer";
+    var input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = canWrite()
+      ? "Add a note — what you saw, or why it is blocked"
+      : "Type your name at the top first";
+    input.autocomplete = "off";
+    input.disabled = !canWrite();
+
+    // A redraw used to wipe whatever was half-typed in here. The text is held
+    // outside the DOM now, so rebuilding the row cannot lose it.
+    input.value = drafts[story.id] || "";
+    input.addEventListener("input", function () { drafts[story.id] = input.value; });
+    input.addEventListener("focus", function () { focusedStory = story.id; });
+    input.addEventListener("blur", function () {
+      if (focusedStory === story.id) focusedStory = null;
+    });
+
+    var send = document.createElement("button");
+    send.type = "submit";
+    send.textContent = "Post";
+    send.disabled = !canWrite();
+    form.appendChild(input);
+    form.appendChild(send);
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var text = (drafts[story.id] || input.value || "").trim();
+      if (!text) return;
+      addNote(story.id, text);
+    });
+    host.appendChild(form);
+
+    // Put the caret back where it was, if this is the box being typed in.
+    if (focusedStory === story.id && !input.disabled) {
+      try {
+        input.focus();
+        var end = input.value.length;
+        if (input.setSelectionRange) input.setSelectionRange(end, end);
+      } catch (e) { /* not fatal */ }
+    }
+    return input;
+  }
+
+  function buildRow(story) {
+    var row = document.createElement("div");
+    row.className = "row" + (story.key ? " key" : "");
+
+    var main = document.createElement("div");
+    main.className = "row-main";
+
+    var rid = document.createElement("div");
+    rid.className = "rid";
+    rid.textContent = story.id;
+    main.appendChild(rid);
+
+    var text = document.createElement("div");
+    text.className = "rtext";
+    var what = document.createElement("span");
+    what.className = "what";
+    what.textContent = story.role + " · " + story.what;
+    text.appendChild(what);
+    var expect = document.createElement("span");
+    expect.className = "expect";
+    expect.textContent = story.expect;
+    text.appendChild(expect);
+    if (story.how) {
+      var how = document.createElement("span");
+      how.className = "how";
+      how.textContent = story.how;
+      text.appendChild(how);
+    }
+    main.appendChild(text);
+
+    var meta = document.createElement("div");
+    meta.className = "rmeta";
+    var newest = latestRun(story.id);
+    meta.textContent = newest ? (newest.tester || "Someone") + " · " + fmtWhen(newest.at) : "";
+    main.appendChild(meta);
+    row.appendChild(main);
+
+    var controls = document.createElement("div");
+    controls.className = "controls";
+    var mine = myRun(story.id);
+
+    STATUSES.forEach(function (st) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "s-" + st.key;
+      b.textContent = st.label;
+      var pressed = mine ? mine.status === st.key : st.key === "notrun";
+      b.setAttribute("aria-pressed", canWrite() && pressed ? "true" : "false");
+      b.disabled = !canWrite();
+      b.addEventListener("click", function () { setStatus(story.id, st.key); });
+      controls.appendChild(b);
+    });
+
+    var count = notesFor(story.id).length;
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "link";
+    toggle.textContent = count ? (count === 1 ? "1 note" : count + " notes") : "Add a note";
+    toggle.addEventListener("click", function () {
+      openThreads[story.id] = !openThreads[story.id];
+      thread.hidden = !openThreads[story.id];
+      if (openThreads[story.id]) renderThread(story, thread);
+    });
+    controls.appendChild(toggle);
+    row.appendChild(controls);
+
+    // Two people disagreeing about a story is the most interesting state a
+    // row can be in, so never hide it behind one headline verdict.
+    var everyone = rowsFor(story.id);
+    if (everyone.length > 1) {
+      var vd = document.createElement("div");
+      vd.className = "verdicts";
+      vd.textContent = everyone.map(function (v) {
+        return (v.tester || "Someone") + ": " + v.status;
+      }).join("   ");
+      row.appendChild(vd);
+    }
+
+    var thread = document.createElement("div");
+    thread.className = "thread";
+    var open = openThreads[story.id] || focusedStory === story.id;
+    thread.hidden = !open;
+    if (open) renderThread(story, thread);
+    row.appendChild(thread);
+
+    return row;
+  }
+
+  function render() {
+    groupsEl.textContent = "";
+
+    GROUPS.forEach(function (g) {
+      var wrap = document.createElement("section");
+      wrap.className = "group";
+
+      var head = document.createElement("div");
+      head.className = "group-head";
+      var h2 = document.createElement("h2");
+      h2.textContent = g.name;
+      head.appendChild(h2);
+      var done = g.stories.filter(function (s) { return statusOf(s[0]) !== "notrun"; }).length;
+      var count = document.createElement("span");
+      count.className = "count";
+      count.textContent = done + " / " + g.stories.length + " run";
+      head.appendChild(count);
+      wrap.appendChild(head);
+
+      if (g.blurb) {
+        var blurb = document.createElement("p");
+        blurb.className = "blurb";
+        blurb.textContent = g.blurb;
+        wrap.appendChild(blurb);
+      }
+
+      var rows = document.createElement("div");
+      rows.className = "rows";
+      g.stories.forEach(function (s) {
+        rows.appendChild(buildRow({
+          id: s[0], role: s[1], what: s[2], expect: s[3], key: s[4], how: s[5]
+        }));
+      });
+
+      wrap.appendChild(rows);
+      groupsEl.appendChild(wrap);
+    });
+
+    renderTallies();
+    renderIdentNote();
+  }
+
+  // ── wiring ─────────────────────────────────────────────────────
+
+  me = typeof readLocal(NAME_KEY, "") === "string" ? readLocal(NAME_KEY, "") : "";
+  var savedQueue = readLocal(QUEUE_KEY, []);
+  if (Array.isArray(savedQueue)) queue = savedQueue;
+
+  whoEl.value = me;
+  whoEl.addEventListener("input", function () {
+    me = whoEl.value;
+    writeLocal(NAME_KEY, me);
+    render();
+  });
+
+  render();
+  flush();
+
+  // Someone else's tick turns up here without anyone reloading, and anything
+  // of ours still waiting goes up on the same beat.
+  setInterval(function () {
+    if (document.hidden) return;
+    flush();
+  }, POLL_MS);
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) flush();
+  });
+})();
+</script>
+</body>
+</html>

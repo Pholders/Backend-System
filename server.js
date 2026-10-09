@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 require('dotenv').config();
@@ -46,10 +47,19 @@ const PORT = process.env.PORT || 3000;
 // MIDDLEWARE CONFIGURATION
 // ============================================================================
 
-// The testing checklist carries its own CORS policy and body parser, so it is
-// mounted ahead of the global ones. It is team tooling called from a Claude
-// artifact, whose origin is per-artifact and cannot be put on an allow-list;
-// the policy below would reject it before the router saw the request.
+// The phase 1 testing checklist: the page and the results it records.
+//
+// The page is served from here rather than published as a Claude artifact,
+// because an artifact runs under a CSP that blocks fetch to any other host,
+// so it could never reach these endpoints. Served from the app, the page is
+// same-origin, needs no account, and works for anyone holding the link.
+//
+// Both are mounted ahead of the global CORS policy and body parser, so the
+// checklist keeps its own: the API router still allows any origin, which
+// leaves the door open for a page hosted elsewhere later.
+app.get('/checklist', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'checklist.html'));
+});
 app.use('/api/checklist', checklistRoutes);
 
 // CORS configuration
