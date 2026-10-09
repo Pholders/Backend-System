@@ -8,6 +8,7 @@ const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
 const EmailService = require('../services/emailService');
+const PrescriptionPdfService = require('../services/prescriptionPdfService');
 const { pool } = require('../config/db');
 const crypto = require('crypto');
 
@@ -514,17 +515,17 @@ class PrescriptionController {
         });
       }
 
-      // Note: In production, generate actual PDF using a library like pdfkit
-      res.status(200).json({
-        success: true,
-        message: 'Prescription download initiated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          downloadLink: `/api/prescriptions/${prescriptionId}/download`,
-          format: 'PDF',
-          size: 'estimated 500KB'
-        }
-      });
+      const pdf = await PrescriptionPdfService.render(prescription);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Length', pdf.length);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      // Personal health information: no shared cache should hold a copy.
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
     } catch (error) {
       console.error('❌ Error downloading prescription:', error);
       res.status(500).json({
@@ -551,17 +552,19 @@ class PrescriptionController {
         });
       }
 
-      // Generate print-friendly format
-      res.status(200).json({
-        success: true,
-        message: 'Print data generated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          printUrl: `/api/prescriptions/${prescriptionId}/print`,
-          printFormat: 'A4',
-          watermark: `Patient: ${prescription.patient_name} | Doctor: ${prescription.prescriber_name}`
-        }
-      });
+      const pdf = await PrescriptionPdfService.render(prescription);
+
+      // The same document as the download, served inline so the browser or
+      // the app opens it in a viewer the person can print from, rather than
+      // dropping a file in their downloads folder.
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Length', pdf.length);
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
     } catch (error) {
       console.error('❌ Error printing prescription:', error);
       res.status(500).json({

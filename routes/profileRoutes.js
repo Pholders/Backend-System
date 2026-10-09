@@ -45,6 +45,22 @@ const medicalAidCardUpload = multer({
   }
 });
 
+// Claim and invoice documents: what a medical aid actually asks for, which is
+// a PDF far more often than a photograph, so both are accepted. 10MB matches
+// the cap on patient documents elsewhere.
+const medicalAidDocumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      'application/pdf',
+      'image/jpeg', 'image/jpg', 'image/png', 'image/webp'
+    ];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only PDF, JPEG, PNG, or WEBP files are allowed'));
+  }
+});
+
 // ===== Sprint 1 — Personal profile =====
 
 // Email-change confirmation (token in query string — NO auth required)
@@ -110,8 +126,14 @@ router.put('/medical-aid/card',                              authMiddleware, req
 router.get('/medical-aid/card/:side/url',                    authMiddleware, requireRole('patient'), MedicalAidController.getCardSignedUrl);
 router.get('/medical-aid/claims',                            authMiddleware, requireRole('patient'), MedicalAidController.listClaims);
 router.get('/medical-aid/claims/:id',                        authMiddleware, requireRole('patient'), MedicalAidController.getClaim);
+router.post('/medical-aid/claims/:id/document',              authMiddleware, requireRole('patient'),
+  medicalAidDocumentUpload.single('document'),
+  MedicalAidController.uploadClaimDocument);
 router.get('/medical-aid/invoices',                          authMiddleware, requireRole('patient'), MedicalAidController.listInvoices);
 router.get('/medical-aid/invoices/:id',                      authMiddleware, requireRole('patient'), MedicalAidController.getInvoice);
+router.post('/medical-aid/invoices/:id/document',            authMiddleware, requireRole('patient'),
+  medicalAidDocumentUpload.single('document'),
+  MedicalAidController.uploadInvoiceDocument);
 
 // ===== Sprint 8 — Permanent account deletion =====
 router.post('/account/delete-request',                       authMiddleware, requireRole('patient'), SupportController.requestAccountDeletion);

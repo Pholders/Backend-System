@@ -62,6 +62,7 @@ const AUDIT_EVENT_TYPES = [
   'dependent_removed',
   'medical_aid_updated',
   'medical_aid_card_uploaded',
+  'medical_aid_document_uploaded',
   'medical_aid_document_downloaded',
   'support_ticket_submitted',
   'contact_message_submitted',

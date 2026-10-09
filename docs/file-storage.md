@@ -78,8 +78,30 @@ would bypass both checks above. That is the whole reason for the extra hop.
 | Route | Types | Limit |
 | --- | --- | --- |
 | Patient documents | PDF, JPEG, PNG, DOC, DOCX, TXT | 10 MB |
+| Claim / invoice document | PDF, JPEG, PNG, WEBP | 10 MB |
 | Medical aid card | JPEG, PNG, WEBP | 8 MB |
 | Avatar | JPEG, PNG, WEBP | 5 MB |
+
+A claim or an invoice holds one document, replaced by uploading another:
+
+- `POST /api/profile/medical-aid/claims/:id/document`
+- `POST /api/profile/medical-aid/invoices/:id/document`
+
+Both take the file as `document`, check the row belongs to the caller before
+storing anything, and delete the object they superseded only after the row
+points at the new one.
+
+## Prescription PDFs
+
+A prescription PDF is generated per request by `services/prescriptionPdfService`
+and never stored, so there is nothing to keep in sync and nothing to leak. It
+is served by `GET /api/prescriptions/:id/download` (as an attachment) and
+`GET /api/prescriptions/:id/print` (inline, for a viewer to print from).
+
+An unsigned or revoked prescription still renders, but carries a banner and a
+per-page watermark saying it cannot be dispensed -- a document that looked
+official while being invalid would be the dangerous outcome. Times are
+rendered in `Africa/Johannesburg` whatever the server's clock is set to.
 
 ## Rows from before this change
 

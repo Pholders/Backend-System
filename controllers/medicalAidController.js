@@ -8,6 +8,17 @@ const { sign: signUrl, verify: verifyUrl } = require('../utils/signedUrl');
 // Where medical aid cards live within the store, whichever driver backs it.
 const CARD_FOLDER = 'medical-aid';
 
+/**
+ * Claims and invoices each carry one supporting document. The two differ only
+ * in which table owns the row, so the upload is written once and driven from
+ * here -- which also keeps the folder, the audit wording and the ownership
+ * check from drifting apart.
+ */
+const DOCUMENT_TARGETS = {
+  claim: { table: 'medical_aid_claims', folder: 'medical-aid/claims', label: 'Claim' },
+  invoice: { table: 'invoices', folder: 'medical-aid/invoices', label: 'Invoice' },
+};
+
 function buildSchemeResponse(row) {
   if (!row) return null;
   return {
@@ -430,6 +441,105 @@ async function downloadFile(req, res) {
   }
 }
 
+/**
+ * Attach the supporting document to a claim or an invoice.
+ *
+ * `kind` is set by the route, never by the request, so there is no way to
+ * point an upload at a table the caller chose.
+ */
+async function uploadDocument(req, res, kind) {
+  try {
+    const target = DOCUMENT_TARGETS[kind];
+    if (!target) {
+      return res.status(500).json({ success: false, message: 'Unknown document kind' });
+    }
+
+    const patientId = req.user.id;
+    const patientEmail = req.user.email;
+    const file = req.file;
+    const recordId = parseInt(req.params.id, 10);
+
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'document file is required' });
+    }
+    if (!Number.isInteger(recordId)) {
+      return res.status(400).json({ success: false, message: 'Invalid id' });
+    }
+
+    // The row has to exist and be this patient's before anything is stored,
+    // so a bad id cannot leave a file behind with nothing pointing at it.
+    const existing = await query(
+      `SELECT document_path FROM ${target.table} WHERE id = $1 AND patient_id = $2`,
+      [recordId, patientId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: `${target.label} not found`
+      });
+    }
+    const previousPath = existing.rows[0].document_path;
+
+    const ext = (path.extname(file.originalname) || '').toLowerCase() || '.pdf';
+    const filename = `patient_${patientId}_${kind}_${recordId}_${Date.now()}${ext}`;
+    const storedPath = await storage.put(file, target.folder, filename);
+
+    await query(
+      `UPDATE ${target.table}
+          SET document_path = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND patient_id = $3`,
+      [storedPath, recordId, patientId]
+    );
+
+    // Only once the row points at the new object is the old one disposable.
+    if (previousPath && previousPath !== storedPath && storage.isSafeKey(previousPath)) {
+      await storage.remove(previousPath);
+    }
+
+    await AuditLog.logSecurityEvent(
+      req, patientId, 'patient', patientEmail,
+      'medical_aid_document_uploaded', 'success',
+      `kind=${kind} id=${recordId}`
+    );
+
+    // By this point the document is stored and the row points at it, so the
+    // upload has succeeded whatever happens next. Handing back a link is a
+    // convenience: if signing one fails the caller is told the truth and can
+    // ask for a link separately, rather than being told the upload failed.
+    let documentUrl = null;
+    try {
+      const token = signUrl({
+        userId: patientId, path: storedPath, kind, ttlSeconds: 600
+      });
+      documentUrl = `${req.protocol}://${req.get('host')}`
+        + `/api/profile/medical-aid/files/download?token=${token}`;
+    } catch (signingError) {
+      console.error('document uploaded but could not be signed:', signingError);
+    }
+
+    res.json({
+      success: true,
+      message: `${target.label} document uploaded`,
+      document_url: documentUrl,
+      document_url_expires_in: documentUrl ? 600 : null,
+      replaced_previous: Boolean(previousPath)
+    });
+  } catch (error) {
+    console.error(`upload ${kind} document error:`, error);
+    res.status(500).json({ success: false, message: 'Failed to upload document' });
+  }
+}
+
+/** POST /api/profile/medical-aid/claims/:id/document */
+async function uploadClaimDocument(req, res) {
+  return uploadDocument(req, res, 'claim');
+}
+
+/** POST /api/profile/medical-aid/invoices/:id/document */
+async function uploadInvoiceDocument(req, res) {
+  return uploadDocument(req, res, 'invoice');
+}
+
 module.exports = {
   getScheme,
   updateScheme,
@@ -437,7 +547,9 @@ module.exports = {
   getCardSignedUrl,
   listClaims,
   getClaim,
+  uploadClaimDocument,
   listInvoices,
   getInvoice,
+  uploadInvoiceDocument,
   downloadFile
 };
