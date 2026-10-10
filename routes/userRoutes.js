@@ -250,6 +250,9 @@ router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('ad
 // Doctor: Get appointments for doctor
 router.get('/doctor/appointments', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorAppointments);
 
+// Doctor: Get de-duplicated list of patients from appointment history
+router.get('/doctor/patients', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorPatients);
+
 // TEST: Get signed prescriptions (early in file)
 router.get('/doctor/test-static', (req, res) => {
   res.json({ test: 'static data' });
@@ -305,6 +308,10 @@ router.get('/payments/appointment/:appointmentId', authMiddleware, requireRole('
 
 // Get payment history
 router.get('/payments', authMiddleware, requireRole('patient'), PaymentController.getPaymentHistory);
+
+// Doctor read-only views of payments for their own appointments
+router.get('/doctor/payments/summary', authMiddleware, requireRole('doctor'), PaymentController.getDoctorPaymentSummary);
+router.get('/doctor/payments', authMiddleware, requireRole('doctor'), PaymentController.getDoctorPaymentHistory);
 
 /**
  * Stripe Payment Routes (Enhanced Stripe Integration)

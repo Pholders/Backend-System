@@ -887,6 +887,7 @@ class AppointmentController {
           total: result.rows.length,
           appointments: result.rows.map(apt => ({
             id: apt.id,
+            patientId: apt.patient_id,
             patientName: `${apt.patient_first_name} ${apt.patient_last_name}`,
             patientEmail: apt.patient_email,
             patientPhone: apt.patient_phone,
@@ -907,6 +908,118 @@ class AppointmentController {
         success: false,
         message: 'Error fetching appointments',
         error: error.message
+      });
+    }
+  }
+
+  /**
+   * Doctor: Get de-duplicated list of patients this doctor has ever seen.
+   * Includes summary (last/next appointment, total visit count) and whether
+   * PHR access is currently granted — used by the doctor UI to decide between
+   * "Request PHR access" and "View PHR" actions.
+   *
+   * Query params:
+   *   search    — free-text on patient first/last name or email
+   *   limit     — default 50, cap 200
+   *   offset    — default 0
+   */
+  static async getDoctorPatients(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { search } = req.query;
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+      const offset = parseInt(req.query.offset, 10) || 0;
+
+      const params = [doctorId];
+      let searchClause = '';
+      if (search && search.trim()) {
+        params.push(`%${search.trim()}%`);
+        const p = `$${params.length}`;
+        searchClause = ` AND (p.first_name ILIKE ${p} OR p.last_name ILIKE ${p} OR p.email ILIKE ${p})`;
+      }
+
+      const listParams = [...params, limit, offset];
+      const listSql = `
+        SELECT
+          p.id AS patient_id,
+          p.first_name,
+          p.last_name,
+          p.email,
+          p.phone,
+          p.date_of_birth,
+          p.gender,
+          MAX(a.appointment_date) AS last_appointment_date,
+          MIN(a.appointment_date) FILTER (
+            WHERE a.appointment_date >= CURRENT_DATE
+              AND a.status IN ('scheduled','pending_payment')
+          ) AS next_appointment_date,
+          COUNT(a.id) AS total_appointments,
+          COUNT(a.id) FILTER (
+            WHERE a.appointment_date >= CURRENT_DATE
+              AND a.status IN ('scheduled','pending_payment')
+          ) AS upcoming_appointments,
+          BOOL_OR(
+            pa.doctor_id IS NOT NULL
+            AND pa.revoked_at IS NULL
+            AND (pa.expires_at IS NULL OR pa.expires_at > CURRENT_TIMESTAMP)
+          ) AS has_phr_access
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.id
+        LEFT JOIN phr_access pa ON pa.patient_id = p.id AND pa.doctor_id = $1
+        WHERE a.doctor_id = $1
+          ${searchClause}
+        GROUP BY p.id
+        ORDER BY MAX(a.appointment_date) DESC NULLS LAST
+        LIMIT $${listParams.length - 1} OFFSET $${listParams.length}
+      `;
+
+      const countSql = `
+        SELECT COUNT(DISTINCT p.id)::int AS total
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.id
+        WHERE a.doctor_id = $1
+          ${searchClause}
+      `;
+
+      const { query } = require('../config/db');
+      const [listRes, countRes] = await Promise.all([
+        query(listSql, listParams),
+        query(countSql, params),
+      ]);
+
+      res.status(200).json({
+        success: true,
+        message: 'Doctor patients retrieved',
+        data: {
+          patients: listRes.rows.map((row) => ({
+            patientId: row.patient_id,
+            firstName: row.first_name,
+            lastName: row.last_name,
+            fullName: `${row.first_name} ${row.last_name}`,
+            email: row.email,
+            phone: row.phone,
+            dateOfBirth: row.date_of_birth,
+            gender: row.gender,
+            lastAppointmentDate: row.last_appointment_date,
+            nextAppointmentDate: row.next_appointment_date,
+            totalAppointments: parseInt(row.total_appointments, 10),
+            upcomingAppointments: parseInt(row.upcoming_appointments, 10),
+            hasPhrAccess: !!row.has_phr_access,
+          })),
+          pagination: {
+            total: countRes.rows[0].total,
+            limit,
+            offset,
+            returned: listRes.rows.length,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('❌ Error fetching doctor patients:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching patients',
+        error: error.message,
       });
     }
   }

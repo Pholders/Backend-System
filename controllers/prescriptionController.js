@@ -1072,6 +1072,62 @@ class PrescriptionController {
         });
       }
 
+      // Auto-create an order so this claim shows up in the pharmacy's Orders queue
+      // (Track A -> Track B bridge). Best-effort: if it fails, the claim itself still
+      // succeeds; we surface the error to the caller as a warning instead.
+      let autoOrder = null;
+      let autoOrderWarning = null;
+      const paymentType = (req.body && req.body.paymentType) || 'cash';
+      const numericPharmacyId = parseInt(pharmacyId, 10);
+
+      if (Number.isNaN(numericPharmacyId)) {
+        autoOrderWarning = 'Order not auto-created: pharmacyId is not numeric.';
+      } else {
+        try {
+          const Order = require('../models/Order');
+          const OrderStatusHistory = require('../models/OrderStatusHistory');
+          const orderNotifications = require('../services/orderNotifications');
+          const realtimeService = require('../services/realtimeService');
+
+          if (!Order.VALID_PAYMENT_TYPES.includes(paymentType)) {
+            autoOrderWarning = `Order not auto-created: invalid paymentType "${paymentType}".`;
+          } else {
+            const existing = await Order.findActiveForPrescription(prescriptionId);
+            if (existing) {
+              autoOrder = await Order.findByIdWithRelations(existing.id);
+            } else {
+              const created = await Order.create({
+                prescription_id: Number(prescriptionId),
+                patient_id: patientId,
+                pharmacy_id: numericPharmacyId,
+                payment_type: paymentType,
+              });
+              await OrderStatusHistory.record({
+                order_id: created.id,
+                from_status: null,
+                to_status: created.status,
+                actor_type: 'patient',
+                actor_id: patientId,
+                notes: 'Order auto-created from prescription claim',
+              });
+              orderNotifications.notifyOrderPlaced(created).catch((e) => {
+                console.error('notifyOrderPlaced failed:', e.message);
+              });
+              autoOrder = await Order.findByIdWithRelations(created.id);
+              try {
+                realtimeService.emitToPatient(created.patient_id, 'order:placed', { order: autoOrder });
+                realtimeService.emitToPharmacy(created.pharmacy_id, 'order:incoming', { order: autoOrder });
+              } catch (e) {
+                console.error('realtime emit on auto-order failed:', e.message);
+              }
+            }
+          }
+        } catch (e) {
+          console.error('auto-order on claim failed:', e);
+          autoOrderWarning = `Order not auto-created: ${e.message}`;
+        }
+      }
+
       res.status(200).json({
         success: true,
         message: 'Prescription claimed successfully at pharmacy',
@@ -1080,7 +1136,9 @@ class PrescriptionController {
           prescriptionNumber: prescription.prescription_number,
           claimedAt: claimResult.claimTime,
           pharmacy: pharmacyName,
-          note: 'This prescription cannot be used again'
+          note: 'This prescription cannot be used again',
+          order: autoOrder,
+          orderWarning: autoOrderWarning,
         }
       });
     } catch (error) {

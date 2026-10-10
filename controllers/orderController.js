@@ -21,12 +21,25 @@
 const Order = require('../models/Order');
 const OrderStatusHistory = require('../models/OrderStatusHistory');
 const Prescription = require('../models/Prescription');
+const InventoryItem = require('../models/InventoryItem');
 const orderStateMachine = require('../services/orderStateMachine');
 const orderNotifications = require('../services/orderNotifications');
 const realtimeService = require('../services/realtimeService');
 const { pool } = require('../config/db');
 
 // ---- helpers ----
+
+// Enrich a single order with prescription + patient snapshot. Never throws.
+async function enrichOne(order) {
+  if (!order) return order;
+  try {
+    const [enriched] = await Order.enrichOrders([order]);
+    return enriched;
+  } catch (e) {
+    console.error('enrichOne failed:', e.message);
+    return order;
+  }
+}
 
 function getUserId(req) {
   return req.user && (req.user.id || req.user.userId);
@@ -118,15 +131,17 @@ class OrderController {
         console.error('notifyOrderPlaced failed:', e.message);
       });
 
+      const enriched = await enrichOne(order);
+
       // Real-time events. Patient sees 'order:placed'; pharmacy queue sees 'order:incoming'.
       try {
-        realtimeService.emitToPatient(order.patient_id, 'order:placed', { order });
-        realtimeService.emitToPharmacy(order.pharmacy_id, 'order:incoming', { order });
+        realtimeService.emitToPatient(order.patient_id, 'order:placed', { order: enriched });
+        realtimeService.emitToPharmacy(order.pharmacy_id, 'order:incoming', { order: enriched });
       } catch (e) {
         console.error('realtime emit on create failed:', e.message);
       }
 
-      res.status(201).json({ success: true, data: { order } });
+      res.status(201).json({ success: true, data: { order: enriched } });
     } catch (err) {
       console.error('orders.create error:', err);
       if (err.code === '23505') {
@@ -141,11 +156,12 @@ class OrderController {
 
   /**
    * GET /api/orders
+   * Query: ?status=&search=&limit=&offset=
    */
   static async listMine(req, res) {
     try {
       const patientId = getUserId(req);
-      const { status } = req.query;
+      const { status, search } = req.query;
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
       const offset = parseInt(req.query.offset, 10) || 0;
 
@@ -156,12 +172,15 @@ class OrderController {
         });
       }
 
-      const orders = await Order.listForPatient(patientId, {
-        status: status || null, limit, offset,
-      });
+      const filters = { status: status || null, search: search || null };
+      const [rows, total] = await Promise.all([
+        Order.listForPatient(patientId, { ...filters, limit, offset }),
+        Order.countForPatient(patientId, filters),
+      ]);
+      const orders = await Order.enrichOrders(rows);
       res.json({
         success: true,
-        data: { orders, pagination: { limit, offset, returned: orders.length } },
+        data: { orders, pagination: { limit, offset, returned: orders.length, total } },
       });
     } catch (err) {
       console.error('orders.listMine error:', err);
@@ -192,8 +211,11 @@ class OrderController {
         return res.status(404).json({ success: false, message: 'Order not found' });
       }
 
-      const history = await OrderStatusHistory.listForOrder(id);
-      res.json({ success: true, data: { order, history } });
+      const [enriched, history] = await Promise.all([
+        enrichOne(order),
+        OrderStatusHistory.listForOrder(id),
+      ]);
+      res.json({ success: true, data: { order: enriched, history } });
     } catch (err) {
       console.error('orders.getOne error:', err);
       res.status(500).json({ success: false, message: err.message });
@@ -238,7 +260,8 @@ class OrderController {
         notes: reason,
       });
 
-      res.json({ success: true, data: { order: updated, history } });
+      const enriched = await enrichOne(updated);
+      res.json({ success: true, data: { order: enriched, history } });
     } catch (err) {
       if (err.name === 'TransitionError') {
         return res.status(409).json({ success: false, message: err.message, code: err.code });
@@ -254,11 +277,12 @@ class OrderController {
 
   /**
    * GET /api/orders/pharmacy/queue
+   * Query: ?status=&search=&limit=&offset=
    */
   static async pharmacyQueue(req, res) {
     try {
       const pharmacyId = getPharmacyId(req);
-      const { status } = req.query;
+      const { status, search } = req.query;
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
       const offset = parseInt(req.query.offset, 10) || 0;
 
@@ -269,12 +293,15 @@ class OrderController {
         });
       }
 
-      const orders = await Order.listForPharmacy(pharmacyId, {
-        status: status || null, limit, offset,
-      });
+      const filters = { status: status || null, search: search || null };
+      const [rows, total] = await Promise.all([
+        Order.listForPharmacy(pharmacyId, { ...filters, limit, offset }),
+        Order.countForPharmacy(pharmacyId, filters),
+      ]);
+      const orders = await Order.enrichOrders(rows);
       res.json({
         success: true,
-        data: { orders, pagination: { limit, offset, returned: orders.length } },
+        data: { orders, pagination: { limit, offset, returned: orders.length, total } },
       });
     } catch (err) {
       console.error('orders.pharmacyQueue error:', err);
@@ -323,7 +350,8 @@ class OrderController {
         notes: notes || null,
       });
 
-      res.json({ success: true, data: { order: updated, history } });
+      const enriched = await enrichOne(updated);
+      res.json({ success: true, data: { order: enriched, history } });
     } catch (err) {
       if (err.name === 'TransitionError') {
         return res.status(409).json({ success: false, message: err.message, code: err.code });
@@ -363,7 +391,8 @@ class OrderController {
         notes: reason,
       });
 
-      res.json({ success: true, data: { order: updated, history } });
+      const enriched = await enrichOne(updated);
+      res.json({ success: true, data: { order: enriched, history } });
     } catch (err) {
       if (err.name === 'TransitionError') {
         return res.status(409).json({ success: false, message: err.message, code: err.code });
@@ -402,7 +431,8 @@ class OrderController {
         notes: notes || null,
       });
 
-      res.json({ success: true, data: { order: updated, history } });
+      const enriched = await enrichOne(updated);
+      res.json({ success: true, data: { order: enriched, history } });
     } catch (err) {
       if (err.name === 'TransitionError') {
         return res.status(409).json({ success: false, message: err.message, code: err.code });
@@ -517,12 +547,245 @@ class OrderController {
           : `Claim ${claimStatus}; outstanding R${outstanding.toFixed(2)}`,
       });
 
-      res.json({ success: true, data: { order: updated, claim, history } });
+      const enriched = await enrichOne(updated);
+      res.json({ success: true, data: { order: enriched, claim, history } });
     } catch (err) {
       if (err.name === 'TransitionError') {
         return res.status(409).json({ success: false, message: err.message, code: err.code });
       }
       console.error('orders.pharmacyRecordClaim error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  // ============================================================
+  // META
+  // ============================================================
+
+  /**
+   * GET /api/orders/meta/statuses
+   * Public reference the frontend calls once at startup to build tabs +
+   * action buttons. Returns the enum, terminal set, and the allowed-transitions map.
+   */
+  static async getStatuses(req, res) {
+    try {
+      res.json({
+        success: true,
+        data: {
+          statuses: Order.VALID_STATUSES,
+          terminalStatuses: Order.TERMINAL_STATUSES,
+          activeStatuses: Order.ACTIVE_STATUSES,
+          paymentTypes: Order.VALID_PAYMENT_TYPES,
+          fulfillmentTypes: Order.VALID_FULFILLMENT_TYPES,
+          allowedTransitions: orderStateMachine.ALLOWED_TRANSITIONS,
+          transitionActors: orderStateMachine.TRANSITION_ACTORS,
+        },
+      });
+    } catch (err) {
+      console.error('orders.getStatuses error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  // ============================================================
+  // DISPENSING (option C: auto-suggest, pharmacist confirms)
+  // ============================================================
+
+  /**
+   * GET /api/orders/:id/dispense-suggestions
+   * For each prescription line, return ranked inventory candidates + a flag
+   * when nothing matches or the line has already been dispensed.
+   */
+  static async dispenseSuggestions(req, res) {
+    try {
+      const pharmacyId = getPharmacyId(req);
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ success: false, message: 'Invalid id' });
+
+      const order = await Order.findById(id);
+      if (!order || !isPharmacyFor(order, pharmacyId)) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+
+      const rx = await Prescription.getById(order.prescription_id);
+      const rxItems = (rx && rx.items) || [];
+
+      const alreadyDispensed = await InventoryItem.listDispensedForOrder(pharmacyId, id);
+      const dispensedByLine = new Map();
+      for (const row of alreadyDispensed) {
+        if (row.related_prescription_item_id != null) {
+          dispensedByLine.set(row.related_prescription_item_id, row);
+        }
+      }
+
+      const suggestions = await Promise.all(rxItems.map(async (line) => {
+        const already = dispensedByLine.get(line.id) || null;
+        const candidates = already
+          ? []
+          : await InventoryItem.suggestForItem(pharmacyId, {
+              medicine_name: line.medicine_name,
+              generic_name: line.generic_name,
+              dosage: line.dosage,
+            });
+        return {
+          prescriptionItemId: line.id,
+          medicationName: line.medicine_name,
+          genericName: line.generic_name,
+          dosage: line.dosage,
+          quantityRequired: line.quantity,
+          quantityUnit: line.quantity_unit,
+          alreadyDispensed: !!already,
+          dispensedFrom: already
+            ? {
+                inventoryItemId: already.inventory_item_id,
+                medicationName: already.medication_name,
+                dosage: already.dosage,
+                quantityDispensed: Math.abs(already.quantity_delta),
+                dispensedAt: already.created_at,
+              }
+            : null,
+          candidates: candidates.map((c) => ({
+            inventoryItemId: c.id,
+            sku: c.sku,
+            medicationName: c.medication_name,
+            genericName: c.generic_name,
+            dosage: c.dosage,
+            packSize: c.pack_size,
+            unit: c.unit,
+            quantityOnHand: c.quantity_on_hand,
+            expiryDate: c.expiry_date,
+            unitPrice: c.unit_price,
+            confidence: c.confidence,
+          })),
+          noMatch: !already && candidates.length === 0,
+        };
+      }));
+
+      res.json({ success: true, data: { orderId: id, suggestions } });
+    } catch (err) {
+      console.error('orders.dispenseSuggestions error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  /**
+   * POST /api/orders/:id/dispense-items
+   * Body: { items: [{ prescription_item_id, inventory_item_id, quantity }, ...], notes? }
+   * Confirmed dispenses committed atomically. Does NOT change order status
+   * — pharmacist explicitly transitions to `ready` when packing is complete.
+   */
+  static async dispenseItems(req, res) {
+    try {
+      const pharmacyId = getPharmacyId(req);
+      const actorId = req.user && req.user.id;
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ success: false, message: 'Invalid id' });
+
+      const order = await Order.findById(id);
+      if (!order || !isPharmacyFor(order, pharmacyId)) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+
+      // Guardrail: only sensible to dispense while the pharmacy is actively working the order.
+      const ALLOWED_STATES = ['accepted', 'claim_approved', 'preparing'];
+      if (!ALLOWED_STATES.includes(order.status)) {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot dispense items on an order in status "${order.status}". Allowed: ${ALLOWED_STATES.join(', ')}.`,
+        });
+      }
+
+      const { items, notes } = req.body || {};
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'items must be a non-empty array of { prescription_item_id, inventory_item_id, quantity }',
+        });
+      }
+
+      const results = await InventoryItem.dispenseForOrder({
+        pharmacy_id: pharmacyId,
+        order_id: id,
+        lines: items,
+        actor_id: actorId,
+        notes: notes || null,
+      });
+
+      // Notify listeners so the patient app and other pharmacy tabs stay in sync.
+      try {
+        realtimeService.emitOrderEvent('order:dispensed', {
+          order,
+          dispensedCount: results.length,
+        });
+      } catch (e) {
+        console.error('realtime emit on dispense failed:', e.message);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          orderId: id,
+          dispensed: results.map((r) => ({
+            inventoryItemId: r.item.id,
+            medicationName: r.item.medication_name,
+            quantityDispensed: Math.abs(r.adjustment.quantity_delta),
+            quantityOnHandAfter: r.item.quantity_on_hand,
+            prescriptionItemId: r.adjustment.related_prescription_item_id,
+            adjustmentId: r.adjustment.id,
+            dispensedAt: r.adjustment.created_at,
+          })),
+        },
+      });
+    } catch (err) {
+      if (err.code === 'ALREADY_DISPENSED') {
+        return res.status(409).json({ success: false, message: err.message, code: err.code });
+      }
+      if (/Insufficient stock|not found|non-empty|Each line/i.test(err.message)) {
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      console.error('orders.dispenseItems error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  /**
+   * GET /api/orders/:id/dispensed
+   * Audit view: what has already been dispensed against this order.
+   */
+  static async getDispensed(req, res) {
+    try {
+      const pharmacyId = getPharmacyId(req);
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ success: false, message: 'Invalid id' });
+
+      const order = await Order.findById(id);
+      if (!order || !isPharmacyFor(order, pharmacyId)) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+
+      const rows = await InventoryItem.listDispensedForOrder(pharmacyId, id);
+      res.json({
+        success: true,
+        data: {
+          orderId: id,
+          dispensed: rows.map((r) => ({
+            adjustmentId: r.id,
+            inventoryItemId: r.inventory_item_id,
+            prescriptionItemId: r.related_prescription_item_id,
+            medicationName: r.medication_name,
+            dosage: r.dosage,
+            sku: r.sku,
+            unit: r.unit,
+            quantityDispensed: Math.abs(r.quantity_delta),
+            quantityOnHandAfter: r.quantity_after,
+            notes: r.notes,
+            actorId: r.actor_id,
+            dispensedAt: r.created_at,
+          })),
+        },
+      });
+    } catch (err) {
+      console.error('orders.getDispensed error:', err);
       res.status(500).json({ success: false, message: err.message });
     }
   }

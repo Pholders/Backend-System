@@ -153,20 +153,43 @@ class Order {
   }
 
   /**
-   * Patient inbox: list orders for a patient, optionally filtered by status.
+   * Build shared WHERE clause + params for list/count queries.
+   * Search matches numeric order id OR prescription_number ILIKE.
    */
-  static async listForPatient(patient_id, { status = null, limit = 50, offset = 0 } = {}) {
-    const params = [patient_id];
-    let where = 'patient_id = $1';
+  static _buildScopeWhere(scopeColumn, scopeId, { status = null, search = null } = {}) {
+    const params = [scopeId];
+    const clauses = [`o.${scopeColumn} = $1`];
     if (status) {
       params.push(status);
-      where += ` AND status = $${params.length}`;
+      clauses.push(`o.status = $${params.length}`);
     }
+    if (search && String(search).trim() !== '') {
+      const term = String(search).trim();
+      const asInt = parseInt(term, 10);
+      if (!Number.isNaN(asInt) && String(asInt) === term.replace(/^#/, '')) {
+        params.push(asInt);
+        clauses.push(`(o.id = $${params.length} OR p.prescription_number ILIKE $${params.length + 1})`);
+        params.push(`%${term}%`);
+      } else {
+        params.push(`%${term}%`);
+        clauses.push(`(p.prescription_number ILIKE $${params.length} OR p.patient_name ILIKE $${params.length})`);
+      }
+    }
+    return { where: clauses.join(' AND '), params };
+  }
+
+  /**
+   * Patient inbox: list orders for a patient, optionally filtered by status/search.
+   */
+  static async listForPatient(patient_id, { status = null, search = null, limit = 50, offset = 0 } = {}) {
+    const { where, params } = this._buildScopeWhere('patient_id', patient_id, { status, search });
     params.push(limit, offset);
     const sql = `
-      SELECT * FROM orders
+      SELECT o.*
+      FROM orders o
+      LEFT JOIN prescriptions p ON p.id = o.prescription_id
       WHERE ${where}
-      ORDER BY created_at DESC
+      ORDER BY o.created_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const result = await query(sql, params);
@@ -176,22 +199,139 @@ class Order {
   /**
    * Pharmacy queue: list orders for a pharmacy.
    */
-  static async listForPharmacy(pharmacy_id, { status = null, limit = 50, offset = 0 } = {}) {
-    const params = [pharmacy_id];
-    let where = 'pharmacy_id = $1';
-    if (status) {
-      params.push(status);
-      where += ` AND status = $${params.length}`;
-    }
+  static async listForPharmacy(pharmacy_id, { status = null, search = null, limit = 50, offset = 0 } = {}) {
+    const { where, params } = this._buildScopeWhere('pharmacy_id', pharmacy_id, { status, search });
     params.push(limit, offset);
     const sql = `
-      SELECT * FROM orders
+      SELECT o.*
+      FROM orders o
+      LEFT JOIN prescriptions p ON p.id = o.prescription_id
       WHERE ${where}
-      ORDER BY created_at DESC
+      ORDER BY o.created_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const result = await query(sql, params);
     return result.rows;
+  }
+
+  /**
+   * Total count matching the same filters as listForPatient. Used for pagination.
+   */
+  static async countForPatient(patient_id, { status = null, search = null } = {}) {
+    const { where, params } = this._buildScopeWhere('patient_id', patient_id, { status, search });
+    const sql = `
+      SELECT COUNT(*)::int AS total
+      FROM orders o
+      LEFT JOIN prescriptions p ON p.id = o.prescription_id
+      WHERE ${where}
+    `;
+    const result = await query(sql, params);
+    return result.rows[0].total;
+  }
+
+  /**
+   * Total count matching the same filters as listForPharmacy.
+   */
+  static async countForPharmacy(pharmacy_id, { status = null, search = null } = {}) {
+    const { where, params } = this._buildScopeWhere('pharmacy_id', pharmacy_id, { status, search });
+    const sql = `
+      SELECT COUNT(*)::int AS total
+      FROM orders o
+      LEFT JOIN prescriptions p ON p.id = o.prescription_id
+      WHERE ${where}
+    `;
+    const result = await query(sql, params);
+    return result.rows[0].total;
+  }
+
+  /**
+   * Enrich orders in-place with the linked prescription snapshot (patient + items).
+   * Batch-loads all referenced prescriptions in a single query.
+   *
+   * Returned shape adds:
+   *   order.prescription = { id, prescription_number, diagnosis, clinical_notes,
+   *                          created_at, prescriber: {...}, items: [...] }
+   *   order.patient      = { id, name, phone, email, id_number, dob }
+   *
+   * Safe to call with [] or with rows missing a prescription — those keys default to null.
+   */
+  static async enrichOrders(orders) {
+    if (!Array.isArray(orders) || orders.length === 0) return orders || [];
+
+    const ids = [...new Set(orders.map((o) => o.prescription_id).filter(Boolean))];
+    if (ids.length === 0) {
+      return orders.map((o) => ({ ...o, prescription: null, patient: null }));
+    }
+
+    const sql = `
+      SELECT p.id, p.prescription_number, p.diagnosis, p.clinical_notes, p.created_at,
+             p.patient_id, p.patient_name, p.patient_phone, p.patient_email,
+             p.patient_id_number, p.patient_dob,
+             p.prescriber_name, p.prescriber_hpcsa, p.prescriber_phone, p.prescriber_email,
+             COALESCE(
+               json_agg(json_build_object(
+                 'id', pi.id,
+                 'medicine_name', pi.medicine_name,
+                 'generic_name', pi.generic_name,
+                 'dosage', pi.dosage,
+                 'dosage_form', pi.dosage_form,
+                 'quantity', pi.quantity,
+                 'quantity_unit', pi.quantity_unit,
+                 'frequency', pi.frequency,
+                 'route_of_administration', pi.route_of_administration,
+                 'duration', pi.duration,
+                 'special_instructions', pi.special_instructions,
+                 'schedule_classification', pi.schedule_classification
+               ) ORDER BY pi.id) FILTER (WHERE pi.id IS NOT NULL),
+               '[]'::json
+             ) AS items
+      FROM prescriptions p
+      LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
+      WHERE p.id = ANY($1::int[])
+      GROUP BY p.id
+    `;
+    const { rows } = await query(sql, [ids]);
+    const byId = new Map(rows.map((r) => [Number(r.id), r]));
+
+    return orders.map((o) => {
+      const p = byId.get(Number(o.prescription_id));
+      if (!p) return { ...o, prescription: null, patient: null };
+      return {
+        ...o,
+        prescription: {
+          id: p.id,
+          prescription_number: p.prescription_number,
+          diagnosis: p.diagnosis,
+          clinical_notes: p.clinical_notes,
+          created_at: p.created_at,
+          prescriber: {
+            name: p.prescriber_name,
+            hpcsa: p.prescriber_hpcsa,
+            phone: p.prescriber_phone,
+            email: p.prescriber_email,
+          },
+          items: p.items || [],
+        },
+        patient: {
+          id: p.patient_id,
+          name: p.patient_name,
+          phone: p.patient_phone,
+          email: p.patient_email,
+          id_number: p.patient_id_number,
+          dob: p.patient_dob,
+        },
+      };
+    });
+  }
+
+  /**
+   * Convenience: fetch one order fully enriched. Returns null if not found.
+   */
+  static async findByIdWithRelations(id) {
+    const order = await this.findById(id);
+    if (!order) return null;
+    const [enriched] = await this.enrichOrders([order]);
+    return enriched;
   }
 
   /**

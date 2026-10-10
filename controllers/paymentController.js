@@ -546,6 +546,103 @@ class PaymentController {
     }
   }
 
+  static async getDoctorPaymentHistory(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const { status, search, startDate, endDate } = req.query;
+      const validStatuses = ['pending', 'completed', 'failed', 'cancelled'];
+
+      if (status && !validStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed: ${validStatuses.join(', ')}`,
+        });
+      }
+
+      const result = await Payment.getDoctorPaymentHistory(doctorId, {
+        status: status || null,
+        search: search ? String(search).trim() : null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        limit,
+        offset,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Doctor payment history retrieved successfully',
+        data: {
+          payments: result.payments.map((payment) => ({
+            paymentId: payment.id,
+            appointmentId: payment.appointment_id,
+            patientId: payment.patient_id,
+            patientName: [payment.patient_first_name, payment.patient_last_name]
+              .filter(Boolean)
+              .join(' '),
+            patientEmail: payment.patient_email,
+            service: 'consultation',
+            appointmentDate: payment.appointment_date,
+            timePeriod: payment.time_period,
+            timeSlot: payment.time_slot,
+            amount: payment.amount,
+            paymentMethod: payment.payment_method,
+            paymentStatus: payment.payment_status,
+            transactionReference: payment.stripe_transaction_id,
+            receiptUrl: payment.receipt_url,
+            createdAt: payment.created_at,
+            updatedAt: payment.updated_at,
+          })),
+          pagination: {
+            total: result.total,
+            limit,
+            offset,
+            returned: result.payments.length,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching doctor payment history:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching doctor payment history',
+        error: error.message,
+      });
+    }
+  }
+
+  static async getDoctorPaymentSummary(req, res) {
+    try {
+      const summary = await Payment.getDoctorPaymentSummary(req.user.id, {
+        startDate: req.query.startDate || null,
+        endDate: req.query.endDate || null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Doctor payment summary retrieved successfully',
+        data: {
+          totalPayments: Number(summary.total_payments),
+          completedPayments: Number(summary.completed_count),
+          completedAmount: Number(summary.completed_amount),
+          pendingPayments: Number(summary.pending_count),
+          pendingAmount: Number(summary.pending_amount),
+          failedPayments: Number(summary.failed_count),
+          cancelledPayments: Number(summary.cancelled_count),
+          currency: 'ZAR',
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching doctor payment summary:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching doctor payment summary',
+        error: error.message,
+      });
+    }
+  }
+
   /**
    * Get payment methods available for patient
    */

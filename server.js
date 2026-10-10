@@ -24,6 +24,7 @@ const userRoutes = require('./routes/userRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -76,6 +77,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS
@@ -169,6 +171,7 @@ async function startServer() {
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
       console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
       console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
+      console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
       console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
 
       // Start scheduled notification triggers (medication + appointment).

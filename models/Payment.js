@@ -281,6 +281,111 @@ class Payment {
     }
   }
 
+  static async getDoctorPaymentHistory(doctorId, {
+    status = null,
+    search = null,
+    startDate = null,
+    endDate = null,
+    limit = 50,
+    offset = 0,
+  } = {}) {
+    const params = [doctorId];
+    const conditions = ['p.doctor_id = $1'];
+
+    if (status) {
+      params.push(status);
+      conditions.push(`p.payment_status = $${params.length}`);
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      const searchParam = `$${params.length}`;
+      conditions.push(`(
+        p.id::text ILIKE ${searchParam}
+        OR p.appointment_id::text ILIKE ${searchParam}
+        OR u.first_name ILIKE ${searchParam}
+        OR u.last_name ILIKE ${searchParam}
+        OR u.email ILIKE ${searchParam}
+      )`);
+    }
+    if (startDate) {
+      params.push(startDate);
+      conditions.push(`p.created_at >= $${params.length}::date`);
+    }
+    if (endDate) {
+      params.push(endDate);
+      conditions.push(`p.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const countSql = `
+      SELECT COUNT(*)::int AS total
+      FROM payments p
+      LEFT JOIN patients u ON p.patient_id = u.id
+      WHERE ${whereClause}
+    `;
+    const countResult = await pool.query(countSql, params);
+
+    const listParams = [...params, limit, offset];
+    const listSql = `
+      SELECT
+        p.id,
+        p.appointment_id,
+        p.patient_id,
+        p.amount,
+        p.payment_method,
+        p.payment_status,
+        p.stripe_transaction_id,
+        p.receipt_url,
+        p.created_at,
+        p.updated_at,
+        a.appointment_date,
+        a.time_period,
+        a.time_slot,
+        u.first_name AS patient_first_name,
+        u.last_name AS patient_last_name,
+        u.email AS patient_email
+      FROM payments p
+      LEFT JOIN appointments a ON p.appointment_id = a.id
+      LEFT JOIN patients u ON p.patient_id = u.id
+      WHERE ${whereClause}
+      ORDER BY p.created_at DESC
+      LIMIT $${listParams.length - 1} OFFSET $${listParams.length}
+    `;
+    const listResult = await pool.query(listSql, listParams);
+
+    return { payments: listResult.rows, total: countResult.rows[0].total };
+  }
+
+  static async getDoctorPaymentSummary(doctorId, { startDate = null, endDate = null } = {}) {
+    const params = [doctorId];
+    const conditions = ['doctor_id = $1'];
+
+    if (startDate) {
+      params.push(startDate);
+      conditions.push(`created_at >= $${params.length}::date`);
+    }
+    if (endDate) {
+      params.push(endDate);
+      conditions.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`);
+    }
+
+    const result = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_payments,
+         COUNT(*) FILTER (WHERE payment_status = 'completed')::int AS completed_count,
+         COUNT(*) FILTER (WHERE payment_status = 'pending')::int AS pending_count,
+         COUNT(*) FILTER (WHERE payment_status = 'failed')::int AS failed_count,
+         COUNT(*) FILTER (WHERE payment_status = 'cancelled')::int AS cancelled_count,
+         COALESCE(SUM(amount) FILTER (WHERE payment_status = 'completed'), 0) AS completed_amount,
+         COALESCE(SUM(amount) FILTER (WHERE payment_status = 'pending'), 0) AS pending_amount
+       FROM payments
+       WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+
+    return result.rows[0];
+  }
+
   /**
    * Cancel payment
    */
