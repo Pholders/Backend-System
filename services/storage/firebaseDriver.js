@@ -52,7 +52,7 @@ function getBucket() {
         credential = admin.credential.cert({
           projectId: process.env.FCM_PROJECT_ID,
           clientEmail: process.env.FCM_CLIENT_EMAIL,
-          privateKey: process.env.FCM_PRIVATE_KEY.replace(/\n/g, '\n'),
+          privateKey: process.env.FCM_PRIVATE_KEY.replace(/\\n/g, '\n'),
         });
       } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
         credential = admin.credential.applicationDefault();
