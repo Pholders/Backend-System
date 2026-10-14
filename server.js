@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 require('dotenv').config();
@@ -27,6 +28,10 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const legalRoutes = require('./routes/legalRoutes');
+const supportRoutes = require('./routes/supportRoutes');
+const checklistRoutes = require('./routes/checklistRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
@@ -45,6 +50,21 @@ const PORT = process.env.PORT || 3000;
 // ============================================================================
 // MIDDLEWARE CONFIGURATION
 // ============================================================================
+
+// The phase 1 testing checklist: the page and the results it records.
+//
+// The page is served from here rather than published as a Claude artifact,
+// because an artifact runs under a CSP that blocks fetch to any other host,
+// so it could never reach these endpoints. Served from the app, the page is
+// same-origin, needs no account, and works for anyone holding the link.
+//
+// Both are mounted ahead of the global CORS policy and body parser, so the
+// checklist keeps its own: the API router still allows any origin, which
+// leaves the door open for a page hosted elsewhere later.
+app.get('/checklist', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'checklist.html'));
+});
+app.use('/api/checklist', checklistRoutes);
 
 // CORS configuration
 const allowedOrigins = [
@@ -125,6 +145,15 @@ app.use('/api', bookingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
+
+// These three were written but never mounted, so every route in them 404'd.
+// The prefixes are the ones their own controllers document. Most visibly this
+// is what lets a patient record their medical aid at all — without it
+// medical_aid_schemes could never be written, and a doctor search filtered by
+// cover could never match anybody.
+app.use('/api/profile', profileRoutes);
+app.use('/api/legal', legalRoutes);
+app.use('/api/support', supportRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS

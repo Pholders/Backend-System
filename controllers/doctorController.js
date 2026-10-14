@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
+const MedicalAid = require('../models/MedicalAid');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -479,6 +480,29 @@ class DoctorController {
   /**
    * Get Doctor Profile
    */
+  /**
+   * The medical aid schemes a doctor can say they accept.
+   *
+   * Any signed-in role can read it: the doctor needs it to populate the
+   * picker, and the patient app needs the names to show cover.
+   */
+  static async getMedicalAidCatalogue(req, res) {
+    try {
+      const schemes = await MedicalAid.listCatalogue();
+      res.status(200).json({
+        success: true,
+        data: { total: schemes.length, schemes }
+      });
+    } catch (error) {
+      console.error('Get medical aid catalogue error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching medical aid schemes',
+        error: error.message
+      });
+    }
+  }
+
   static async getProfile(req, res) {
     try {
       const doctorId = req.user.id;
@@ -492,6 +516,10 @@ class DoctorController {
       }
 
       delete doctor.password_hash;
+
+      // Which medical aids this doctor accepts. Phase 1 needs it so patients
+      // can find a doctor covered by their plan.
+      doctor.medicalAids = await MedicalAid.getForDoctor(doctorId);
 
       res.status(200).json({
         success: true,
@@ -521,6 +549,18 @@ class DoctorController {
       delete updateData.email;
       delete updateData.hpcsa_number;
       delete updateData.created_at;
+
+      // Accepted schemes live in their own table, so they must not reach
+      // Doctor.update — it maps every remaining key to a doctors column.
+      const medicalAids = updateData.medicalAids;
+      delete updateData.medicalAids;
+
+      if (medicalAids !== undefined && !Array.isArray(medicalAids)) {
+        return res.status(400).json({
+          success: false,
+          message: 'medicalAids must be an array of scheme ids'
+        });
+      }
 
       const timeRegex = /^\d{2}:\d{2}$/;
       if (updateData.opens_at && !timeRegex.test(updateData.opens_at)) {
@@ -566,7 +606,66 @@ class DoctorController {
         }
       }
 
-      const updatedDoctor = await Doctor.update(doctorId, updateData);
+      // Re-geocode when the practice moves. Signup geocodes the address, but
+      // this endpoint used to write clinic_address and leave the coordinates
+      // alone, so a doctor who relocated stayed discoverable at their old
+      // position — which works directly against "find doctor nearest to them".
+      //
+      // Unlike signup this never fails the save. The geocoder resolves place
+      // names far more reliably than street addresses, so refusing the whole
+      // profile update over it would block a doctor from correcting their own
+      // details. The city is tried as a fallback, and the response says
+      // whether the pin actually moved.
+      let locationUpdated = false;
+      let locationWarning = null;
+
+      const movedPractice =
+        updateData.clinic_address !== undefined ||
+        updateData.city !== undefined ||
+        updateData.province !== undefined;
+
+      if (movedPractice && updateData.latitude === undefined) {
+        const existing = await Doctor.findById(doctorId);
+        const address = updateData.clinic_address ?? (existing && existing.clinic_address);
+        const city = updateData.city ?? (existing && existing.city);
+        const province = updateData.province ?? (existing && existing.province);
+
+        // Most precise first, then progressively coarser.
+        const candidates = [
+          address,
+          [city, province, 'South Africa'].filter(Boolean).join(', '),
+        ].filter((value) => value && String(value).trim());
+
+        for (const candidate of candidates) {
+          try {
+            const result = await GeocodingService.processLocation({
+              clinic_address: candidate
+            });
+            if (result.success) {
+              updateData.latitude = result.latitude;
+              updateData.longitude = result.longitude;
+              locationUpdated = true;
+              break;
+            }
+          } catch (geoError) {
+            console.error('Geocoding error on profile update:', geoError);
+          }
+        }
+
+        if (!locationUpdated) {
+          locationWarning =
+            'The practice address could not be placed on the map, so your '
+            + 'location is unchanged. Patients will still find you at your '
+            + 'previous address.';
+        }
+      }
+
+      // Saving only the scheme list is legitimate, and Doctor.update builds
+      // no valid statement from an empty object.
+      const updatedDoctor = Object.keys(updateData).length > 0
+        ? await Doctor.update(doctorId, updateData)
+        : await Doctor.findById(doctorId);
+
       if (!updatedDoctor) {
         return res.status(404).json({
           success: false,
@@ -576,11 +675,17 @@ class DoctorController {
 
       delete updatedDoctor.password_hash;
 
+      updatedDoctor.medicalAids = medicalAids === undefined
+          ? await MedicalAid.getForDoctor(doctorId)
+          : await MedicalAid.setForDoctor(doctorId, medicalAids);
+
       await AuditLog.logSecurityEvent(req, doctorId, 'doctor', updatedDoctor.email, 'profile_updated', 'success');
 
       res.status(200).json({
         success: true,
         message: 'Profile updated successfully',
+        location_updated: locationUpdated,
+        ...(locationWarning ? { location_warning: locationWarning } : {}),
         data: updatedDoctor
       });
 
@@ -600,7 +705,10 @@ class DoctorController {
    */
   static async getNearbyDoctors(req, res) {
     try {
-      const { latitude, longitude, radius = 15 } = req.body;
+      // The patient app sends radius_km; earlier callers send radius. Taking
+      // only one of them silently ignored whatever the patient chose.
+      const { latitude, longitude, coveredByMyMedicalAid } = req.body;
+      const radius = req.body.radius ?? req.body.radius_km ?? 15;
       const userId = req.user ? req.user.id : null;
 
       // Validate required location parameters
@@ -680,6 +788,31 @@ class DoctorController {
         delete doc.password_hash;
       });
 
+      // Phase 1: "find doctor nearest to them (if under medical aid, doctor
+      // that's covered by medical plan)". The patient's scheme is free text,
+      // so it is matched against the catalogue rather than compared directly.
+      let medicalAidFilter = null;
+      if (coveredByMyMedicalAid && userId) {
+        const schemeName = await MedicalAid.getPatientSchemeName(userId);
+        const scheme = await MedicalAid.findSchemeByName(schemeName);
+        if (scheme) {
+          const accepting = new Set(await MedicalAid.doctorIdsAccepting(scheme.id));
+          medicalAidFilter = scheme;
+          for (let i = nearbyDoctors.length - 1; i >= 0; i--) {
+            if (!accepting.has(nearbyDoctors[i].id)) nearbyDoctors.splice(i, 1);
+          }
+        }
+      }
+
+      // Always say which schemes each doctor takes, so the patient can see
+      // cover even when they have not asked to filter by it.
+      const acceptedByDoctor = await MedicalAid.getForDoctors(
+        nearbyDoctors.map(d => d.id)
+      );
+      nearbyDoctors.forEach(doc => {
+        doc.medicalAids = acceptedByDoctor[doc.id] || [];
+      });
+
       // Log search for analytics
       if (userId) {
         await AuditLog.logSecurityEvent(
@@ -702,6 +835,11 @@ class DoctorController {
             longitude
           },
           radius_km: radius,
+          // Null when the caller did not ask to filter, or when their scheme
+          // did not match the catalogue. The client must not present an
+          // unfiltered list as "covered by your plan".
+          medical_aid_filter: medicalAidFilter,
+          medical_aid_filter_applied: medicalAidFilter !== null,
           doctors_count: nearbyDoctors.length,
           doctors: nearbyDoctors
         }

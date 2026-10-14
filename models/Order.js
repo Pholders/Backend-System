@@ -178,16 +178,27 @@ class Order {
    */
   static async listForPharmacy(pharmacy_id, { status = null, limit = 50, offset = 0 } = {}) {
     const params = [pharmacy_id];
-    let where = 'pharmacy_id = $1';
+    // Qualified with o.: patients also has a status column, so an unqualified
+    // one is ambiguous once the joins below are in play.
+    let where = 'o.pharmacy_id = $1';
     if (status) {
       params.push(status);
-      where += ` AND status = $${params.length}`;
+      where += ` AND o.status = $${params.length}`;
     }
     params.push(limit, offset);
+    // The pharmacy queue is read by people, so it carries the patient's
+    // name and the script reference rather than only their ids.
     const sql = `
-      SELECT * FROM orders
+      SELECT o.*,
+             u.first_name AS patient_first_name,
+             u.last_name  AS patient_last_name,
+             u.phone      AS patient_phone,
+             p.prescription_number
+      FROM orders o
+      LEFT JOIN patients u ON u.id = o.patient_id
+      LEFT JOIN prescriptions p ON p.id = o.prescription_id
       WHERE ${where}
-      ORDER BY created_at DESC
+      ORDER BY o.created_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const result = await query(sql, params);

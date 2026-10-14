@@ -8,6 +8,7 @@ const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
 const EmailService = require('../services/emailService');
+const PrescriptionPdfService = require('../services/prescriptionPdfService');
 const { pool } = require('../config/db');
 const crypto = require('crypto');
 
@@ -307,8 +308,22 @@ class PrescriptionController {
         [session.id]
       );
 
-      // Generate QR code
+      // Generate the QR code and STORE its token. Without the store the
+      // token exists only in this response: GET /prescriptions/qr/:token
+      // looks it up in prescription_qr_access and finds nothing, so every
+      // link and QR issued before this was dead the moment it was minted.
       const qrCodeData = QRCodeService.generateQRCodeData(prescription);
+
+      let qrStored = false;
+      try {
+        await Prescription.generateQRCodeAccess(prescriptionId, qrCodeData.qrToken);
+        qrStored = true;
+      } catch (qrError) {
+        // The signature is the part that matters legally, so a QR failure
+        // does not fail the signing — but a code that cannot be redeemed is
+        // not returned either, rather than handing out a dead link.
+        console.error('❌ Could not store QR access token:', qrError.message);
+      }
 
       res.status(200).json({
         success: true,
@@ -320,8 +335,11 @@ class PrescriptionController {
           signatureTimestamp: timestamp,
           signatureMethod: 'RSA-SHA256',
           signatureFingerprint: signatureFingerprint,
-          qrCode: qrCodeData.qrString,
-          accessLink: qrCodeData.accessLink,
+          qrAvailable: qrStored,
+          ...(qrStored ? {
+            qrCode: qrCodeData.qrString,
+            accessLink: qrCodeData.accessLink,
+          } : {}),
           medicineCount: prescription.items.length,
           auditTrail: {
             signedBy: prescription.prescriber_name,
@@ -497,17 +515,17 @@ class PrescriptionController {
         });
       }
 
-      // Note: In production, generate actual PDF using a library like pdfkit
-      res.status(200).json({
-        success: true,
-        message: 'Prescription download initiated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          downloadLink: `/api/prescriptions/${prescriptionId}/download`,
-          format: 'PDF',
-          size: 'estimated 500KB'
-        }
-      });
+      const pdf = await PrescriptionPdfService.render(prescription);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Length', pdf.length);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      // Personal health information: no shared cache should hold a copy.
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
     } catch (error) {
       console.error('❌ Error downloading prescription:', error);
       res.status(500).json({
@@ -534,17 +552,19 @@ class PrescriptionController {
         });
       }
 
-      // Generate print-friendly format
-      res.status(200).json({
-        success: true,
-        message: 'Print data generated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          printUrl: `/api/prescriptions/${prescriptionId}/print`,
-          printFormat: 'A4',
-          watermark: `Patient: ${prescription.patient_name} | Doctor: ${prescription.prescriber_name}`
-        }
-      });
+      const pdf = await PrescriptionPdfService.render(prescription);
+
+      // The same document as the download, served inline so the browser or
+      // the app opens it in a viewer the person can print from, rather than
+      // dropping a file in their downloads folder.
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Length', pdf.length);
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
     } catch (error) {
       console.error('❌ Error printing prescription:', error);
       res.status(500).json({
@@ -973,9 +993,20 @@ class PrescriptionController {
             id: p.id,
             prescriptionNumber: p.prescription_number,
             patient: p.patient_name,
+            // The doctor UI needs the patient to open a record from a script,
+            // and the revoke/dispense state to show it. All of this was
+            // already queried and then dropped here.
+            patientId: p.patient_id,
+            appointmentId: p.appointment_id,
             diagnosis: p.diagnosis,
             status: p.signature_status,
-            createdAt: p.created_at
+            createdAt: p.created_at,
+            isRevoked: p.is_revoked,
+            revokeReason: p.revoke_reason,
+            // Doctors display dispensing, they do not perform it.
+            isDispensed: p.is_dispensed,
+            dispensedAt: p.dispensed_at,
+            dispensedByPharmacyName: p.dispensed_by_pharmacy_name
           }))
         }
       });

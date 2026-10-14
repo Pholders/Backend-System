@@ -985,7 +985,27 @@ class AppointmentController {
   static async getDoctorAppointments(req, res) {
     try {
       const doctorId = req.user.id;
-      const { limit = 50, offset = 0 } = req.query;
+      const { limit = 50, offset = 0, scope = 'inbox' } = req.query;
+
+      // `inbox` is what this endpoint has always returned: bookings the doctor
+      // has not accepted yet. That leaves no way to see the day's confirmed
+      // appointments, so `upcoming` and `all` were added alongside it. The
+      // default is unchanged so existing callers keep working.
+      const scopeFilters = {
+        inbox: `AND a.status IN ('pending_payment', 'scheduled')
+                AND a.doctor_accepted = FALSE`,
+        upcoming: `AND a.status = 'scheduled'
+                   AND a.doctor_accepted = TRUE
+                   AND a.appointment_date >= CURRENT_DATE`,
+        all: `AND a.status IN ('pending_payment', 'scheduled', 'completed')`
+      };
+      const scopeFilter = scopeFilters[scope];
+      if (!scopeFilter) {
+        return res.status(400).json({
+          success: false,
+          message: `Unknown scope '${scope}'. Use inbox, upcoming or all.`
+        });
+      }
 
       const query_string = `
         SELECT a.*, 
@@ -993,9 +1013,8 @@ class AppointmentController {
                u.email as patient_email, u.phone as patient_phone
         FROM appointments a
         LEFT JOIN patients u ON a.patient_id = u.id
-        WHERE a.doctor_id = $1 
-          AND a.status IN ('pending_payment', 'scheduled')
-          AND a.doctor_accepted = FALSE
+        WHERE a.doctor_id = $1
+          ${scopeFilter}
         ORDER BY a.appointment_date ASC, a.time_slot ASC
         LIMIT $2 OFFSET $3;
       `;
@@ -1008,8 +1027,12 @@ class AppointmentController {
         message: 'Doctor appointments retrieved',
         data: {
           total: result.rows.length,
+          scope,
           appointments: result.rows.map(apt => ({
             id: apt.id,
+            // Without this the app has a patient's name but no way to open
+            // their record or attach them to anything.
+            patientId: apt.patient_id,
             patientName: `${apt.patient_first_name} ${apt.patient_last_name}`,
             patientEmail: apt.patient_email,
             patientPhone: apt.patient_phone,

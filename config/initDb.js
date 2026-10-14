@@ -10,7 +10,13 @@ const DeviceToken = require('../models/DeviceToken');
 const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
+const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
+const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
+// Exports the function directly, unlike the { runMigration } modules above.
+const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+const { runMigration: createChecklistTables } = require('./createChecklistTables');
+const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
@@ -72,8 +78,14 @@ const initializeDatabase = async () => {
     // Medical aid (medical_aid_schemes, medical_aid_claims, invoices)
     await createMedicalAidTables();
 
+    // Which medical aids a doctor accepts, so patients can filter on cover.
+    // Runs after the doctors table exists.
+    await addDoctorMedicalAids();
+
     // Support tickets
     await createSupportTicketsTable();
+    await createChecklistTables();
+    await createStoredFilesTable();
 
     // Notifications stack
     await Notification.createTable();
@@ -120,6 +132,15 @@ const initializeDatabase = async () => {
 
     // Run appointment reminders migration
     await addAppointmentReminders();
+
+    // In-app reminders. Runs after patients and appointments exist, since it
+    // references both.
+    await createInAppNotifications();
+
+    // prescription_qr_access, which every prescription QR link depends on.
+    // The migration existed and was never registered here, so the table was
+    // never created and no QR token could be stored.
+    await addQRCodeOneTimeUse();
 
     // Create pharmacy partnership tables
     await addPharmacyPartnerships();

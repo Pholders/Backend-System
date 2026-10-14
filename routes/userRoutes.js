@@ -847,6 +847,9 @@ router.post('/doctor/verify-otp', preventAuthenticated, DoctorController.verifyO
 router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
 router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
 
+// Medical aid catalogue — doctors pick from it, patients read the names.
+router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
+
 // Doctor Account Activation Routes (OTP-based)
 router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
 router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
@@ -1017,6 +1020,10 @@ router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patie
  *       400:
  *         description: Invalid input
  */
+// Pharmacies a patient can claim a prescription at. Claiming needs a
+// pharmacyId and nothing patient-callable listed them.
+router.get('/pharmacies', authMiddleware, requireRole('patient'), PharmacyController.listForPatients);
+
 router.post('/pharmacy/signup', preventAuthenticated, PharmacyController.signup);
 
 /**
@@ -1330,6 +1337,10 @@ router.get('/admin/activity-log', authMiddleware, requireRole('admin'), AdminCon
  *       401:
  *         description: Unauthorized
  */
+// Pharmacy directory and admission to the partnership network.
+router.get('/admin/pharmacies', authMiddleware, requireRole('admin'), AdminController.listPharmacies);
+router.patch('/admin/pharmacies/:pharmacyId/status', authMiddleware, requireRole('admin'), AdminController.setPharmacyStatus);
+
 router.get('/admin/security/dashboard', authMiddleware, requireRole('admin'), AdminController.getSecurityDashboard);
 
 /**
@@ -2197,20 +2208,22 @@ router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'),
 // Pharmacy Groups
 router.post('/partnerships/groups', authMiddleware, requireRole('admin'), PharmacyPartnershipController.createGroup);
 router.get('/partnerships/groups', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAllGroups);
+// Literal paths must precede /:id, or Express reads 'search' as an id.
+router.get('/partnerships/groups/search', authMiddleware, requireRole('admin'), PharmacyPartnershipController.searchGroups);
 router.get('/partnerships/groups/:groupId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getGroupById);
 router.put('/partnerships/groups/:groupId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.updateGroup);
 router.post('/partnerships/groups/:groupId/pharmacies', authMiddleware, requireRole('admin'), PharmacyPartnershipController.addPharmacyToGroup);
 router.delete('/partnerships/groups/:groupId/pharmacies/:pharmacyId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.removePharmacyFromGroup);
-router.get('/partnerships/groups/search', authMiddleware, requireRole('admin'), PharmacyPartnershipController.searchGroups);
 
 // Partnership Agreements
 router.post('/partnerships/agreements', authMiddleware, requireRole('admin'), PharmacyPartnershipController.createAgreement);
 router.get('/partnerships/agreements', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAllAgreements);
+// Same here: 'expiring' would otherwise be taken for an agreement id.
+router.get('/partnerships/agreements/expiring', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getExpiringAgreements);
 router.get('/partnerships/agreements/:agreementId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getAgreementById);
 router.put('/partnerships/agreements/:agreementId', authMiddleware, requireRole('admin'), PharmacyPartnershipController.updateAgreement);
 router.post('/partnerships/agreements/:agreementId/activate', authMiddleware, requireRole('admin'), PharmacyPartnershipController.activateAgreement);
 router.post('/partnerships/agreements/:agreementId/suspend', authMiddleware, requireRole('admin'), PharmacyPartnershipController.suspendAgreement);
-router.get('/partnerships/agreements/expiring', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getExpiringAgreements);
 
 // Compliance & Reporting
 router.get('/partnerships/compliance/dashboard', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getComplianceDashboard);
