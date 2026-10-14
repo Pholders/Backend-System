@@ -16,6 +16,7 @@ const { runMigration: createInAppNotifications } = require('./createInAppNotific
 const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
+const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
@@ -84,6 +85,7 @@ const initializeDatabase = async () => {
     // Support tickets
     await createSupportTicketsTable();
     await createChecklistTables();
+    await createStoredFilesTable();
 
     // Notifications stack
     await Notification.createTable();

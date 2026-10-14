@@ -22,8 +22,9 @@ it is set.
 
 | Value | Where bytes live | Use |
 | --- | --- | --- |
-| `local` (default) | `uploads/` on the machine | Development |
-| `firebase` | Firebase Storage bucket | Render, and any host with an ephemeral disk |
+| `local` (default) | `uploads/` on the machine | A developer machine |
+| `postgres` | `stored_files` in the app's own database | Render, today |
+| `firebase` | Firebase Storage bucket | Once there is a billing account for one |
 
 On Render the disk is wiped on every deploy. With the `local` driver, a
 document a patient uploaded on Monday is gone after Tuesday's deploy while
@@ -31,7 +32,28 @@ its database row survives — pointing at nothing. That is the reason the
 firebase driver exists, and why `STORAGE_DRIVER=firebase` belongs on any
 deployed environment.
 
+## The postgres driver
+
+`STORAGE_DRIVER=postgres` keeps the bytes in a `stored_files` table, keyed by
+the same storage key every other driver uses. It needs no account, no card and
+no configuration beyond that one variable, because it uses the database the
+app already connects to.
+
+It is not where files belong long term. It grows the database and its backups,
+and it puts file reads on the same connection pool as everything else. It is
+here because it is the only durable store available without a billing
+account, and it suits what is actually stored: every upload route caps at
+10MB or less, files are read one at a time behind an ownership check, and
+nothing streams.
+
+Moving off it later is a copy and an env var, not a data migration — the keys
+in `medical_aid_schemes`, `patient_files` and the rest mean the same thing to
+every driver.
+
 ## Setting up the firebase driver
+
+Firebase Storage requires a billing account (the Blaze plan), which is why
+the `postgres` driver exists. When there is one:
 
 1. Create a Firebase project and enable Storage. Pick **africa-south1** as
    the location — patient data under POPIA should stay in South Africa, and

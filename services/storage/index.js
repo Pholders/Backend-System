@@ -1,5 +1,5 @@
 /**
- * File storage — one interface, two drivers.
+ * File storage — one interface, several drivers.
  *
  * Uploads used to be written straight to the server's disk. On Render that
  * filesystem is ephemeral: every deploy and restart wipes it, while the
@@ -12,8 +12,11 @@
  * local disk to Firebase (and later to S3) changes where bytes live without
  * touching a single stored row.
  *
- * Driver is chosen by STORAGE_DRIVER: `local` (the default, unchanged
- * behaviour) or `firebase`.
+ * Driver is chosen by STORAGE_DRIVER:
+ *   local     the default, unchanged behaviour — fine on a developer machine
+ *   postgres  bytes in the database this deployment already has, which is
+ *             the only durable store available without a billing account
+ *   firebase  a Storage bucket, once there is a billing account for one
  *
  * Deliberately NOT exposing public or signed provider URLs. Downloads keep
  * going through our own route, which verifies a signed token and re-checks
@@ -23,6 +26,7 @@
 
 const DRIVERS = {
   local: () => require('./localDriver'),
+  postgres: () => require('./postgresDriver'),
   firebase: () => require('./firebaseDriver'),
 };
 
