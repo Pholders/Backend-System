@@ -487,6 +487,19 @@
     yet, so <em>Documents and PDFs</em> is the newest and least trustworthy
     section on this page.
     <br><br>
+    <strong>New on 14 October.</strong> Uploaded files are kept in the database
+    instead of on the server's disk, which a deploy wipes. Firebase Storage was
+    the plan until it started requiring a paid billing account. Set
+    <code>STORAGE_DRIVER=postgres</code> on Render or uploads still go to the
+    disk that gets erased.
+    <br><br>
+    <strong>What counts as phase 1.</strong> Every story here was checked
+    against SRS 3.2.1.1, the only part of the document that defines a phase.
+    Seven that are built but not asked for &mdash; security settings, devices
+    and login activity, 2FA and biometrics, support and legal pages, linked
+    services and dependents &mdash; now sit under <em>Beyond phase 1</em> so
+    they are not confused with what phase 1 owes.
+    <br><br>
     <strong>Least tested:</strong> the pharmacy screens. The queue, claiming and
     dispensing are all confirmed working through the API, but nobody has clicked
     through the screens themselves, so that section is the most likely to turn
@@ -505,7 +518,7 @@
     <h2>Known, not defects</h2>
     <ul>
       <li>SMS and push reminders are console stubs.</li>
-      <li>Uploaded files are erased by the next deploy until <code>STORAGE_DRIVER</code> is set to <code>firebase</code> on Render. The Firebase project has not been created yet.</li>
+      <li>Uploaded files need <code>STORAGE_DRIVER=postgres</code> set on Render. Without it the app writes to local disk, which every deploy erases. Firebase Storage was the original plan but now requires a paid billing account.</li>
       <li>Nothing in the platform creates invoice rows, so an invoice has no document to attach to. Claims are created by the pharmacy order flow and do work.</li>
       <li>A prescription PDF is generated on each request and never stored, so there is nothing to go stale.</li>
       <li>Prescription QR links point at localhost until the web app is deployed.</li>
@@ -521,7 +534,7 @@
 
   <footer>
     <div id="foot">Anyone with this link can tick and comment — no account needed. Results are shared, so what you mark is what everyone else sees.</div>
-    <div class="stamp">Served by the PHolders backend · results are shared live</div>
+    <div class="stamp">Served by the PHolders backend · results are shared live · reviewed against SRS 3.2.1.1 on 14 October 2026</div>
   </footer>
 </div>
 
@@ -635,8 +648,7 @@
         ["D5", "Doctor", "Save the profile of a doctor whose address moved", "Coordinates move with it — the test doctor sits ~10km out", true, "Professional Details → Save with no changes → re-read the profile's coordinates"],
         ["D6", "Doctor", "Untick every medical aid and save", "Persists as \"accepts none\", not as unchanged", false, "Professional Details → untick every scheme → Save → reload"],
         ["D7", "Doctor", "Change consulting hours, including closing a day", "Persists. A malformed time is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
-        ["D8", "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"],
-        ["D9", "Doctor", "Open Security", "Recent sign-ins and active sessions listed", false, "Settings → Security → Login Activity and Device Management"]
+        ["D8", "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"]
       ]
     },
     {
@@ -655,15 +667,9 @@
     {
       id: "new",
       name: "Newly reachable",
-      blurb: "46 routes returned 404 until this week. The paths resolve and the code loads, but none has run live — treat it as new code.",
+      blurb: "46 routes returned 404 until recently. These two carry medical aid, which phase 1 asks for; the rest of what was unblocked sits under Beyond phase 1.",
       stories: [
         ["X1", "Patient", "Record a medical aid through the API", "Saved and readable back", false, "PUT /api/profile/medical-aid, then GET it back"],
-        ["X2", "Any",     "Terms and privacy", "Both return content", false, "GET /api/legal/terms and /api/legal/privacy"],
-        ["X3", "Patient", "Support ticket, contact, FAQ", "All four routes answer", false, "POST /api/support/tickets and /contact; GET /faq and /tickets"],
-        ["X4", "Patient", "Profile, avatar, password, 2FA, biometrics", "Each saves and reads back", false, "Patient app → Profile → each section in turn"],
-        ["X5", "Patient", "Devices and login activity", "Listed; revoke one, revoke others", false, "Patient app → Security → Devices and Login activity"],
-        ["X6", "Patient", "Report suspicious, freeze, unfreeze, audit export", "Each completes", false, "Patient app → Security → Report suspicious, then Freeze"],
-        ["X7", "Patient", "Linked doctors, pharmacies, dependents", "List, link, unlink", false, "Patient app → Linked services → each of the three tabs"],
         ["X8", "Patient", "Medical aid card upload, claims, invoices, signed download", "Upload works, and the signed link refuses someone else's token", true, "Patient app → Medical aid → upload a card, then open the signed link"]
       ]
     },
@@ -682,7 +688,7 @@
     {
       id: "docs",
       name: "Documents and PDFs",
-      blurb: "Prescription PDFs, and the documents a medical aid asks for. All of it was built on 9 October and none of it has run live. DX12 is expected to fail until Firebase is configured.",
+      blurb: "Prescription PDFs, and the documents a medical aid asks for. Built on 9 October, with file storage moved into the database on 14 October. None of it has run live yet.",
       stories: [
         ["DX1",  "Patient", "Download a prescription", "A real PDF opens, not JSON describing one. Prescriber with HPCSA number, patient, diagnosis, a card per medicine with its schedule, and a signature fingerprint", true, "Patient app -> a signed prescription -> Download"],
         ["DX2",  "Patient", "Print a prescription", "The same document, opened in a viewer to print from rather than dropped in Downloads", false, "Patient app -> a prescription -> Print"],
@@ -695,7 +701,21 @@
         ["DX9",  "Patient", "Attach a document to someone else's claim", "Refused, and nothing is stored", true, "Use a claim id belonging to another patient"],
         ["DX10", "Patient", "Attach something that is not a document", "Refused on type, and refused again on size over 10MB", false, "Try an .exe, then try a file larger than 10MB"],
         ["DX11", "Patient", "Attach a document to an invoice", "Expected to fail: nothing in the platform creates invoice rows, so there is no invoice to attach to", true, "POST .../invoices/:id/document and see that no invoice exists"],
-        ["DX12", "Any",     "Upload a document, redeploy, open it again", "Known failure until STORAGE_DRIVER is firebase. Render wipes the disk on every deploy", true, "Upload a claim document, redeploy the backend, then open the link"]
+        ["DX12", "Any",     "Upload a document, redeploy, open it again", "It still opens. Files live in the database now, so a deploy no longer erases them. Fails if STORAGE_DRIVER is not set to postgres", true, "Upload a claim document, redeploy the backend, then open the link"]
+      ]
+    },
+    {
+      id: "beyond",
+      name: "Beyond phase 1",
+      blurb: "Built and reachable, but not asked for by SRS 3.2.1.1, which is the only part of the document that defines a phase. Worth testing when there is time; not worth holding phase 1 for. Nothing here blocks the loop.",
+      stories: [
+        ["D9", "Doctor",  "Open Security", "Recent sign-ins and active sessions listed", false, "Settings → Security → Login Activity and Device Management"],
+        ["X2", "Any",     "Terms and privacy", "Both return content", false, "GET /api/legal/terms and /api/legal/privacy"],
+        ["X3", "Patient", "Support ticket, contact, FAQ", "All four routes answer", false, "POST /api/support/tickets and /contact; GET /faq and /tickets"],
+        ["X4", "Patient", "Profile, avatar, password, 2FA, biometrics", "Each saves and reads back", false, "Patient app → Profile → each section in turn"],
+        ["X5", "Patient", "Devices and login activity", "Listed; revoke one, revoke others", false, "Patient app → Security → Devices and Login activity"],
+        ["X6", "Patient", "Report suspicious, freeze, unfreeze, audit export", "Each completes", false, "Patient app → Security → Report suspicious, then Freeze"],
+        ["X7", "Patient", "Linked doctors, pharmacies, dependents", "List, link, unlink", false, "Patient app → Linked services → each of the three tabs"]
       ]
     },
     {
@@ -709,7 +729,7 @@
         ["XC4", "Patient",  "Call an admin route with a patient token", "Refused", false, "Call /users/admin/pharmacies with a patient token"],
         ["XC5", "Any",      "Reload mid-session", "Still signed in, same place", false, "Reload on any inner page"],
         ["XC6", "Patient",  "Scan a prescription QR", "Opens. Still localhost means FRONTEND_URL was not set", true, "Scan the QR, or open the accessLink from the signing dialog"],
-        ["XC7", "Any",      "Check the deploy log on boot", "Three migrations: schemes catalogue, doctor medical aids, in-app notifications", false, "Render → the service → Logs, at boot"]
+        ["XC7", "Any",      "Check the deploy log on boot", "Every migration reports a tick and none reports an error. stored_files and the checklist tables are among them", false, "Render → the service → Logs, at boot"]
       ]
     }
   ];
