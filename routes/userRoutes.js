@@ -850,6 +850,9 @@ router.post('/doctor/resend-verification', preventAuthenticated, DoctorControlle
 // Medical aid catalogue — doctors pick from it, patients read the names.
 router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
 
+// Medical aid catalogue — doctors pick from it, patients read the names.
+router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
+
 // Doctor Account Activation Routes (OTP-based)
 router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
 router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
