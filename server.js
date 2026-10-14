@@ -32,6 +32,10 @@ const { initializeDatabase } = require('./config/initDb');
 // Import Passport config
 require('./config/passport');
 
+// Import Swagger config
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./config/swagger');
+
 // Import scheduled notification triggers
 const notificationTriggers = require('./jobs/notificationTriggers');
 
@@ -107,6 +111,9 @@ app.use(session({
 // Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Swagger UI middleware
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // ============================================================================
 // API ROUTES
@@ -217,6 +224,7 @@ async function startServer() {
       console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
       console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+      console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
       console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
       console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
       console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
