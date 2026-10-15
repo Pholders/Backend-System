@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const path = require('path');
 const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
 const MedicalAid = require('../models/MedicalAid');
@@ -11,6 +12,28 @@ const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
+const storage = require('../services/storage');
+
+const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
+
+function buildProfileImageUrl(req, filename) {
+  return `${req.protocol}://${req.get('host')}/api/users/doctor/profile-images/${filename}`;
+}
+
+function profileImageStorageKey(profileImageUrl) {
+  if (typeof profileImageUrl !== 'string') return null;
+
+  try {
+    const match = new URL(profileImageUrl).pathname
+      .match(/\/api\/users\/doctor\/profile-images\/([^/]+)$/);
+    if (!match) return null;
+
+    const key = `${DOCTOR_PROFILE_IMAGE_FOLDER}/${decodeURIComponent(match[1])}`;
+    return storage.isSafeKey(key) ? key : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /**
  * Build a display-ready doctor name with the "Dr" title prefix.
@@ -537,6 +560,111 @@ class DoctorController {
   }
 
   /**
+   * GET /api/users/doctor/profile-images/:filename
+   *
+   * Doctor profile images appear in patient-facing provider listings. The
+   * random filename makes this public route unguessable while Cloudinary
+   * remains private behind the application proxy.
+   */
+  static async serveProfileImage(req, res) {
+    try {
+      const key = `${DOCTOR_PROFILE_IMAGE_FOLDER}/${req.params.filename}`;
+      if (!storage.isSafeKey(key)) {
+        return res.status(400).json({ success: false, message: 'Invalid path' });
+      }
+
+      let stored;
+      try {
+        stored = await storage.get(key);
+      } catch (error) {
+        if (error && error.code === 'STORAGE_NOT_FOUND') {
+          return res.status(404).json({ success: false, message: 'Profile image not found' });
+        }
+        throw error;
+      }
+
+      res.setHeader('Content-Type', stored.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.send(stored.buffer);
+    } catch (error) {
+      console.error('Serve doctor profile image error:', error);
+      return res.status(500).json({ success: false, message: 'Error loading profile image' });
+    }
+  }
+
+  /**
+   * PUT /api/users/doctor/profile/image
+   */
+  static async uploadProfileImage(req, res) {
+    let uploadedKey = null;
+
+    try {
+      const doctorId = req.user.id;
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No image file provided (field: image)'
+        });
+      }
+
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+
+      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+      const suffix = crypto.randomBytes(8).toString('hex');
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${ext}`;
+      uploadedKey = await storage.put(req.file, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
+
+      const profileImageUrl = buildProfileImageUrl(req, filename);
+      const updatedDoctor = await Doctor.update(doctorId, { profile_image: profileImageUrl });
+      if (!updatedDoctor) {
+        await storage.remove(uploadedKey);
+        uploadedKey = null;
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+      uploadedKey = null;
+
+      const previousKey = profileImageStorageKey(doctor.profile_image);
+      let cleanupWarning = null;
+      if (previousKey) {
+        try {
+          await storage.remove(previousKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove replaced doctor profile image:', cleanupError);
+          cleanupWarning = 'Your profile image was updated, but the previous image could not be removed.';
+        }
+      }
+
+      await AuditLog.logSecurityEvent(
+        req, doctorId, 'doctor', updatedDoctor.email, 'avatar_updated', 'success'
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Profile image updated successfully',
+        data: { profile_image: profileImageUrl },
+        warning: cleanupWarning
+      });
+    } catch (error) {
+      if (uploadedKey) {
+        try {
+          await storage.remove(uploadedKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove orphaned doctor profile image:', cleanupError);
+        }
+      }
+      console.error('Upload doctor profile image error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error uploading profile image',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Update Doctor Profile
    */
   static async updateProfile(req, res) {
@@ -549,6 +677,7 @@ class DoctorController {
       delete updateData.email;
       delete updateData.hpcsa_number;
       delete updateData.created_at;
+      delete updateData.profile_image;
 
       // Accepted schemes live in their own table, so they must not reach
       // Doctor.update — it maps every remaining key to a doctors column.

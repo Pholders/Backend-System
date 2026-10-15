@@ -106,6 +106,7 @@ would bypass both checks above. That is the whole reason for the extra hop.
 | Route | Types | Limit |
 | --- | --- | --- |
 | Patient documents | PDF, JPEG, PNG, DOC, DOCX, TXT | 10 MB |
+| Doctor profile image | JPEG, PNG, WEBP | 5 MB |
 | Claim / invoice document | PDF, JPEG, PNG, WEBP | 10 MB |
 | Medical aid card | JPEG, PNG, WEBP | 8 MB |
 | Avatar | JPEG, PNG, WEBP | 5 MB |
@@ -118,6 +119,12 @@ A claim or an invoice holds one document, replaced by uploading another:
 Both take the file as `document`, check the row belongs to the caller before
 storing anything, and delete the object they superseded only after the row
 points at the new one.
+
+Doctor profile images are uploaded through
+`PUT /api/users/doctor/profile/image` using the multipart field `image`.
+Only the signed-in doctor can upload their own image. The stored image is
+returned through `GET /api/users/doctor/profile-images/:filename` for
+patient-facing provider listings.
 
 ## Prescription PDFs
 

@@ -32,6 +32,16 @@ const upload = multer({
   }
 });
 
+const doctorProfileImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only JPEG, PNG, or WEBP images are allowed for profile images'));
+  }
+});
+
 /**
  * @swagger
  * tags:
@@ -872,6 +882,7 @@ router.post('/doctor/resend-verification', preventAuthenticated, DoctorControlle
  *         description: Unauthorized
  */
 router.get('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.getProfile);
+router.get('/doctor/profile-images/:filename', DoctorController.serveProfileImage);
 
 /**
  * @swagger
@@ -899,6 +910,13 @@ router.get('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorContr
  *         description: Invalid input
  */
 router.put('/doctor/profile', authMiddleware, requireRole('doctor'), DoctorController.updateProfile);
+router.put(
+  '/doctor/profile/image',
+  authMiddleware,
+  requireRole('doctor'),
+  doctorProfileImageUpload.single('image'),
+  DoctorController.uploadProfileImage
+);
 
 /**
  * @swagger
