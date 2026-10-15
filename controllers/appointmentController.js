@@ -332,7 +332,7 @@ class AppointmentController {
         appointment_date: appointmentDate,
         time_period: timePeriod,
         time_slot: timeSlot,
-        consultation_fee: doctor.consultation_fee,
+        consultation_fee: Doctor.consultationFeeFor(doctor),
         reason_for_visit: reasonForVisit || null
       });
 

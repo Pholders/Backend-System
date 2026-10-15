@@ -7,6 +7,26 @@ const { query } = require('../config/db');
 
 class Doctor {
   /**
+   * The fee a doctor charges, falling back when none has been set.
+   *
+   * Signup does not ask for a fee, but appointments.consultation_fee is
+   * NOT NULL, so booking a doctor without one failed with a 500. The
+   * fallbacks match config/backfillProviderDetails.js.
+   */
+  static consultationFeeFor(doctor) {
+    const fee = Number(doctor && doctor.consultation_fee);
+    if (fee > 0) {
+      return fee;
+    }
+    const bySpecialization = {
+      Cardiologist: 1200,
+      'General Practice': 350,
+      'General Practitioner': 350,
+    };
+    return bySpecialization[doctor && doctor.specialization] || 350;
+  }
+
+  /**
    * Create the doctors table
    */
   static async createTable() {
@@ -84,16 +104,18 @@ class Doctor {
       INSERT INTO doctors (
         first_name, last_name, email, password_hash, phone,
         hpcsa_number, specialization, experience,
-        clinic_name, city, province, latitude, longitude, clinic_address, bio
+        clinic_name, city, province, latitude, longitude, clinic_address, bio,
+        consultation_fee
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
     `;
 
     const values = [
       first_name, last_name, email, password_hash, phone,
       hpcsa_number, specialization, experience,
-      clinic_name, city, province, latitude, longitude, clinic_address, bio || null
+      clinic_name, city, province, latitude, longitude, clinic_address, bio || null,
+      Doctor.consultationFeeFor(doctorData)
     ];
 
     const result = await query(insertQuery, values);

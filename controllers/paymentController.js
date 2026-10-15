@@ -81,7 +81,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       // Create payment record
       const paymentData = {
@@ -670,7 +670,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       const StripeService = require('../services/stripeService');
 
@@ -1032,7 +1032,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       const StripeService = require('../services/stripeService');
       const breakdown = StripeService.calculatePaymentBreakdown(consultationFee);
