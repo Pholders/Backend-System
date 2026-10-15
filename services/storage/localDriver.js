@@ -6,7 +6,7 @@ const path = require('path');
  * changes until STORAGE_DRIVER says otherwise.
  *
  * Fine for a developer machine. On a host with an ephemeral filesystem the
- * files do not survive a deploy, which is the reason the firebase driver
+ * files do not survive a deploy, which is the reason the postgres driver
  * exists.
  */
 

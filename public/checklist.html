@@ -518,7 +518,7 @@
     <h2>Known, not defects</h2>
     <ul>
       <li>SMS and push reminders are console stubs.</li>
-      <li>Uploaded files need <code>STORAGE_DRIVER=postgres</code> set on Render. Without it the app writes to local disk, which every deploy erases. Firebase Storage was the original plan but now requires a paid billing account.</li>
+      <li>Uploaded files need <code>STORAGE_DRIVER=postgres</code> set on Render. Without it the app writes to local disk, which every deploy erases. Firebase Storage was the original plan and has been removed; Cloudinary is being added in its place.</li>
       <li>Nothing in the platform creates invoice rows, so an invoice has no document to attach to. Claims are created by the pharmacy order flow and do work.</li>
       <li>A prescription PDF is generated on each request and never stored, so there is nothing to go stale.</li>
       <li>Prescription QR links point at localhost until the web app is deployed.</li>

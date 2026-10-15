@@ -5,8 +5,8 @@ const { query } = require('./db');
  *
  * Keeping uploaded bytes in the database is not where they belong long term,
  * but it is the one durable place this deployment already has. Render's disk
- * is wiped on every deploy and Firebase Storage now requires a billing
- * account, so without this an uploaded document survives until the next
+ * is wiped on every deploy and there is no hosted file store yet, so without
+ * this an uploaded document survives until the next
  * deploy and no further.
  *
  * The key is the primary key, which is the same opaque path every other

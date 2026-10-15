@@ -9,14 +9,16 @@
  * Callers work in terms of a storage KEY — an opaque, forward-slashed path
  * like `medical-aid/patient_16_front_1791.jpg`. That key is what goes in the
  * database, and it means the same thing to every driver, so moving from
- * local disk to Firebase (and later to S3) changes where bytes live without
- * touching a single stored row.
+ * local disk to the database (and later to a hosted store such as Cloudinary)
+ * changes where bytes live without touching a single stored row.
  *
  * Driver is chosen by STORAGE_DRIVER:
  *   local     the default, unchanged behaviour — fine on a developer machine
  *   postgres  bytes in the database this deployment already has, which is
- *             the only durable store available without a billing account
- *   firebase  a Storage bucket, once there is a billing account for one
+ *             the only durable store available today
+ *
+ * A hosted store (Cloudinary is being added) is one more entry in DRIVERS:
+ * a module exporting name, put, get, exists and remove.
  *
  * Deliberately NOT exposing public or signed provider URLs. Downloads keep
  * going through our own route, which verifies a signed token and re-checks
@@ -27,7 +29,6 @@
 const DRIVERS = {
   local: () => require('./localDriver'),
   postgres: () => require('./postgresDriver'),
-  firebase: () => require('./firebaseDriver'),
 };
 
 let active = null;

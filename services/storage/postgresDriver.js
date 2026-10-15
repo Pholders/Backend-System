@@ -6,13 +6,12 @@ const { query } = require('../../config/db');
  * Not where bytes belong long term — it grows the database and its backups,
  * and it puts file reads on the same connection pool as everything else. It
  * is here because it is the only durable store this deployment already has:
- * the disk is wiped on every deploy, and Firebase Storage requires a billing
- * account.
+ * the disk is wiped on every deploy, and there is no hosted file store yet.
  *
  * It is a reasonable fit for what is actually stored. Every upload route
  * caps at 10MB or less, the files are read one at a time behind an ownership
  * check, and nothing streams. When that stops being true, the key in each
- * row is driver-independent, so moving to S3 is a copy and an env var rather
+ * row is driver-independent, so moving to a hosted store such as Cloudinary is a copy and an env var rather
  * than a data migration.
  */
 

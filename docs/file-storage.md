@@ -24,13 +24,11 @@ it is set.
 | --- | --- | --- |
 | `local` (default) | `uploads/` on the machine | A developer machine |
 | `postgres` | `stored_files` in the app's own database | Render, today |
-| `firebase` | Firebase Storage bucket | Once there is a billing account for one |
 
 On Render the disk is wiped on every deploy. With the `local` driver, a
 document a patient uploaded on Monday is gone after Tuesday's deploy while
-its database row survives — pointing at nothing. That is the reason the
-firebase driver exists, and why `STORAGE_DRIVER=firebase` belongs on any
-deployed environment.
+its database row survives — pointing at nothing. That is why every deployed
+environment needs a durable driver, which today means `STORAGE_DRIVER=postgres`.
 
 ## The postgres driver
 
@@ -50,32 +48,20 @@ Moving off it later is a copy and an env var, not a data migration — the keys
 in `medical_aid_schemes`, `patient_files` and the rest mean the same thing to
 every driver.
 
-## Setting up the firebase driver
+## Adding a driver
 
-Firebase Storage requires a billing account (the Blaze plan), which is why
-the `postgres` driver exists. When there is one:
+A driver is a module in `services/storage` that exports `name` and four
+async functions — `put(file, destination, filename)` returning the key,
+`get(key)` returning `{ buffer, contentType }`, `exists(key)` and
+`remove(key)` — and one line in the `DRIVERS` map in
+`services/storage/index.js`. `postgresDriver.js` is the shortest example.
 
-1. Create a Firebase project and enable Storage. Pick **africa-south1** as
-   the location — patient data under POPIA should stay in South Africa, and
-   the bucket location cannot be changed afterwards.
-2. Project settings → Service accounts → generate a private key.
-3. Set these on the host:
+Cloudinary is being added this way. Keep two things from the existing drivers:
 
-   | Variable | Value |
-   | --- | --- |
-   | `STORAGE_DRIVER` | `firebase` |
-   | `FIREBASE_STORAGE_BUCKET` | e.g. `pholders.firebasestorage.app` |
-   | `FCM_PROJECT_ID` | `project_id` from the key file |
-   | `FCM_CLIENT_EMAIL` | `client_email` from the key file |
-   | `FCM_PRIVATE_KEY` | `private_key` from the key file, newlines and all |
-
-   The `FCM_*` names are shared with push notifications, which already
-   authenticate as the same service account — one credential, one app.
-   `GOOGLE_APPLICATION_CREDENTIALS` works instead if the host mounts the key
-   file.
-
-The driver only reaches for Firebase on the first upload or download, so a
-missing variable surfaces as a failed request and never as a crashed boot.
+- Store files privately and serve them through the app's own routes below,
+  never through a public provider URL — these are patient medical documents.
+- Read credentials lazily, on the first upload or download, so a missing
+  variable fails a request rather than the server's boot.
 
 ## Serving files
 
