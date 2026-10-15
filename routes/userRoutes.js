@@ -36,21 +36,11 @@ const upload = multer({
 const doctorProfileImageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Only JPEG, PNG, or WEBP images are allowed for profile images'));
-  }
 });
 
 const patientAvatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Only JPEG, PNG, or WEBP images are allowed for avatars'));
-  }
 });
 
 /**

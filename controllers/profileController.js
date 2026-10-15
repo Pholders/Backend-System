@@ -1,5 +1,4 @@
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const storage = require('../services/storage');
 const bcrypt = require('bcrypt'); // not needed here; kept import-free below
@@ -10,6 +9,7 @@ const ActionToken = require('../models/ActionToken');
 const AuditLog = require('../models/AuditLog');
 const emailService = require('../services/emailService');
 const { encrypt, decryptAndMask } = require('../utils/encryption');
+const { normalizeSupportedImage } = require('../utils/imageUpload');
 
 /**
  * Profile Controller
@@ -347,6 +347,13 @@ class ProfileController {
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'No image file provided (field: avatar)' });
       }
+      const image = normalizeSupportedImage(req.file);
+      if (!image) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only valid JPEG, PNG, or WEBP images are allowed for avatars'
+        });
+      }
 
       const existing = await query(
         'SELECT avatar_url FROM patients WHERE id = $1',
@@ -356,11 +363,10 @@ class ProfileController {
         return res.status(404).json({ success: false, message: 'User not found' });
       }
 
-      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
       // A random suffix as well as the timestamp: the URL is unauthenticated,
       // so a guessable name would expose one patient's photo to another.
       const suffix = crypto.randomBytes(8).toString('hex');
-      const filename = `patient_${userId}_${Date.now()}_${suffix}${ext}`;
+      const filename = `patient_${userId}_${Date.now()}_${suffix}${image.extension}`;
 
       uploadedKey = await storage.put(req.file, AVATAR_FOLDER, filename);
 

@@ -1,7 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const path = require('path');
 const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
 const MedicalAid = require('../models/MedicalAid');
@@ -13,6 +12,7 @@ const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
+const { normalizeSupportedImage } = require('../utils/imageUpload');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
@@ -606,15 +606,21 @@ class DoctorController {
           message: 'No image file provided (field: image)'
         });
       }
+      const image = normalizeSupportedImage(req.file);
+      if (!image) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only valid JPEG, PNG, or WEBP images are allowed for profile images'
+        });
+      }
 
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
 
-      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
       const suffix = crypto.randomBytes(8).toString('hex');
-      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${ext}`;
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${image.extension}`;
       uploadedKey = await storage.put(req.file, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
 
       const profileImageUrl = buildProfileImageUrl(req, filename);

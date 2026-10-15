@@ -128,7 +128,10 @@ patient-facing provider listings.
 
 Patient avatars are uploaded through `PUT /api/profile/avatar`. For clients
 using the patient API base, `PUT /api/users/profile/avatar` is an equivalent
-compatibility endpoint. Both use the multipart field `avatar`.
+compatibility endpoint. Both use the multipart field `avatar`. The backend
+checks the uploaded bytes rather than trusting the multipart MIME label, so
+mobile clients that report a valid JPEG, PNG, or WEBP image as
+`application/octet-stream` remain supported.
 
 ## Prescription PDFs
 
