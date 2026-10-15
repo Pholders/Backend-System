@@ -47,6 +47,20 @@ function buildAvatarUrl(req, filename) {
   return `${req.protocol}://${req.get('host')}/api/profile/avatars/${filename}`;
 }
 
+function avatarStorageKey(avatarUrl) {
+  if (typeof avatarUrl !== 'string') return null;
+
+  try {
+    const match = new URL(avatarUrl).pathname.match(/\/api\/profile\/avatars\/([^/]+)$/);
+    if (!match) return null;
+
+    const key = `${AVATAR_FOLDER}/${decodeURIComponent(match[1])}`;
+    return storage.isSafeKey(key) ? key : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 class ProfileController {
   /**
    * Task 1: GET /api/profile
@@ -327,10 +341,19 @@ class ProfileController {
    * Multer is configured in routes/profileRoutes.js (memory storage, image MIME only).
    */
   static async updateAvatar(req, res) {
+    let uploadedKey = null;
     try {
       const userId = req.user.id;
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'No image file provided (field: avatar)' });
+      }
+
+      const existing = await query(
+        'SELECT avatar_url FROM patients WHERE id = $1',
+        [userId]
+      );
+      if (existing.rowCount === 0) {
+        return res.status(404).json({ success: false, message: 'User not found' });
       }
 
       const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
@@ -339,7 +362,7 @@ class ProfileController {
       const suffix = crypto.randomBytes(8).toString('hex');
       const filename = `patient_${userId}_${Date.now()}_${suffix}${ext}`;
 
-      await storage.put(req.file, AVATAR_FOLDER, filename);
+      uploadedKey = await storage.put(req.file, AVATAR_FOLDER, filename);
 
       const url = buildAvatarUrl(req, filename);
 
@@ -348,8 +371,23 @@ class ProfileController {
         [url, userId]
       );
       if (result.rowCount === 0) {
+        await storage.remove(uploadedKey);
+        uploadedKey = null;
         return res.status(404).json({ success: false, message: 'User not found' });
       }
+      uploadedKey = null;
+
+      const previousKey = avatarStorageKey(existing.rows[0].avatar_url);
+      let cleanupWarning = null;
+      if (previousKey) {
+        try {
+          await storage.remove(previousKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove replaced avatar:', cleanupError);
+          cleanupWarning = 'Your avatar was updated, but the previous image could not be removed.';
+        }
+      }
+
       await invalidateUserCache(userId, result.rows[0].email);
 
       await AuditLog.logSecurityEvent(req, userId, 'patient', result.rows[0].email, 'avatar_updated', 'success');
@@ -357,9 +395,17 @@ class ProfileController {
       return res.status(200).json({
         success: true,
         message: 'Avatar updated successfully',
-        data: { avatar_url: url }
+        data: { avatar_url: url },
+        warning: cleanupWarning
       });
     } catch (error) {
+      if (uploadedKey) {
+        try {
+          await storage.remove(uploadedKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove orphaned avatar:', cleanupError);
+        }
+      }
       console.error('Update avatar error:', error);
       return res.status(500).json({ success: false, message: 'Error updating avatar', error: error.message });
     }

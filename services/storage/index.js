@@ -29,6 +29,7 @@
 const DRIVERS = {
   local: () => require('./localDriver'),
   postgres: () => require('./postgresDriver'),
+  cloudinary: () => require('./cloudinaryDriver'),
 };
 
 let active = null;

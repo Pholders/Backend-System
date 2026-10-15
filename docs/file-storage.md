@@ -24,6 +24,7 @@ it is set.
 | --- | --- | --- |
 | `local` (default) | `uploads/` on the machine | A developer machine |
 | `postgres` | `stored_files` in the app's own database | Render, today |
+| `cloudinary` | Private authenticated assets in Cloudinary | Production object storage |
 
 On Render the disk is wiped on every deploy. With the `local` driver, a
 document a patient uploaded on Monday is gone after Tuesday's deploy while
@@ -56,7 +57,26 @@ async functions — `put(file, destination, filename)` returning the key,
 `remove(key)` — and one line in the `DRIVERS` map in
 `services/storage/index.js`. `postgresDriver.js` is the shortest example.
 
-Cloudinary is being added this way. Keep two things from the existing drivers:
+## The Cloudinary driver
+
+Set `STORAGE_DRIVER=cloudinary` and configure these server-side environment
+variables:
+
+```dotenv
+CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_API_KEY=...
+CLOUDINARY_API_SECRET=...
+# Optional namespace for all uploaded assets (defaults to "pholders")
+CLOUDINARY_FOLDER=pholders
+```
+
+The driver uploads images as Cloudinary `image` resources and other accepted
+document types as `raw` resources. All assets are uploaded as authenticated,
+not public. The app still downloads the bytes from Cloudinary and returns them
+only after its normal authorization checks; it never stores or returns a
+Cloudinary delivery URL.
+
+Keep two things from the existing drivers:
 
 - Store files privately and serve them through the app's own routes below,
   never through a public provider URL — these are patient medical documents.
