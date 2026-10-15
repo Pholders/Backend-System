@@ -561,6 +561,16 @@ class UserController {
         await AuditLog.logSecurityEvent(req, userId, 'patient', req.user.email, 'logout', 'success');
       }
 
+      // Revoking the session alone left the refresh token usable, so a client
+      // that had logged out could still mint new access tokens with it. A
+      // second /logout route did revoke it, but it was registered after this
+      // one and Express never reached it.
+      const { refreshToken } = req.body || {};
+      if (refreshToken) {
+        const stored = await RefreshToken.findValidToken(refreshToken);
+        if (stored) await RefreshToken.revoke(stored.id);
+      }
+
       res.status(200).json({
         success: true,
         message: 'Logged out successfully'

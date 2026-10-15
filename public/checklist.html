@@ -493,6 +493,14 @@
     <code>STORAGE_DRIVER=postgres</code> on Render or uploads still go to the
     disk that gets erased.
     <br><br>
+    <strong>New on 15 October.</strong> A doctor can upload a profile photo:
+    Prince added the endpoints, and the button that had been opening a picker
+    and discarding the result is now wired to them. Image URLs also come back
+    as <code>https://</code> now &mdash; behind Render's proxy the server was
+    building them as <code>http://</code>, so every photo and avatar silently
+    failed to load, and stored URLs written before the fix are repaired on
+    boot.
+    <br><br>
     <strong>What counts as phase 1.</strong> Every story here was checked
     against SRS 3.2.1.1, the only part of the document that defines a phase.
     Seven that are built but not asked for &mdash; security settings, devices
@@ -518,6 +526,7 @@
     <h2>Known, not defects</h2>
     <ul>
       <li>SMS and push reminders are console stubs.</li>
+      <li>A doctor profile photo is not asked for by phase 1. It is here because it is new and worth a minute, not because the release waits on it.</li>
       <li>Uploaded files need <code>STORAGE_DRIVER=postgres</code> set on Render. Without it the app writes to local disk, which every deploy erases. Firebase Storage was the original plan and has been removed; Cloudinary is being added in its place.</li>
       <li>Nothing in the platform creates invoice rows, so an invoice has no document to attach to. Claims are created by the pharmacy order flow and do work.</li>
       <li>A prescription PDF is generated on each request and never stored, so there is nothing to go stale.</li>
@@ -534,7 +543,7 @@
 
   <footer>
     <div id="foot">Anyone with this link can tick and comment — no account needed. Results are shared, so what you mark is what everyone else sees.</div>
-    <div class="stamp">Served by the PHolders backend · results are shared live · reviewed against SRS 3.2.1.1 on 14 October 2026</div>
+    <div class="stamp">Served by the PHolders backend · results are shared live · reviewed against SRS 3.2.1.1 on 14 October 2026 · photo stories added 15 October</div>
   </footer>
 </div>
 
@@ -648,7 +657,10 @@
         ["D5", "Doctor", "Save the profile of a doctor whose address moved", "Coordinates move with it — the test doctor sits ~10km out", true, "Professional Details → Save with no changes → re-read the profile's coordinates"],
         ["D6", "Doctor", "Untick every medical aid and save", "Persists as \"accepts none\", not as unchanged", false, "Professional Details → untick every scheme → Save → reload"],
         ["D7", "Doctor", "Change consulting hours, including closing a day", "Persists. A malformed time is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
-        ["D8", "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"]
+        ["D8",  "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"],
+        ["D10", "Doctor", "Upload a profile photo", "It appears straight away and survives a reload. Until 15 October the picker opened and the file was thrown away", true, "Settings → Account → Upload photo → pick a JPEG or PNG"],
+        ["D11", "Doctor", "Upload something that is not an image, then one over 5MB", "Refused before anything is sent, naming the reason", false, "Settings → Account → Upload photo → pick a PDF, then a large photo"],
+        ["D12", "Doctor", "Replace the photo, then reload", "The new one shows. The old file is deleted server-side, so an old link stops working", false, "Upload a second photo, reload, then open the first photo URL"]
       ]
     },
     {
@@ -729,6 +741,7 @@
         ["XC4", "Patient",  "Call an admin route with a patient token", "Refused", false, "Call /users/admin/pharmacies with a patient token"],
         ["XC5", "Any",      "Reload mid-session", "Still signed in, same place", false, "Reload on any inner page"],
         ["XC6", "Patient",  "Scan a prescription QR", "Opens. Still localhost means FRONTEND_URL was not set", true, "Scan the QR, or open the accessLink from the signing dialog"],
+        ["XC8", "Any",      "Check an image URL the server hands back", "It starts https://. An http:// URL is the proxy bug returning — the browser will not load it and the photo stays blank", true, "Open a doctor profile response and read profile_image, or check the Network tab for a 301"],
         ["XC7", "Any",      "Check the deploy log on boot", "Every migration reports a tick and none reports an error. stored_files and the checklist tables are among them", false, "Render → the service → Logs, at boot"]
       ]
     }

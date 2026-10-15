@@ -17,6 +17,7 @@ const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
+const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
@@ -86,6 +87,7 @@ const initializeDatabase = async () => {
     await createSupportTicketsTable();
     await createChecklistTables();
     await createStoredFilesTable();
+    await fixStoredImageUrls();
 
     // Notifications stack
     await Notification.createTable();

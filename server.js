@@ -47,6 +47,17 @@ const notificationTriggers = require('./jobs/notificationTriggers');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Render terminates TLS at its proxy and forwards plain HTTP, so without this
+// req.protocol reads "http". Every URL built from it — doctor profile images,
+// patient avatars, medical aid download links — then comes out as http:// on
+// a host that only serves HTTPS. The browser refuses to load it as a
+// subresource, and the 301 to HTTPS it gets instead never helps.
+//
+// One proxy sits in front of the app, hence 1. This also makes req.ip the
+// real client address rather than the proxy's, which the audit log and the
+// checklist rate limit both want.
+app.set('trust proxy', 1);
+
 // ============================================================================
 // MIDDLEWARE CONFIGURATION
 // ============================================================================
