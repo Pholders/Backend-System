@@ -126,6 +126,10 @@ Only the signed-in doctor can upload their own image. The stored image is
 returned through `GET /api/users/doctor/profile-images/:filename` for
 patient-facing provider listings.
 
+Patient avatars are uploaded through `PUT /api/profile/avatar`. For clients
+using the patient API base, `PUT /api/users/profile/avatar` is an equivalent
+compatibility endpoint. Both use the multipart field `avatar`.
+
 ## Prescription PDFs
 
 A prescription PDF is generated per request by `services/prescriptionPdfService`

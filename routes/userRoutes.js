@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const UserController = require('../controllers/userController');
 const DoctorController = require('../controllers/doctorController');
+const ProfileController = require('../controllers/profileController');
 const PharmacyController = require('../controllers/pharmacyController');
 const AdminController = require('../controllers/adminController');
 const PharmacyPartnershipController = require('../controllers/pharmacyPartnershipController');
@@ -39,6 +40,16 @@ const doctorProfileImageUpload = multer({
     const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (allowed.includes(file.mimetype)) cb(null, true);
     else cb(new Error('Only JPEG, PNG, or WEBP images are allowed for profile images'));
+  }
+});
+
+const patientAvatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only JPEG, PNG, or WEBP images are allowed for avatars'));
   }
 });
 
@@ -916,6 +927,16 @@ router.put(
   requireRole('doctor'),
   doctorProfileImageUpload.single('image'),
   DoctorController.uploadProfileImage
+);
+
+// Compatibility path for patient clients using the /api/users profile base.
+// The primary route remains PUT /api/profile/avatar.
+router.put(
+  '/profile/avatar',
+  authMiddleware,
+  requireRole('patient'),
+  patientAvatarUpload.single('avatar'),
+  ProfileController.updateAvatar
 );
 
 /**

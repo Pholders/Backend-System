@@ -538,7 +538,7 @@ Update account settings.
 
 ---
 
-### PUT `/profile/avatar`
+### PUT `/api/profile/avatar` or `/api/users/profile/avatar`
 Upload or update the profile avatar. Send as `multipart/form-data`.
 
 **Request Body** (`multipart/form-data`)
