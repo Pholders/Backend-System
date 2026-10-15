@@ -26,6 +26,7 @@
     "migrate:security-alerts": "node config/addSecurityAlerts.js",
     "migrate:doctor-acceptance": "node config/addDoctorAppointmentAcceptance.js",
     "migrate:prescriptions": "node config/addPrescriptionSupport.js",
+    "migrate:prescription-pdf-snapshots": "node config/addPrescriptionPdfSnapshots.js",
     "migrate:qr-one-time-use": "node config/addQRCodeOneTimeUse.js",
     "migrate:prescription-claims": "node config/addPrescriptionClaimTracking.js",
     "migrate:orders": "node config/createOrdersTables.js",

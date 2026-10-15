@@ -9,6 +9,7 @@ const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
 const EmailService = require('../services/emailService');
 const PrescriptionPdfService = require('../services/prescriptionPdfService');
+const storage = require('../services/storage');
 const { pool } = require('../config/db');
 const crypto = require('crypto');
 
@@ -18,6 +19,28 @@ const crypto = require('crypto');
  */
 
 class PrescriptionController {
+  static async renderOrLoadPdfSnapshot(prescription) {
+    if (prescription.signature_status === 'signed' && prescription.prescription_pdf_path) {
+      try {
+        return storage.get(prescription.prescription_pdf_path);
+      } catch (error) {
+        if (error && error.code === 'STORAGE_NOT_FOUND') {
+          console.error(
+            `Signed prescription ${prescription.id} references a missing PDF snapshot:`,
+            prescription.prescription_pdf_path
+          );
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return {
+      buffer: await PrescriptionPdfService.render(prescription),
+      contentType: 'application/pdf'
+    };
+  }
+
   /**
    * Doctor: Create a new prescription (after appointment acceptance)
    */
@@ -290,17 +313,64 @@ class PrescriptionController {
         .update(fingerprintData)
         .digest('hex');
 
-      // ✅ NEW: Update prescription with signature details
       const timestamp = new Date().toISOString();
-      await pool.query(
-        `UPDATE prescriptions
-         SET signature_status = 'signed',
-             digital_signature = $1,
-             signature_timestamp = NOW(),
-             updated_at = NOW()
-         WHERE id = $2`,
-        [signatureHash, prescriptionId]
-      );
+      const signedPrescription = {
+        ...prescription,
+        signature_status: 'signed',
+        digital_signature: signatureHash,
+        signature_timestamp: timestamp
+      };
+      const pdf = await PrescriptionPdfService.render(signedPrescription);
+      const filename = `prescription_${prescription.id}_${PrescriptionPdfService.filenameFor(prescription)}`;
+      let pdfPath = null;
+      let signed;
+      try {
+        pdfPath = await storage.put(
+          {
+            buffer: pdf,
+            mimetype: 'application/pdf',
+            originalname: filename,
+            size: pdf.length
+          },
+          'prescriptions',
+          filename
+        );
+
+        signed = await pool.query(
+          `UPDATE prescriptions
+           SET signature_status = 'signed',
+               digital_signature = $1,
+               signature_timestamp = $2,
+               prescription_pdf_path = $3,
+               updated_at = NOW()
+           WHERE id = $4
+             AND signature_status = 'pending'
+             AND is_revoked = FALSE
+           RETURNING id`,
+          [signatureHash, timestamp, pdfPath, prescriptionId]
+        );
+      } catch (error) {
+        if (pdfPath) {
+          try {
+            await storage.remove(pdfPath);
+          } catch (cleanupError) {
+            console.error('Unable to remove orphaned prescription PDF snapshot:', cleanupError);
+          }
+        }
+        throw error;
+      }
+
+      if (signed.rowCount === 0) {
+        try {
+          await storage.remove(pdfPath);
+        } catch (cleanupError) {
+          console.error('Unable to remove duplicate prescription PDF snapshot:', cleanupError);
+        }
+        return res.status(409).json({
+          success: false,
+          message: 'Prescription was already signed or revoked'
+        });
+      }
 
       // ✅ NEW: Update session last_activity timestamp
       await pool.query(
@@ -515,17 +585,17 @@ class PrescriptionController {
         });
       }
 
-      const pdf = await PrescriptionPdfService.render(prescription);
+      const pdf = await PrescriptionController.renderOrLoadPdfSnapshot(prescription);
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Length', pdf.length);
+      res.setHeader('Content-Type', pdf.contentType || 'application/pdf');
+      res.setHeader('Content-Length', pdf.buffer.length);
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
       );
       // Personal health information: no shared cache should hold a copy.
       res.setHeader('Cache-Control', 'private, no-store');
-      res.send(pdf);
+      res.send(pdf.buffer);
     } catch (error) {
       console.error('❌ Error downloading prescription:', error);
       res.status(500).json({
@@ -552,19 +622,19 @@ class PrescriptionController {
         });
       }
 
-      const pdf = await PrescriptionPdfService.render(prescription);
+      const pdf = await PrescriptionController.renderOrLoadPdfSnapshot(prescription);
 
       // The same document as the download, served inline so the browser or
       // the app opens it in a viewer the person can print from, rather than
       // dropping a file in their downloads folder.
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Length', pdf.length);
+      res.setHeader('Content-Type', pdf.contentType || 'application/pdf');
+      res.setHeader('Content-Length', pdf.buffer.length);
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
       );
       res.setHeader('Cache-Control', 'private, no-store');
-      res.send(pdf);
+      res.send(pdf.buffer);
     } catch (error) {
       console.error('❌ Error printing prescription:', error);
       res.status(500).json({

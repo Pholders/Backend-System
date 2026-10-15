@@ -71,10 +71,20 @@ CLOUDINARY_FOLDER=pholders
 ```
 
 The driver uploads images as Cloudinary `image` resources and other accepted
-document types as `raw` resources. All assets are uploaded as authenticated,
-not public. The app still downloads the bytes from Cloudinary and returns them
-only after its normal authorization checks; it never stores or returns a
-Cloudinary delivery URL.
+document types as `raw` resources. All uploaded PDFs are placed under the
+root-level Cloudinary `documents/` folder:
+
+```text
+documents/patient-files/patient_<id>/...
+documents/medical-aid/claims/...
+documents/medical-aid/invoices/...
+```
+
+Images and non-PDF files remain beneath `CLOUDINARY_FOLDER` (default:
+`pholders`). All assets are uploaded as authenticated, not public. The app
+still downloads the bytes from Cloudinary and returns them only after its
+normal authorization checks; it never stores or returns a Cloudinary delivery
+URL. Previously stored files under `pholders/` remain retrievable.
 
 Keep two things from the existing drivers:
 
@@ -135,10 +145,21 @@ mobile clients that report a valid JPEG, PNG, or WEBP image as
 
 ## Prescription PDFs
 
-A prescription PDF is generated per request by `services/prescriptionPdfService`
-and never stored, so there is nothing to keep in sync and nothing to leak. It
-is served by `GET /api/prescriptions/:id/download` (as an attachment) and
-`GET /api/prescriptions/:id/print` (inline, for a viewer to print from).
+When a doctor signs a prescription, the backend renders a PDF snapshot and
+stores it as an authenticated raw asset at
+`documents/prescriptions/prescription_<id>_<number>.pdf`. Its storage key is
+recorded in `prescriptions.prescription_pdf_path`. The signing request does
+not succeed unless the snapshot is stored and linked to the prescription.
+
+Patient downloads and print views first load this stored snapshot after
+checking ownership:
+
+- `GET /api/prescriptions/:id/download` sends it as an attachment.
+- `GET /api/prescriptions/:id/print` serves it inline for a viewer to print.
+
+Signed prescriptions created before this feature have no snapshot and are
+rendered on demand as a compatibility fallback; the server logs if a newer
+signed prescription references a missing snapshot.
 
 An unsigned or revoked prescription still renders, but carries a banner and a
 per-page watermark saying it cannot be dispensed -- a document that looked

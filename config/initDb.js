@@ -33,6 +33,7 @@ const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
+const { addPrescriptionPdfSnapshots } = require('./addPrescriptionPdfSnapshots');
 const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
 const { migrate: addUserTypeToOTP } = require('./addUserTypeToOTP');
 const addAppointmentReminders = require('./addAppointmentReminders');
@@ -121,6 +122,7 @@ const initializeDatabase = async () => {
 
     // Add session-based signature support
     await addSessionBasedSignatures();
+    await addPrescriptionPdfSnapshots();
 
     // Add pharmacy dispensing support
     await addPharmacyDispensingSupport();

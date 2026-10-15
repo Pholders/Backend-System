@@ -2,6 +2,8 @@ const https = require('https');
 const path = require('path');
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.webp']);
+const PDF_MIME_TYPE = 'application/pdf';
+const DOCUMENTS_PREFIX = 'documents';
 
 let client;
 
@@ -57,6 +59,9 @@ function publicIdFor(key, resourceType) {
   const objectKey = resourceType === 'image'
     ? key.slice(0, -path.posix.extname(key).length)
     : key;
+  if (objectKey === DOCUMENTS_PREFIX || objectKey.startsWith(`${DOCUMENTS_PREFIX}/`)) {
+    return objectKey;
+  }
   return prefix ? `${prefix}/${objectKey}` : objectKey;
 }
 
@@ -94,7 +99,9 @@ function download(url) {
 }
 
 async function put(file, destination, filename) {
-  const key = `${destination}/${filename}`;
+  const key = file.mimetype === PDF_MIME_TYPE
+    ? `${DOCUMENTS_PREFIX}/${destination}/${filename}`
+    : `${destination}/${filename}`;
   ensureSafeKey(key);
 
   const resourceType = file.mimetype && file.mimetype.startsWith('image/')

@@ -39,6 +39,7 @@ class Prescription {
         signature_status VARCHAR(20) DEFAULT 'pending' CHECK (signature_status IN ('pending', 'signed', 'revoked')),
         digital_signature TEXT,
         signature_timestamp TIMESTAMP,
+        prescription_pdf_path TEXT,
         otp_hash VARCHAR(255),
         otp_expiry TIMESTAMP,
         qr_code_data TEXT,
