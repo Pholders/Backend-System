@@ -130,10 +130,6 @@ router.post('/verify-otp', preventAuthenticated, UserController.verifyOTP);
 router.post('/verify-email', preventAuthenticated, UserController.verifyEmail);
 router.post('/resend-verification', preventAuthenticated, UserController.resendVerificationEmail);
 
-// Account Activation Routes (OTP-based)
-router.post('/verify-email', preventAuthenticated, UserController.verifyEmail);
-router.post('/resend-verification', preventAuthenticated, UserController.resendVerificationEmail);
-
 /**
  * Google OAuth Routes
  */
@@ -860,13 +856,6 @@ router.post('/doctor/resend-verification', preventAuthenticated, DoctorControlle
 // Medical aid catalogue — doctors pick from it, patients read the names.
 router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
 
-// Medical aid catalogue — doctors pick from it, patients read the names.
-router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
-
-// Doctor Account Activation Routes (OTP-based)
-router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
-router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
-
 /**
  * @swagger
  * /api/users/doctor/profile:
@@ -1001,14 +990,6 @@ router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorControl
 // GET /doctors/:doctorId/availability?date=YYYY-MM-DD
 router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patient'), DoctorController.getAvailability);
 
-// Patient "Find doctors near you" listing + details (Sprint: patient app)
-// GET /doctors?lat=&lng=&radius_km=&specialty=&max_fee=&page=&limit=
-router.get('/doctors', authMiddleware, requireRole('patient'), DoctorController.listDoctors);
-// GET /doctors/:id
-router.get('/doctors/:id', authMiddleware, requireRole('patient'), DoctorController.getDoctorById);
-// GET /doctors/:doctorId/availability?date=YYYY-MM-DD
-router.get('/doctors/:doctorId/availability', authMiddleware, requireRole('patient'), DoctorController.getAvailability);
-
 /**
  * @swagger
  * tags:
@@ -1096,10 +1077,6 @@ router.post('/pharmacy/login', preventAuthenticated, PharmacyController.login);
  *         description: Invalid OTP
  */
 router.post('/pharmacy/verify-otp', preventAuthenticated, PharmacyController.verifyOTP);
-
-// Pharmacy Account Activation Routes (OTP-based)
-router.post('/pharmacy/verify-email', preventAuthenticated, PharmacyController.verifyEmail);
-router.post('/pharmacy/resend-verification', preventAuthenticated, PharmacyController.resendVerificationEmail);
 
 // Pharmacy Account Activation Routes (OTP-based)
 router.post('/pharmacy/verify-email', preventAuthenticated, PharmacyController.verifyEmail);
@@ -1992,155 +1969,6 @@ router.post('/payments/webhook/stripe', PaymentController.handleStripeWebhook);
 router.get('/payments/stripe/test', authMiddleware, requireRole('admin'), PaymentController.testStripeConnection);
 
 /**
- * Appointment Booking Routes
- */
-// Get booking information (time periods, date ranges)
-router.get('/appointments/booking-info', AppointmentController.getBookingInfo);
-
-// Get available doctors for appointment booking
-router.get('/appointments/doctors', authMiddleware, requireRole('patient'), AppointmentController.getAvailableDoctors);
-
-// Get available time slots for a specific doctor, date, and time period
-router.get('/appointments/available-slots', authMiddleware, requireRole('patient'), AppointmentController.getAvailableTimeSlots);
-
-// Book a new appointment
-router.post('/appointments/book', authMiddleware, requireRole('patient'), AppointmentController.bookAppointment);
-
-// Get all appointments for the patient
-router.get('/appointments', authMiddleware, requireRole('patient'), AppointmentController.getPatientAppointments);
-
-// Get patient's upcoming appointments
-router.get('/appointments/upcoming', authMiddleware, requireRole('patient'), AppointmentController.getUpcomingAppointments);
-
-// Get specific appointment details
-router.get('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentDetails);
-
-// Cancel an appointment
-router.delete('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.cancelAppointment);
-
-// Reschedule an appointment
-router.put('/appointments/:appointmentId/reschedule', authMiddleware, requireRole('patient'), AppointmentController.rescheduleAppointment);
-
-// Get daily availability (all time periods) for a doctor
-router.get('/appointments/day-availability', AppointmentController.getDayAvailability);
-
-// Auto-cancel expired pending payments (admin endpoint)
-router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('admin'), AppointmentController.autoCancelExpiredPayments);
-
-// Doctor: Get appointments for doctor
-router.get('/doctor/appointments', authMiddleware, requireRole('doctor'), AppointmentController.getDoctorAppointments);
-
-// TEST: Get signed prescriptions (early in file)
-router.get('/doctor/test-static', (req, res) => {
-  res.json({ test: 'static data' });
-});
-
-// Doctor: Accept appointment (acknowledge before consultation)
-router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
-
-// Doctor: Mark appointment as completed after consultation
-router.post('/appointments/:appointmentId/complete', authMiddleware, requireRole('doctor'), AppointmentController.completeAppointment);
-
-/**
- * Appointment Reminder Routes
- */
-// Set or update reminder for an appointment
-router.post('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.setAppointmentReminder);
-
-// Get reminder for a specific appointment
-router.get('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentReminder);
-
-// Update reminder settings
-router.put('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.updateAppointmentReminder);
-
-// Toggle reminder on/off
-router.patch('/appointments/:appointmentId/reminders/toggle', authMiddleware, requireRole('patient'), AppointmentController.toggleAppointmentReminder);
-
-// Delete reminder
-router.delete('/appointments/:appointmentId/reminders', authMiddleware, requireRole('patient'), AppointmentController.deleteAppointmentReminder);
-
-// Get all reminders for patient
-router.get('/reminders', authMiddleware, requireRole('patient'), AppointmentController.getPatientReminders);
-
-// Get upcoming reminders (within 24 hours)
-router.get('/reminders/upcoming', authMiddleware, requireRole('patient'), AppointmentController.getUpcomingReminders);
-
-// Get notification history for appointment
-router.get('/appointments/:appointmentId/notification-history', authMiddleware, requireRole('patient'), AppointmentController.getNotificationHistory);
-
-/**
- * Doctor Reviews & Ratings Routes
- */
-// Submit or update a review for a doctor
-router.post('/appointments/doctors/:doctorId/reviews', authMiddleware, requireRole('patient'), ReviewController.submitReview);
-
-// Get all reviews for a doctor
-router.get('/appointments/doctors/:doctorId/reviews', ReviewController.getDoctorReviews);
-
-// Get rating summary for a doctor
-router.get('/appointments/doctors/:doctorId/reviews/summary', ReviewController.getRatingSummary);
-
-// Check if patient has already reviewed a doctor
-router.get('/appointments/doctors/:doctorId/reviews/check-review', authMiddleware, requireRole('patient'), ReviewController.checkExistingReview);
-
-// Get patient's reviews
-router.get('/reviews', authMiddleware, requireRole('patient'), ReviewController.getPatientReviews);
-
-// Update a review
-router.put('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.updateReview);
-
-// Delete a review
-router.delete('/reviews/:reviewId', authMiddleware, requireRole('patient'), ReviewController.deleteReview);
-
-/**
- * Payment Routes
- */
-// Get available payment methods
-router.get('/payments/methods', authMiddleware, requireRole('patient'), PaymentController.getAvailablePaymentMethods);
-
-// Initialize payment for appointment
-router.post('/payments/initialize', authMiddleware, requireRole('patient'), PaymentController.initializePayment);
-
-// Confirm Stripe payment
-router.post('/payments/confirm-stripe', authMiddleware, requireRole('patient'), PaymentController.confirmStripePayment);
-
-// Complete cash on arrival payment
-router.post('/payments/cash-on-arrival', authMiddleware, requireRole('patient'), PaymentController.completeCashPayment);
-
-// Complete medical aid payment
-router.post('/payments/medical-aid', authMiddleware, requireRole('patient'), PaymentController.completeMedicalAidPayment);
-
-// Get payment status for appointment
-router.get('/payments/appointment/:appointmentId', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
-
-// Get payment history
-router.get('/payments', authMiddleware, requireRole('patient'), PaymentController.getPaymentHistory);
-
-/**
- * Stripe Payment Routes (Enhanced Stripe Integration)
- */
-// Create Stripe Payment Intent
-router.post('/payments/stripe/create-intent', authMiddleware, requireRole('patient'), PaymentController.createStripePaymentIntent);
-
-// Get saved payment methods
-router.get('/payments/stripe/methods', authMiddleware, requireRole('patient'), PaymentController.getStripePaymentMethods);
-
-// Get payment status
-router.get('/payments/:paymentId/status', authMiddleware, requireRole('patient'), PaymentController.getPaymentStatus);
-
-// Request refund
-router.post('/payments/:paymentId/refund', authMiddleware, requireRole('patient'), PaymentController.requestRefund);
-
-// Get payment breakdown
-router.get('/payments/appointment/:appointmentId/breakdown', authMiddleware, requireRole('patient'), PaymentController.getPaymentBreakdown);
-
-// Stripe Webhook (no auth required - for Stripe)
-router.post('/payments/webhook/stripe', PaymentController.handleStripeWebhook);
-
-// Test Stripe connection (admin only)
-router.get('/payments/stripe/test', authMiddleware, requireRole('admin'), PaymentController.testStripeConnection);
-
-/**
  * @swagger
  * tags:
  *   name: Token Management
@@ -2184,8 +2012,6 @@ router.post('/refresh-token', RefreshController.refreshToken);
  *       401:
  *         description: Unauthorized
  */
-router.post('/logout', authMiddleware, RefreshController.logout);
-
 /**
  * Personal Health Record (PHR) Routes
  */
