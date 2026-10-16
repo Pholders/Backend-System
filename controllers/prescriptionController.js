@@ -22,7 +22,10 @@ class PrescriptionController {
   static async renderOrLoadPdfSnapshot(prescription) {
     if (prescription.signature_status === 'signed' && prescription.prescription_pdf_path) {
       try {
-        return storage.get(prescription.prescription_pdf_path);
+        // Awaited on purpose: returning the promise un-awaited puts the
+        // rejection outside this try, so a missing snapshot would fail the
+        // download instead of falling through to a fresh render.
+        return await storage.get(prescription.prescription_pdf_path);
       } catch (error) {
         if (error && error.code === 'STORAGE_NOT_FOUND') {
           console.error(
