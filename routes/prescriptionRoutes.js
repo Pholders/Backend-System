@@ -79,7 +79,19 @@ router.post('/:prescriptionId/revert-claim', authMiddleware, requireRole('admin'
 // GET operations on specific prescriptions
 router.get('/', authMiddleware, requireRole('patient'), PrescriptionController.getPatientPrescriptions);
 
-router.get('/:prescriptionId', authMiddleware, requireRole('patient'), PrescriptionController.viewPrescription);
+// A path that is not a number is not a prescription id. Without this the
+// value reaches Postgres as an integer and comes back as a 500 carrying the
+// raw database message -- GET /prescriptions/pharmacies answered
+// "invalid input syntax for type integer: \"pharmacies\"", which both leaks
+// internals and reads like a server fault rather than a wrong URL.
+const numericId = (param) => (req, res, next) => {
+  if (!/^\d+$/.test(String(req.params[param] ?? ''))) {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+  return next();
+};
+
+router.get('/:prescriptionId', authMiddleware, requireRole('patient'), numericId('prescriptionId'), PrescriptionController.viewPrescription);
 
 router.get('/:prescriptionId/download', authMiddleware, requireRole('patient'), PrescriptionController.downloadPrescription);
 
