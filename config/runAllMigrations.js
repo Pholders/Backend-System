@@ -89,9 +89,15 @@ const run = async () => {
   console.log('\n✅ All migrations completed.');
 };
 
-run()
-  .then(() => process.exit(0))
-  .catch(err => {
-    console.error('\n❌ Fatal migration error:', err);
-    process.exit(1);
-  });
+// Only when run directly. Requiring this file used to kick off every
+// migration against whatever database .env pointed at.
+if (require.main === module) {
+  run()
+    .then(() => process.exit(0))
+    .catch(err => {
+      console.error('\n❌ Fatal migration error:', err);
+      process.exit(1);
+    });
+}
+
+module.exports = { run };

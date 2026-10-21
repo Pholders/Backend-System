@@ -55,4 +55,13 @@ async function createRefreshTokensTable() {
   }
 }
 
-createRefreshTokensTable();
+// Only when run directly. Requiring this file must not execute it.
+
+
+if (require.main === module) {
+
+
+  createRefreshTokensTable();
+
+
+}
