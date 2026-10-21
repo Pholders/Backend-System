@@ -26,6 +26,7 @@ const {
 const userRoutes = require('./routes/userRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
+const medicationRoutes = require('./routes/medicationRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const profileRoutes = require('./routes/profileRoutes');
@@ -154,6 +155,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/auth', userRoutes);
 app.use('/api', bookingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/medications', medicationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
 

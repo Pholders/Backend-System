@@ -20,6 +20,7 @@
     "migrate:refresh-tokens": "node config/createRefreshTokens.js",
     "migrate:otp-hashed": "node config/migrateOTPToHashed.js",
     "migrate:patient-profile": "node config/createPatientProfile.js",
+    "migrate:medications": "node config/createPatientMedicationTables.js",
     "migrate:enhanced-features": "node config/addEnhancedProfileFeatures.js",
     "migrate:password-reset": "node config/addPasswordReset.js",
     "migrate:login-locations": "node config/addLoginLocationTracking.js",
