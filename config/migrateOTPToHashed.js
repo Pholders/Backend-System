@@ -44,4 +44,13 @@ async function migrateOTPToHashed() {
   }
 }
 
-migrateOTPToHashed();
+// Only when run directly. Requiring this file must not execute it.
+
+
+if (require.main === module) {
+
+
+  migrateOTPToHashed();
+
+
+}

@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const Pharmacy = require('../models/Pharmacy');
+const PharmacyGroup = require('../models/PharmacyGroup');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -287,7 +288,21 @@ class PharmacyController {
         // Activate the pharmacy account
         await Pharmacy.update(pharmacy.id, { status: 'active' });
 
-        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'success');
+        // Auto-assign to Basic group tier
+        try {
+          const basicGroup = await PharmacyGroup.getDefaultGroup();
+          if (basicGroup) {
+            await PharmacyGroup.addPharmacy(basicGroup.id, pharmacy.id, true);
+            console.log(`✅ Pharmacy ${pharmacy.id} assigned to Basic tier group ${basicGroup.id}`);
+          } else {
+            console.warn(`⚠️ Basic tier group not found for pharmacy ${pharmacy.id}`);
+          }
+        } catch (groupError) {
+          console.error('❌ Error assigning pharmacy to group:', groupError);
+          // Continue with signup even if group assignment fails
+        }
+
+        await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'signup_verified', 'success');
 
         delete pharmacy.password_hash;
 
@@ -296,6 +311,7 @@ class PharmacyController {
           message: 'Email verified successfully! Your pharmacy account is now active. You can now log in.',
           data: {
             pharmacy: pharmacy,
+            tier: 'Basic',
             nextStep: 'Use /api/users/pharmacy/login with your email and password'
           }
         });
@@ -458,6 +474,64 @@ class PharmacyController {
   /**
    * Get Pharmacy Profile
    */
+  /**
+   * Active pharmacies a patient can claim a prescription at.
+   *
+   * Claiming requires a pharmacyId, and nothing patient-callable listed
+   * pharmacies, so a patient had no way to choose one and no script ever
+   * reached a pharmacy. Only active pharmacies are returned, and only the
+   * fields needed to pick one — never credentials or licence details.
+   */
+  static async listForPatients(req, res) {
+    try {
+      const { latitude, longitude, radiusKm = 25, city, limit = 100 } = req.query;
+
+      let pharmacies;
+      if (latitude !== undefined && longitude !== undefined) {
+        pharmacies = await Pharmacy.findNearby(
+          parseFloat(latitude),
+          parseFloat(longitude),
+          parseFloat(radiusKm)
+        );
+      } else if (city) {
+        pharmacies = await Pharmacy.findByCity(city);
+      } else {
+        pharmacies = await Pharmacy.findAll(parseInt(limit), 0);
+      }
+
+      const active = pharmacies.filter((p) => p.status === 'active');
+
+      res.status(200).json({
+        success: true,
+        message: 'Pharmacies retrieved',
+        data: {
+          total: active.length,
+          pharmacies: active.map((p) => ({
+            id: p.id,
+            name: p.pharmacy_name,
+            address: p.address,
+            city: p.city,
+            province: p.province,
+            phone: p.phone,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            deliveryAvailable: p.delivery_available === true,
+            ...(p.distance !== undefined
+              ? { distanceKm: parseFloat(Number(p.distance).toFixed(2)) }
+              : {})
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('List pharmacies for patients error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching pharmacies',
+        error: error.message
+      });
+    }
+  }
+
   static async getProfile(req, res) {
     try {
       const pharmacyId = req.user.id;
@@ -862,6 +936,15 @@ class PharmacyController {
       }
 
       await Pharmacy.markEmailVerified(pharmacy.id);
+
+      // This endpoint told the pharmacy "you can now log in" while leaving
+      // status inactive, so the next login was refused. Both OTP paths prove
+      // the same thing — that they own the address — so verifying the email
+      // activates the account, as verify-otp already did.
+      if (pharmacy.status !== 'active') {
+        await Pharmacy.update(pharmacy.id, { status: 'active' });
+      }
+
       await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'success');
 
       return res.status(200).json({
@@ -869,7 +952,8 @@ class PharmacyController {
         message: 'Email verified successfully. You can now log in.',
         data: {
           email: pharmacy.email,
-          email_verified: true
+          email_verified: true,
+          status: 'active'
         }
       });
     } catch (error) {
@@ -905,13 +989,23 @@ class PharmacyController {
 
       const pharmacy = await Pharmacy.findByEmail(email);
 
-      // Don't reveal whether the account exists or its verification state
-      if (!pharmacy || pharmacy.email_verified === true) {
+      // A pharmacy that is not active still needs activating, and only a
+      // `signup` OTP does that — `verify-otp` rejects every other purpose and
+      // is the sole path that sets status = 'active'. Issuing
+      // `email_verification` here left an account that could never be
+      // activated once its signup email went astray.
+      const needsActivation = pharmacy && pharmacy.status !== 'active';
+      const purpose = needsActivation ? 'signup' : 'email_verification';
+
+      // Don't reveal whether the account exists or its verification state.
+      // An inactive pharmacy still gets a code even once its email is
+      // verified, otherwise it is stuck with nothing left to try.
+      if (!pharmacy || (pharmacy.email_verified === true && !needsActivation)) {
         return res.status(200).json(genericResponse);
       }
 
       // Rate-limit: reject if a code was issued in the last 60 seconds
-      const latest = await OTP.getLatest(pharmacy.id, 'email_verification', 'pharmacy');
+      const latest = await OTP.getLatest(pharmacy.id, purpose, 'pharmacy');
       if (latest) {
         const ageSeconds = (Date.now() - new Date(latest.created_at).getTime()) / 1000;
         if (ageSeconds < 60) {
@@ -923,7 +1017,7 @@ class PharmacyController {
         }
       }
 
-      const otpRecord = await OTP.create(pharmacy.id, 'email_verification', 'pharmacy', 15);
+      const otpRecord = await OTP.create(pharmacy.id, purpose, 'pharmacy', 15);
       await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification_resend', 'success');
 
       try {

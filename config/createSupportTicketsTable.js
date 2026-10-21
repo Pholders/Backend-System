@@ -1,4 +1,5 @@
 const { query } = require('./db');
+const { auditEventTypeList } = require('./auditEventTypes');
 
 /**
  * Migration: support_tickets
@@ -42,29 +43,7 @@ const runMigration = async () => {
     await query(`
       ALTER TABLE audit_logs
         ADD CONSTRAINT audit_logs_event_type_check
-        CHECK (event_type IN (
-          'signup', 'login', 'logout', 'login_failed',
-          'password_change', 'password_changed', 'password_reset',
-          'otp_generated', 'otp_verified', 'otp_failed',
-          'session_created', 'session_revoked', 'sessions_revoked_others',
-          'profile_updated', 'account_updated', 'avatar_updated',
-          'email_change_requested', 'email_changed',
-          'biometrics_updated',
-          'twofa_enable_started', 'twofa_enable_verify',
-          'twofa_enabled', 'twofa_disabled', 'twofa_disable',
-          'unauthorized_access', 'account_locked', 'account_unlocked',
-          'account_frozen', 'account_unfrozen',
-          'suspicious_activity_reported', 'audit_log_exported',
-          'forgot_password',
-          'doctor_linked', 'doctor_unlinked',
-          'pharmacy_linked', 'pharmacy_unlinked',
-          'dependent_added', 'dependent_updated', 'dependent_removed',
-          'medical_aid_updated', 'medical_aid_card_uploaded',
-          'medical_aid_document_downloaded',
-          'support_ticket_submitted', 'contact_message_submitted',
-          'account_deletion_requested', 'account_deleted',
-          'email_verification_sent', 'email_verification', 'email_verification_resend'
-        ));
+        CHECK (event_type IN (${auditEventTypeList()}));
     `);
     console.log('✅ Extended audit_logs event_type CHECK (support & legal)');
 

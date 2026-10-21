@@ -1,4 +1,4 @@
-const { query } = require('../config/db');
+ const { query } = require('../config/db');
 const crypto = require('crypto');
 
 /**
@@ -39,6 +39,7 @@ class Prescription {
         signature_status VARCHAR(20) DEFAULT 'pending' CHECK (signature_status IN ('pending', 'signed', 'revoked')),
         digital_signature TEXT,
         signature_timestamp TIMESTAMP,
+        prescription_pdf_path TEXT,
         otp_hash VARCHAR(255),
         otp_expiry TIMESTAMP,
         qr_code_data TEXT,
@@ -168,8 +169,8 @@ class Prescription {
         appointment_id, doctor_id, patient_id, prescription_number,
         prescriber_name, prescriber_hpcsa, prescriber_phone, prescriber_email,
         patient_name, patient_id_number, patient_dob, patient_phone, patient_email,
-        diagnosis, clinical_notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        diagnosis, clinical_notes, claim_expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP + INTERVAL '30 days')
       RETURNING *;
     `;
 
@@ -268,7 +269,8 @@ class Prescription {
   static async getByDoctorId(doctorId, limit = 50, offset = 0) {
     const getQuery = `
       SELECT id, prescription_number, diagnosis, signature_status, created_at,
-             patient_name, patient_id, is_revoked, appointment_id
+             patient_name, patient_id, is_revoked, revoke_reason, appointment_id,
+             is_dispensed, dispensed_at, dispensed_by_pharmacy_name
       FROM prescriptions
       WHERE doctor_id = $1
       ORDER BY created_at DESC

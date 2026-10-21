@@ -80,7 +80,7 @@ class UserController {
       }
 
       // Check if email already exists
-      const existingUserByEmail = await User.findByEmail(email);
+      const existingUserByEmail = await User.findByEmail(email, { skipCache: true });
       if (existingUserByEmail) {
         await AuditLog.logSecurityEvent(req, null, 'patient', email, 'signup', 'failed', 'Email already registered');
         return res.status(409).json({
@@ -561,6 +561,16 @@ class UserController {
         await AuditLog.logSecurityEvent(req, userId, 'patient', req.user.email, 'logout', 'success');
       }
 
+      // Revoking the session alone left the refresh token usable, so a client
+      // that had logged out could still mint new access tokens with it. A
+      // second /logout route did revoke it, but it was registered after this
+      // one and Express never reached it.
+      const { refreshToken } = req.body || {};
+      if (refreshToken) {
+        const stored = await RefreshToken.findValidToken(refreshToken);
+        if (stored) await RefreshToken.revoke(stored.id);
+      }
+
       res.status(200).json({
         success: true,
         message: 'Logged out successfully'
@@ -713,8 +723,10 @@ class UserController {
     try {
       const { email } = req.body;
 
-      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
-      const userAgent = req.headers['user-agent'];
+      const genericSuccessResponse = {
+        success: true,
+        message: 'If an account with this email exists, a password reset code has been sent to your email. Please check your inbox and spam folder.'
+      };
 
       // Validate required fields
       if (!email) {
@@ -741,71 +753,39 @@ class UserController {
         // For security reasons, don't reveal if email exists or not
         // But log the failed attempt
         await AuditLog.logSecurityEvent(req, null, 'patient', email, 'forgot_password', 'failed', 'User not found');
-        return res.status(200).json({
-          success: true,
-          message: 'If an account with this email exists, a password reset link has been sent to your email. Please check your inbox and spam folder.'
-        });
+        return res.status(200).json(genericSuccessResponse);
       }
 
-      // Create password reset token
-      let resetTokenData;
+      // Create password reset OTP (stored hashed with expiry in the OTP table)
+      let resetOtp;
       try {
-        resetTokenData = await PasswordResetToken.create(user.id, email, ipAddress, userAgent);
+        resetOtp = await OTP.create(user.id, 'password_reset', 'patient', 15);
+        await PasswordResetToken.invalidateAllUserTokens(user.id);
       } catch (tokenError) {
-        console.error('Error creating reset token:', tokenError);
+        console.error('Error creating reset OTP:', tokenError);
         await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'forgot_password', 'failed', `Token creation error: ${tokenError.message}`);
         return res.status(500).json({
           success: false,
-          message: 'Error generating password reset token. Please try again later.'
+          message: 'Error generating password reset code. Please try again later.'
         });
       }
 
-      // Build reset link
-      const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetTokenData.token}`;
-
-      // Send password reset email
-      let emailSent = false;
-      const isDevelopment = process.env.NODE_ENV === 'development';
-
       try {
-        await emailService.sendPasswordReset(email, user.first_name, resetTokenData.token, resetLink);
-        emailSent = true;
-        console.log('✅ Password reset email sent successfully');
+        await emailService.sendPasswordResetOTP(email, resetOtp.otp_code, user.first_name);
+        console.log('✅ Password reset OTP email sent successfully');
       } catch (emailError) {
-        console.error('❌ Failed to send password reset email:', emailError.message);
-
-        if (!isDevelopment) {
-          await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'forgot_password', 'failed', `Email error: ${emailError.message}`);
-          // Invalidate the token if email couldn't be sent
-          await PasswordResetToken.markAsUsed(resetTokenData.data.id);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to send password reset email. Please try again later.'
-          });
-        }
-
-        console.log('⚠️  Development mode: Skipping email requirement');
+        console.error('❌ Failed to send password reset OTP email:', emailError.message);
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'forgot_password', 'failed', `Email error: ${emailError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send password reset code. Please try again later.'
+        });
       }
 
       // Log successful request
       await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'forgot_password', 'success');
 
-      const response = {
-        success: true,
-        message: emailSent 
-          ? 'Password reset link has been sent to your email. The link will expire in 24 hours.'
-          : 'Password reset token generated. Check server logs (development mode only).'
-      };
-
-      if (isDevelopment && !emailSent) {
-        response.dev_token = resetTokenData.token;
-        response.dev_link = resetLink;
-        response.dev_note = 'Token and link included in response (development mode only)';
-        console.log(`\n🔐 Development Reset Token: ${resetTokenData.token}\n`);
-        console.log(`🔗 Development Reset Link: ${resetLink}\n`);
-      }
-
-      res.status(200).json(response);
+      res.status(200).json(genericSuccessResponse);
 
     } catch (error) {
       console.error('Forgot password error:', error);
@@ -818,25 +798,103 @@ class UserController {
   }
 
   /**
+   * Verify Password Reset OTP
+   * No authentication required
+   */
+  static async verifyPasswordResetOTP(req, res) {
+    try {
+      const { email, otp, otp_code } = req.body;
+      const submittedOtp = otp || otp_code;
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+
+      if (!email || !submittedOtp) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email || null, 'otp_failed', 'failed', 'Missing email or OTP');
+        return res.status(400).json({
+          success: false,
+          message: 'Email and OTP code are required'
+        });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'otp_failed', 'failed', 'Invalid email format');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid email format'
+        });
+      }
+
+      const user = await User.findByEmail(email);
+      if (!user) {
+        await AuditLog.logSecurityEvent(req, null, 'patient', email, 'otp_failed', 'failed', 'User not found');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired password reset code. Please request a new one.'
+        });
+      }
+
+      const otpVerification = await OTP.verify(user.id, submittedOtp, 'password_reset', 'patient');
+      if (!otpVerification.valid) {
+        await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_failed', 'failed', otpVerification.message);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired password reset code. Please request a new one.'
+        });
+      }
+
+      await PasswordResetToken.invalidateAllUserTokens(user.id);
+      const resetTokenData = await PasswordResetToken.create(user.id, user.email, ipAddress, userAgent, 15);
+
+      await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'otp_verified', 'success');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Password reset code verified successfully.',
+        data: {
+          reset_token: resetTokenData.token,
+          expires_in: '15 minutes'
+        }
+      });
+    } catch (error) {
+      console.error('Verify password reset OTP error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error verifying password reset code',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Reset Password - Verify Token and Update Password
    * No authentication required
    */
   static async resetPassword(req, res) {
     try {
-      const { token, new_password, confirm_password } = req.body;
+      const {
+        token,
+        new_password,
+        confirm_password,
+        newPassword,
+        confirmPassword
+      } = req.body;
+
+      const normalizedNewPassword = new_password || newPassword;
+      const normalizedConfirmPassword = confirm_password || confirmPassword;
 
       const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
 
       // Validate required fields
-      if (!token || !new_password || !confirm_password) {
+      if (!token || !normalizedNewPassword || !normalizedConfirmPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Token, new password, and password confirmation are required'
+          message: 'Verified reset token, new password, and password confirmation are required'
         });
       }
 
       // Verify passwords match
-      if (new_password !== confirm_password) {
+      if (normalizedNewPassword !== normalizedConfirmPassword) {
         await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', 'Passwords do not match');
         return res.status(400).json({
           success: false,
@@ -845,28 +903,26 @@ class UserController {
       }
 
       // Validate password strength
-      const passwordValidation = PasswordValidator.validate(new_password);
+      const passwordValidation = PasswordValidator.validate(normalizedNewPassword);
       if (!passwordValidation.valid) {
         await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', `Weak password: ${passwordValidation.errors.join(', ')}`);
         return res.status(400).json({
           success: false,
           message: 'Password does not meet security requirements',
           errors: passwordValidation.errors,
-          strength: PasswordValidator.getStrengthDescription(PasswordValidator.getStrength(new_password))
+          strength: PasswordValidator.getStrengthDescription(PasswordValidator.getStrength(normalizedNewPassword))
         });
       }
 
-      // Find reset token
       const resetToken = await PasswordResetToken.findByToken(token);
       if (!resetToken) {
         await AuditLog.logSecurityEvent(req, null, 'patient', null, 'reset_password', 'failed', 'Invalid or expired reset token');
         return res.status(401).json({
           success: false,
-          message: 'Invalid or expired password reset token. Please request a new one.'
+          message: 'Invalid or expired password reset token. Please verify your OTP and try again.'
         });
       }
 
-      // Get user
       const user = await User.findById(resetToken.user_id);
       if (!user) {
         await AuditLog.logSecurityEvent(req, resetToken.user_id, 'patient', resetToken.email, 'reset_password', 'failed', 'User not found');
@@ -878,15 +934,14 @@ class UserController {
 
       // Hash new password
       const saltRounds = 10;
-      const password_hash = await bcrypt.hash(new_password, saltRounds);
+      const password_hash = await bcrypt.hash(normalizedNewPassword, saltRounds);
 
       // Update user password
-      const updatedUser = await User.update(user.id, { password_hash });
+      await User.update(user.id, { password_hash });
 
-      // Mark token as used
       await PasswordResetToken.markAsUsed(resetToken.id);
 
-      // Invalidate all other unused reset tokens for this user
+      // Invalidate all other unused reset tokens for this user.
       await PasswordResetToken.invalidateAllUserTokens(user.id);
 
       // Invalidate all sessions for this user (force re-login)
@@ -1133,8 +1188,8 @@ class UserController {
         // Clear user's cache if using cache service
         const cache = require('../services/cacheService');
         try {
-          await cache.delete(`user:id:${userId}`);
-          await cache.delete(`user:email:${userEmail}`);
+          await cache.del(`user:id:${userId}`);
+          await cache.del(`user:email:${userEmail}`);
         } catch (cacheError) {
           console.warn('Warning: Cache cleanup failed:', cacheError.message);
         }

@@ -3,10 +3,13 @@ const PrescriptionItem = require('../models/PrescriptionItem');
 const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
 const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
 const EmailService = require('../services/emailService');
+const PrescriptionPdfService = require('../services/prescriptionPdfService');
+const storage = require('../services/storage');
 const { pool } = require('../config/db');
 const crypto = require('crypto');
 
@@ -16,6 +19,31 @@ const crypto = require('crypto');
  */
 
 class PrescriptionController {
+  static async renderOrLoadPdfSnapshot(prescription) {
+    if (prescription.signature_status === 'signed' && prescription.prescription_pdf_path) {
+      try {
+        // Awaited on purpose: returning the promise un-awaited puts the
+        // rejection outside this try, so a missing snapshot would fail the
+        // download instead of falling through to a fresh render.
+        return await storage.get(prescription.prescription_pdf_path);
+      } catch (error) {
+        if (error && error.code === 'STORAGE_NOT_FOUND') {
+          console.error(
+            `Signed prescription ${prescription.id} references a missing PDF snapshot:`,
+            prescription.prescription_pdf_path
+          );
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return {
+      buffer: await PrescriptionPdfService.render(prescription),
+      contentType: 'application/pdf'
+    };
+  }
+
   /**
    * Doctor: Create a new prescription (after appointment acceptance)
    */
@@ -64,6 +92,28 @@ class PrescriptionController {
 
       const prescription = await Prescription.create(prescriptionData);
 
+      // Update payment status to completed when prescription is created
+      // (confirms that consultation happened and cash payment was received)
+      let paymentFinalized = false;
+      try {
+        const payment = await Payment.getByAppointmentId(appointmentId);
+        console.log('💳 Payment record for appointment', appointmentId, ':', payment);
+        if (payment) {
+          console.log('📊 Payment status:', payment.payment_status, '| Method:', payment.payment_method);
+          if (payment.payment_status === 'pending') {
+            const updatedPayment = await Payment.updatePaymentStatus(payment.id, 'completed');
+            console.log('✅ Payment updated to completed:', updatedPayment);
+            paymentFinalized = true;
+          } else {
+            console.log('⏭️ Payment already', payment.payment_status, ', skipping update');
+          }
+        } else {
+          console.warn('❌ No payment record found for appointment', appointmentId);
+        }
+      } catch (paymentError) {
+        console.error('❌ Error updating payment status:', paymentError);
+      }
+
       res.status(201).json({
         success: true,
         message: 'Prescription created successfully',
@@ -71,7 +121,8 @@ class PrescriptionController {
           prescriptionId: prescription.id,
           prescriptionNumber: prescription.prescription_number,
           status: prescription.signature_status,
-          createdAt: prescription.created_at
+          createdAt: prescription.created_at,
+          paymentFinalized
         }
       });
     } catch (error) {
@@ -265,17 +316,64 @@ class PrescriptionController {
         .update(fingerprintData)
         .digest('hex');
 
-      // ✅ NEW: Update prescription with signature details
       const timestamp = new Date().toISOString();
-      await pool.query(
-        `UPDATE prescriptions
-         SET signature_status = 'signed',
-             digital_signature = $1,
-             signature_timestamp = NOW(),
-             updated_at = NOW()
-         WHERE id = $2`,
-        [signatureHash, prescriptionId]
-      );
+      const signedPrescription = {
+        ...prescription,
+        signature_status: 'signed',
+        digital_signature: signatureHash,
+        signature_timestamp: timestamp
+      };
+      const pdf = await PrescriptionPdfService.render(signedPrescription);
+      const filename = `prescription_${prescription.id}_${PrescriptionPdfService.filenameFor(prescription)}`;
+      let pdfPath = null;
+      let signed;
+      try {
+        pdfPath = await storage.put(
+          {
+            buffer: pdf,
+            mimetype: 'application/pdf',
+            originalname: filename,
+            size: pdf.length
+          },
+          'prescriptions',
+          filename
+        );
+
+        signed = await pool.query(
+          `UPDATE prescriptions
+           SET signature_status = 'signed',
+               digital_signature = $1,
+               signature_timestamp = $2,
+               prescription_pdf_path = $3,
+               updated_at = NOW()
+           WHERE id = $4
+             AND signature_status = 'pending'
+             AND is_revoked = FALSE
+           RETURNING id`,
+          [signatureHash, timestamp, pdfPath, prescriptionId]
+        );
+      } catch (error) {
+        if (pdfPath) {
+          try {
+            await storage.remove(pdfPath);
+          } catch (cleanupError) {
+            console.error('Unable to remove orphaned prescription PDF snapshot:', cleanupError);
+          }
+        }
+        throw error;
+      }
+
+      if (signed.rowCount === 0) {
+        try {
+          await storage.remove(pdfPath);
+        } catch (cleanupError) {
+          console.error('Unable to remove duplicate prescription PDF snapshot:', cleanupError);
+        }
+        return res.status(409).json({
+          success: false,
+          message: 'Prescription was already signed or revoked'
+        });
+      }
 
       // ✅ NEW: Update session last_activity timestamp
       await pool.query(
@@ -283,8 +381,22 @@ class PrescriptionController {
         [session.id]
       );
 
-      // Generate QR code
+      // Generate the QR code and STORE its token. Without the store the
+      // token exists only in this response: GET /prescriptions/qr/:token
+      // looks it up in prescription_qr_access and finds nothing, so every
+      // link and QR issued before this was dead the moment it was minted.
       const qrCodeData = QRCodeService.generateQRCodeData(prescription);
+
+      let qrStored = false;
+      try {
+        await Prescription.generateQRCodeAccess(prescriptionId, qrCodeData.qrToken);
+        qrStored = true;
+      } catch (qrError) {
+        // The signature is the part that matters legally, so a QR failure
+        // does not fail the signing — but a code that cannot be redeemed is
+        // not returned either, rather than handing out a dead link.
+        console.error('❌ Could not store QR access token:', qrError.message);
+      }
 
       res.status(200).json({
         success: true,
@@ -296,8 +408,11 @@ class PrescriptionController {
           signatureTimestamp: timestamp,
           signatureMethod: 'RSA-SHA256',
           signatureFingerprint: signatureFingerprint,
-          qrCode: qrCodeData.qrString,
-          accessLink: qrCodeData.accessLink,
+          qrAvailable: qrStored,
+          ...(qrStored ? {
+            qrCode: qrCodeData.qrString,
+            accessLink: qrCodeData.accessLink,
+          } : {}),
           medicineCount: prescription.items.length,
           auditTrail: {
             signedBy: prescription.prescriber_name,
@@ -473,17 +588,17 @@ class PrescriptionController {
         });
       }
 
-      // Note: In production, generate actual PDF using a library like pdfkit
-      res.status(200).json({
-        success: true,
-        message: 'Prescription download initiated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          downloadLink: `/api/prescriptions/${prescriptionId}/download`,
-          format: 'PDF',
-          size: 'estimated 500KB'
-        }
-      });
+      const pdf = await PrescriptionController.renderOrLoadPdfSnapshot(prescription);
+
+      res.setHeader('Content-Type', pdf.contentType || 'application/pdf');
+      res.setHeader('Content-Length', pdf.buffer.length);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      // Personal health information: no shared cache should hold a copy.
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf.buffer);
     } catch (error) {
       console.error('❌ Error downloading prescription:', error);
       res.status(500).json({
@@ -510,17 +625,19 @@ class PrescriptionController {
         });
       }
 
-      // Generate print-friendly format
-      res.status(200).json({
-        success: true,
-        message: 'Print data generated',
-        data: {
-          prescriptionNumber: prescription.prescription_number,
-          printUrl: `/api/prescriptions/${prescriptionId}/print`,
-          printFormat: 'A4',
-          watermark: `Patient: ${prescription.patient_name} | Doctor: ${prescription.prescriber_name}`
-        }
-      });
+      const pdf = await PrescriptionController.renderOrLoadPdfSnapshot(prescription);
+
+      // The same document as the download, served inline so the browser or
+      // the app opens it in a viewer the person can print from, rather than
+      // dropping a file in their downloads folder.
+      res.setHeader('Content-Type', pdf.contentType || 'application/pdf');
+      res.setHeader('Content-Length', pdf.buffer.length);
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${PrescriptionPdfService.filenameFor(prescription)}"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf.buffer);
     } catch (error) {
       console.error('❌ Error printing prescription:', error);
       res.status(500).json({
@@ -949,9 +1066,20 @@ class PrescriptionController {
             id: p.id,
             prescriptionNumber: p.prescription_number,
             patient: p.patient_name,
+            // The doctor UI needs the patient to open a record from a script,
+            // and the revoke/dispense state to show it. All of this was
+            // already queried and then dropped here.
+            patientId: p.patient_id,
+            appointmentId: p.appointment_id,
             diagnosis: p.diagnosis,
             status: p.signature_status,
-            createdAt: p.created_at
+            createdAt: p.created_at,
+            isRevoked: p.is_revoked,
+            revokeReason: p.revoke_reason,
+            // Doctors display dispensing, they do not perform it.
+            isDispensed: p.is_dispensed,
+            dispensedAt: p.dispensed_at,
+            dispensedByPharmacyName: p.dispensed_by_pharmacy_name
           }))
         }
       });

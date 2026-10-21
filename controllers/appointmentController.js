@@ -2,6 +2,8 @@ const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const DoctorReview = require('../models/DoctorReview');
 const User = require('../models/User');
+const Payment = require('../models/Payment');
+const notificationService = require('../services/notificationService');
 
 /**
  * Appointment Controller
@@ -167,30 +169,32 @@ class AppointmentController {
       const maxDate = new Date();
       maxDate.setDate(maxDate.getDate() + 90); // Allow booking up to 90 days in advance
 
+      const defaultDoctorSchedule = { opens_at: '09:00', closes_at: '17:00' };
+
       const timePeriods = [
         {
           name: 'morning',
           label: 'Morning',
-          timeRange: '08:00 - 11:30',
-          slots: Appointment.getTimeSlots('morning')
+          timeRange: '09:00 - 11:30',
+          slots: Appointment.getTimeSlots('morning', defaultDoctorSchedule)
         },
         {
           name: 'afternoon',
           label: 'Afternoon',
           timeRange: '12:00 - 15:30',
-          slots: Appointment.getTimeSlots('afternoon')
+          slots: Appointment.getTimeSlots('afternoon', defaultDoctorSchedule)
         },
         {
           name: 'evening',
           label: 'Evening',
           timeRange: '16:00 - 18:30',
-          slots: Appointment.getTimeSlots('evening')
+          slots: Appointment.getTimeSlots('evening', defaultDoctorSchedule)
         },
         {
           name: 'night',
           label: 'Night',
           timeRange: '19:00 - 21:00',
-          slots: Appointment.getTimeSlots('night')
+          slots: Appointment.getTimeSlots('night', defaultDoctorSchedule)
         }
       ];
 
@@ -247,14 +251,6 @@ class AppointmentController {
         });
       }
 
-      const validSlots = Appointment.getTimeSlots(timePeriod);
-      if (!validSlots.includes(timeSlot)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid time slot for the selected time period'
-        });
-      }
-
       // Validate appointment date
       const selectedDate = new Date(appointmentDate);
       const today = new Date();
@@ -293,6 +289,14 @@ class AppointmentController {
         });
       }
 
+      const validSlots = Appointment.getTimeSlots(timePeriod, doctor, appointmentDate);
+      if (!validSlots.includes(timeSlot)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid time slot for the selected time period'
+        });
+      }
+
       // Check if patient already has an appointment at the same time
       const existingAppointment = await Appointment.findByDoctorAndDate(doctorId, appointmentDate);
       const conflictingSlot = existingAppointment.find(
@@ -328,9 +332,18 @@ class AppointmentController {
         appointment_date: appointmentDate,
         time_period: timePeriod,
         time_slot: timeSlot,
-        consultation_fee: doctor.consultation_fee,
+        consultation_fee: Doctor.consultationFeeFor(doctor),
         reason_for_visit: reasonForVisit || null
       });
+
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Booked',
+        body: `Your appointment with Dr. ${doctor.first_name} ${doctor.last_name} on ${appointmentDate} at ${timeSlot} has been booked. Please complete payment to confirm.`,
+        data: { appointmentId: appointment.id, status: 'pending_payment' }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       res.status(201).json({
         success: true,
@@ -484,6 +497,15 @@ class AppointmentController {
 
       const cancelledAppointment = await Appointment.cancel(appointmentId);
 
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Cancelled',
+        body: `Your appointment on ${new Date(appointment.appointment_date).toDateString()} at ${appointment.time_slot} has been cancelled.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       res.json({
         success: true,
         message: 'Appointment cancelled successfully',
@@ -559,7 +581,15 @@ class AppointmentController {
       }
 
       // Validate time slot
-      const validSlots = Appointment.getTimeSlots(newTimePeriod);
+      const doctor = await Doctor.findById(appointment.doctor_id);
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      const validSlots = Appointment.getTimeSlots(newTimePeriod, doctor, newDate);
       if (!validSlots.includes(newTimeSlot)) {
         return res.status(400).json({
           success: false,
@@ -589,6 +619,15 @@ class AppointmentController {
         newTimePeriod,
         newTimeSlot
       );
+
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Rescheduled',
+        body: `Your appointment has been rescheduled to ${newDate} at ${newTimeSlot}.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       res.json({
         success: true,
@@ -832,6 +871,15 @@ class AppointmentController {
       const result = await query(updateQuery, [doctorNotes, appointmentId]);
       const updatedAppointment = result.rows[0];
 
+      // Notify patient that the doctor has accepted — fire-and-forget
+      notificationService.sendToPatient({
+        patientId: appointment.patient_id,
+        type: 'appointment',
+        title: 'Doctor Accepted Your Appointment',
+        body: `Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name} has accepted your appointment on ${appointment.appointment_date} at ${appointment.time_slot}.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       res.status(200).json({
         success: true,
         message: 'Appointment accepted successfully',
@@ -857,12 +905,107 @@ class AppointmentController {
   }
 
   /**
+   * Doctor: Mark appointment as completed after consultation
+   * Also updates payment status to 'completed'
+   */
+  static async completeAppointment(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { appointmentId } = req.params;
+      const { completionNotes = '' } = req.body;
+
+      // Get appointment
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      // Verify doctor owns this appointment
+      if (appointment.doctor_id !== doctorId) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to complete this appointment'
+        });
+      }
+
+      // Verify appointment is in scheduled status
+      if (appointment.status !== 'scheduled') {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot complete appointment with status: ${appointment.status}. Appointment must be scheduled.`
+        });
+      }
+
+      // Update appointment to mark as completed
+      const completedAppointment = await Appointment.updateStatus(appointmentId, 'completed');
+
+      // Also update the payment status to 'completed' if payment exists
+      const payment = await Payment.getByAppointmentId(appointmentId);
+      if (payment && payment.payment_status !== 'completed') {
+        await Payment.updatePaymentStatus(payment.id, 'completed');
+      }
+
+      // Notify patient that consultation is complete — fire-and-forget
+      notificationService.sendToPatient({
+        patientId: appointment.patient_id,
+        type: 'appointment',
+        title: 'Consultation Completed',
+        body: `Your consultation with Dr. ${appointment.doctor_first_name} ${appointment.doctor_last_name} has been marked as completed.`,
+        data: { appointmentId: parseInt(appointmentId) }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
+      res.status(200).json({
+        success: true,
+        message: 'Appointment marked as completed successfully',
+        data: {
+          appointmentId: completedAppointment.id,
+          status: completedAppointment.status,
+          completedAt: completedAppointment.updated_at,
+          patientName: `${appointment.patient_first_name} ${appointment.patient_last_name}`,
+          consultationFee: appointment.consultation_fee,
+          paymentUpdated: payment ? true : false
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error completing appointment:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error completing appointment',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Doctor: Get appointments awaiting acceptance
    */
   static async getDoctorAppointments(req, res) {
     try {
       const doctorId = req.user.id;
-      const { limit = 50, offset = 0 } = req.query;
+      const { limit = 50, offset = 0, scope = 'inbox' } = req.query;
+
+      // `inbox` is what this endpoint has always returned: bookings the doctor
+      // has not accepted yet. That leaves no way to see the day's confirmed
+      // appointments, so `upcoming` and `all` were added alongside it. The
+      // default is unchanged so existing callers keep working.
+      const scopeFilters = {
+        inbox: `AND a.status IN ('pending_payment', 'scheduled')
+                AND a.doctor_accepted = FALSE`,
+        upcoming: `AND a.status = 'scheduled'
+                   AND a.doctor_accepted = TRUE
+                   AND a.appointment_date >= CURRENT_DATE`,
+        all: `AND a.status IN ('pending_payment', 'scheduled', 'completed')`
+      };
+      const scopeFilter = scopeFilters[scope];
+      if (!scopeFilter) {
+        return res.status(400).json({
+          success: false,
+          message: `Unknown scope '${scope}'. Use inbox, upcoming or all.`
+        });
+      }
 
       const query_string = `
         SELECT a.*, 
@@ -870,9 +1013,8 @@ class AppointmentController {
                u.email as patient_email, u.phone as patient_phone
         FROM appointments a
         LEFT JOIN patients u ON a.patient_id = u.id
-        WHERE a.doctor_id = $1 
-          AND a.status IN ('pending_payment', 'scheduled')
-          AND a.doctor_accepted = FALSE
+        WHERE a.doctor_id = $1
+          ${scopeFilter}
         ORDER BY a.appointment_date ASC, a.time_slot ASC
         LIMIT $2 OFFSET $3;
       `;
@@ -885,6 +1027,7 @@ class AppointmentController {
         message: 'Doctor appointments retrieved',
         data: {
           total: result.rows.length,
+          scope,
           appointments: result.rows.map(apt => ({
             id: apt.id,
             patientId: apt.patient_id,
@@ -1020,6 +1163,502 @@ class AppointmentController {
         success: false,
         message: 'Error fetching patients',
         error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Set or update reminder for an appointment
+   */
+  static async setAppointmentReminder(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+      const { reminderTimes, reminderMethods } = req.body;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to set reminder for this appointment'
+        });
+      }
+
+      // Validate reminder times (must be positive integers - minutes before appointment)
+      if (!Array.isArray(reminderTimes) || reminderTimes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'reminderTimes must be a non-empty array of minutes (e.g., [1440, 60])'
+        });
+      }
+
+      if (!reminderTimes.every(time => Number.isInteger(time) && time > 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'All reminder times must be positive integers (minutes before appointment)'
+        });
+      }
+
+      // Validate reminder methods
+      const validMethods = ['email', 'sms', 'push', 'in-app'];
+      if (!Array.isArray(reminderMethods) || reminderMethods.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: `reminderMethods must be a non-empty array. Valid options: ${validMethods.join(', ')}`
+        });
+      }
+
+      if (!reminderMethods.every(method => validMethods.includes(method))) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid reminder method. Valid options: ${validMethods.join(', ')}`
+        });
+      }
+
+      // Set reminder
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const reminder = await AppointmentReminder.setReminder(
+        appointmentId,
+        patientId,
+        reminderTimes,
+        reminderMethods
+      );
+
+      res.json({
+        success: true,
+        message: 'Reminder set successfully',
+        data: {
+          reminderId: reminder.id,
+          appointmentId: reminder.appointment_id,
+          reminderTimes: reminder.reminder_times,
+          reminderMethods: reminder.reminder_methods,
+          isEnabled: reminder.is_enabled,
+          createdAt: reminder.created_at
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error setting appointment reminder:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to set reminder',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get reminder for an appointment
+   */
+  static async getAppointmentReminder(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to view reminder for this appointment'
+        });
+      }
+
+      // Get reminder
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const reminder = await AppointmentReminder.getReminder(appointmentId);
+
+      if (!reminder) {
+        return res.status(404).json({
+          success: false,
+          message: 'No reminder set for this appointment'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Reminder retrieved successfully',
+        data: {
+          reminderId: reminder.id,
+          appointmentId: reminder.appointment_id,
+          reminderTimes: reminder.reminder_times,
+          reminderMethods: reminder.reminder_methods,
+          isEnabled: reminder.is_enabled,
+          createdAt: reminder.created_at,
+          updatedAt: reminder.updated_at
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching appointment reminder:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch reminder',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get all reminders for patient (all appointments with reminders)
+   */
+  static async getPatientReminders(req, res) {
+    try {
+      const patientId = req.user.id;
+
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const reminders = await AppointmentReminder.getRemindersByPatient(patientId);
+
+      res.json({
+        success: true,
+        message: 'Patient reminders retrieved successfully',
+        data: {
+          total: reminders.length,
+          reminders: reminders.map(reminder => ({
+            reminderId: reminder.id,
+            appointmentId: reminder.appointment_id,
+            doctorName: `${reminder.doctor_first_name} ${reminder.doctor_last_name}`,
+            appointmentDate: reminder.appointment_date,
+            appointmentTime: reminder.time_slot,
+            reminderTimes: reminder.reminder_times,
+            reminderMethods: reminder.reminder_methods,
+            isEnabled: reminder.is_enabled
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching patient reminders:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch patient reminders',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get upcoming reminders (reminders due in next 24 hours)
+   */
+  static async getUpcomingReminders(req, res) {
+    try {
+      const patientId = req.user.id;
+
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const upcomingReminders = await AppointmentReminder.getUpcomingReminders(patientId);
+
+      res.json({
+        success: true,
+        message: 'Upcoming reminders retrieved successfully',
+        data: {
+          total: upcomingReminders.length,
+          reminders: upcomingReminders.map(reminder => ({
+            reminderId: reminder.reminder_id,
+            appointmentId: reminder.appointment_id,
+            doctorName: `${reminder.doctor_first_name} ${reminder.doctor_last_name}`,
+            specialization: reminder.specialization,
+            clinicName: reminder.clinic_name,
+            appointmentDate: reminder.appointment_date,
+            appointmentTime: reminder.appointment_time,
+            reminderTimes: reminder.reminder_times,
+            reminderMethods: reminder.reminder_methods,
+            consultationFee: reminder.consultation_fee,
+            status: reminder.status
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching upcoming reminders:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch upcoming reminders',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Update reminder settings for an appointment
+   */
+  static async updateAppointmentReminder(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+      const { reminderTimes, reminderMethods } = req.body;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to update reminder for this appointment'
+        });
+      }
+
+      // Validate at least one field is provided
+      if (!reminderTimes && !reminderMethods) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one field must be updated: reminderTimes or reminderMethods'
+        });
+      }
+
+      // Validate reminder times if provided
+      if (reminderTimes) {
+        if (!Array.isArray(reminderTimes) || reminderTimes.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'reminderTimes must be a non-empty array'
+          });
+        }
+
+        if (!reminderTimes.every(time => Number.isInteger(time) && time > 0)) {
+          return res.status(400).json({
+            success: false,
+            message: 'All reminder times must be positive integers'
+          });
+        }
+      }
+
+      // Validate reminder methods if provided
+      const validMethods = ['email', 'sms', 'push', 'in-app'];
+      if (reminderMethods) {
+        if (!Array.isArray(reminderMethods) || reminderMethods.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'reminderMethods must be a non-empty array'
+          });
+        }
+
+        if (!reminderMethods.every(method => validMethods.includes(method))) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid reminder method. Valid options: ${validMethods.join(', ')}`
+          });
+        }
+      }
+
+      // Update reminder
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const updatedReminder = await AppointmentReminder.updateReminder(
+        appointmentId,
+        reminderTimes,
+        reminderMethods
+      );
+
+      if (!updatedReminder) {
+        return res.status(404).json({
+          success: false,
+          message: 'Reminder not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Reminder updated successfully',
+        data: {
+          reminderId: updatedReminder.id,
+          appointmentId: updatedReminder.appointment_id,
+          reminderTimes: updatedReminder.reminder_times,
+          reminderMethods: updatedReminder.reminder_methods,
+          updatedAt: updatedReminder.updated_at
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error updating appointment reminder:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update reminder',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Toggle reminder on/off for an appointment
+   */
+  static async toggleAppointmentReminder(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+      const { isEnabled } = req.body;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to toggle reminder for this appointment'
+        });
+      }
+
+      // Validate isEnabled is boolean
+      if (typeof isEnabled !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          message: 'isEnabled must be a boolean value'
+        });
+      }
+
+      // Toggle reminder
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const updatedReminder = await AppointmentReminder.toggleReminder(appointmentId, isEnabled);
+
+      if (!updatedReminder) {
+        return res.status(404).json({
+          success: false,
+          message: 'Reminder not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Reminder ${isEnabled ? 'enabled' : 'disabled'} successfully`,
+        data: {
+          reminderId: updatedReminder.id,
+          appointmentId: updatedReminder.appointment_id,
+          isEnabled: updatedReminder.is_enabled
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error toggling appointment reminder:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to toggle reminder',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Delete reminder for an appointment
+   */
+  static async deleteAppointmentReminder(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to delete reminder for this appointment'
+        });
+      }
+
+      // Delete reminder
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const deletedReminder = await AppointmentReminder.deleteReminder(appointmentId);
+
+      if (!deletedReminder) {
+        return res.status(404).json({
+          success: false,
+          message: 'Reminder not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Reminder deleted successfully',
+        data: {
+          reminderId: deletedReminder.id,
+          appointmentId: deletedReminder.appointment_id
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error deleting appointment reminder:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to delete reminder',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get notification history for an appointment
+   */
+  static async getNotificationHistory(req, res) {
+    try {
+      const patientId = req.user.id;
+      const { appointmentId } = req.params;
+
+      // Validate appointment exists and belongs to patient
+      const appointment = await Appointment.findById(appointmentId);
+      if (!appointment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Appointment not found'
+        });
+      }
+
+      if (appointment.patient_id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to view notification history for this appointment'
+        });
+      }
+
+      // Get notification history
+      const AppointmentReminder = require('../models/AppointmentReminder');
+      const history = await AppointmentReminder.getNotificationHistory(appointmentId);
+
+      res.json({
+        success: true,
+        message: 'Notification history retrieved successfully',
+        data: {
+          appointmentId,
+          total: history.length,
+          notifications: history.map(notification => ({
+            notificationId: notification.id,
+            reminderMethod: notification.reminder_method,
+            minutesBefore: notification.minutes_before,
+            status: notification.status,
+            sentAt: notification.sent_at,
+            errorMessage: notification.error_message
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching notification history:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch notification history',
+        error: error.message
       });
     }
   }

@@ -1,5 +1,6 @@
 const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
+const storage = require('../services/storage');
 const bcrypt = require('bcrypt'); // not needed here; kept import-free below
 const { query } = require('../config/db');
 const cache = require('../services/cacheService');
@@ -8,6 +9,7 @@ const ActionToken = require('../models/ActionToken');
 const AuditLog = require('../models/AuditLog');
 const emailService = require('../services/emailService');
 const { encrypt, decryptAndMask } = require('../utils/encryption');
+const { normalizeSupportedImage } = require('../utils/imageUpload');
 
 /**
  * Profile Controller
@@ -23,10 +25,8 @@ const { encrypt, decryptAndMask } = require('../utils/encryption');
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3000';
 
-const AVATARS_DIR = path.join(__dirname, '..', 'uploads', 'avatars');
-if (!fs.existsSync(AVATARS_DIR)) {
-  fs.mkdirSync(AVATARS_DIR, { recursive: true });
-}
+// Where avatars live within the store, whichever driver backs it.
+const AVATAR_FOLDER = 'avatars';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^\+?[0-9\s\-()]{7,20}$/;
@@ -42,8 +42,23 @@ async function invalidateUserCache(userId, email) {
 }
 
 function buildAvatarUrl(req, filename) {
-  // Served by static route mounted in server.js
-  return `${req.protocol}://${req.get('host')}/uploads/avatars/${filename}`;
+  // Served by serveAvatar below. The previous URL pointed at /uploads, which
+  // nothing ever served, so every stored avatar URL 404'd.
+  return `${req.protocol}://${req.get('host')}/api/profile/avatars/${filename}`;
+}
+
+function avatarStorageKey(avatarUrl) {
+  if (typeof avatarUrl !== 'string') return null;
+
+  try {
+    const match = new URL(avatarUrl).pathname.match(/\/api\/profile\/avatars\/([^/]+)$/);
+    if (!match) return null;
+
+    const key = `${AVATAR_FOLDER}/${decodeURIComponent(match[1])}`;
+    return storage.isSafeKey(key) ? key : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 class ProfileController {
@@ -286,22 +301,74 @@ class ProfileController {
   }
 
   /**
+   * GET /api/profile/avatars/:filename
+   *
+   * Serves an avatar from the store. Unauthenticated on purpose — the URL is
+   * embedded in pages and emails — which is why the filename carries random
+   * bytes rather than being guessable from a patient id.
+   */
+  static async serveAvatar(req, res) {
+    try {
+      const { filename } = req.params;
+      const key = `${AVATAR_FOLDER}/${filename}`;
+
+      if (!storage.isSafeKey(key)) {
+        return res.status(400).json({ success: false, message: 'Invalid path' });
+      }
+
+      let stored;
+      try {
+        stored = await storage.get(key);
+      } catch (err) {
+        if (err && err.code === 'STORAGE_NOT_FOUND') {
+          return res.status(404).json({ success: false, message: 'Avatar not found' });
+        }
+        throw err;
+      }
+
+      res.setHeader('Content-Type', stored.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.send(stored.buffer);
+    } catch (error) {
+      console.error('Serve avatar error:', error);
+      return res.status(500).json({ success: false, message: 'Error loading avatar' });
+    }
+  }
+
+  /**
    * Task 4: PUT /api/profile/avatar
    * Accepts an image upload, stores it, saves URL to patient record, returns the URL.
    * Multer is configured in routes/profileRoutes.js (memory storage, image MIME only).
    */
   static async updateAvatar(req, res) {
+    let uploadedKey = null;
     try {
       const userId = req.user.id;
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'No image file provided (field: avatar)' });
       }
+      const image = normalizeSupportedImage(req.file);
+      if (!image) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only valid JPEG, PNG, or WEBP images are allowed for avatars'
+        });
+      }
 
-      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
-      const filename = `patient_${userId}_${Date.now()}${ext}`;
-      const fullPath = path.join(AVATARS_DIR, filename);
+      const existing = await query(
+        'SELECT avatar_url FROM patients WHERE id = $1',
+        [userId]
+      );
+      if (existing.rowCount === 0) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+      }
 
-      await fs.promises.writeFile(fullPath, req.file.buffer);
+      // A random suffix as well as the timestamp: the URL is unauthenticated,
+      // so a guessable name would expose one patient's photo to another.
+      const suffix = crypto.randomBytes(8).toString('hex');
+      const filename = `patient_${userId}_${Date.now()}_${suffix}${image.extension}`;
+
+      uploadedKey = await storage.put(req.file, AVATAR_FOLDER, filename);
 
       const url = buildAvatarUrl(req, filename);
 
@@ -310,8 +377,23 @@ class ProfileController {
         [url, userId]
       );
       if (result.rowCount === 0) {
+        await storage.remove(uploadedKey);
+        uploadedKey = null;
         return res.status(404).json({ success: false, message: 'User not found' });
       }
+      uploadedKey = null;
+
+      const previousKey = avatarStorageKey(existing.rows[0].avatar_url);
+      let cleanupWarning = null;
+      if (previousKey) {
+        try {
+          await storage.remove(previousKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove replaced avatar:', cleanupError);
+          cleanupWarning = 'Your avatar was updated, but the previous image could not be removed.';
+        }
+      }
+
       await invalidateUserCache(userId, result.rows[0].email);
 
       await AuditLog.logSecurityEvent(req, userId, 'patient', result.rows[0].email, 'avatar_updated', 'success');
@@ -319,9 +401,17 @@ class ProfileController {
       return res.status(200).json({
         success: true,
         message: 'Avatar updated successfully',
-        data: { avatar_url: url }
+        data: { avatar_url: url },
+        warning: cleanupWarning
       });
     } catch (error) {
+      if (uploadedKey) {
+        try {
+          await storage.remove(uploadedKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove orphaned avatar:', cleanupError);
+        }
+      }
       console.error('Update avatar error:', error);
       return res.status(500).json({ success: false, message: 'Error updating avatar', error: error.message });
     }

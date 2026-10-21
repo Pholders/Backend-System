@@ -1,12 +1,15 @@
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const path = require('path');
 const session = require('express-session');
 const passport = require('passport');
 require('dotenv').config();
 const { pool } = require('./config/db');
 const cache = require('./services/cacheService');
 const AppointmentCleanupService = require('./services/appointmentCleanupService');
+const ReminderSchedulerService = require('./services/reminderSchedulerService');
+const ComplianceTrackingService = require('./services/complianceTrackingService');
 const logger = require('./services/loggerService');
 const ResponseFormatter = require('./utils/responseFormatter');
 const realtimeService = require('./services/realtimeService');
@@ -21,14 +24,24 @@ const {
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
+const medicationRoutes = require('./routes/medicationRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const legalRoutes = require('./routes/legalRoutes');
+const supportRoutes = require('./routes/supportRoutes');
+const checklistRoutes = require('./routes/checklistRoutes');
 const { initializeDatabase } = require('./config/initDb');
 
 // Import Passport config
 require('./config/passport');
+
+// Import Swagger config
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./config/swagger');
 
 // Import scheduled notification triggers
 const notificationTriggers = require('./jobs/notificationTriggers');
@@ -36,14 +49,77 @@ const notificationTriggers = require('./jobs/notificationTriggers');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Render terminates TLS at its proxy and forwards plain HTTP, so without this
+// req.protocol reads "http". Every URL built from it — doctor profile images,
+// patient avatars, medical aid download links — then comes out as http:// on
+// a host that only serves HTTPS. The browser refuses to load it as a
+// subresource, and the 301 to HTTPS it gets instead never helps.
+//
+// One proxy sits in front of the app, hence 1. This also makes req.ip the
+// real client address rather than the proxy's, which the audit log and the
+// checklist rate limit both want.
+app.set('trust proxy', 1);
+
 // ============================================================================
 // MIDDLEWARE CONFIGURATION
 // ============================================================================
 
+// The phase 1 testing checklist: the page and the results it records.
+//
+// The page is served from here rather than published as a Claude artifact,
+// because an artifact runs under a CSP that blocks fetch to any other host,
+// so it could never reach these endpoints. Served from the app, the page is
+// same-origin, needs no account, and works for anyone holding the link.
+//
+// Both are mounted ahead of the global CORS policy and body parser, so the
+// checklist keeps its own: the API router still allows any origin, which
+// leaves the door open for a page hosted elsewhere later.
+app.get('/checklist', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'checklist.html'));
+});
+app.use('/api/checklist', checklistRoutes);
+
 // CORS configuration
+const allowedOrigins = [
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const isLocalhost =
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:');
+
+    const isProductionOrigin =
+      allowedOrigins.includes(origin);
+
+    if (isLocalhost || isProductionOrigin) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked: ${origin}`));
+  },
+
+  credentials: true,
+
+  methods: [
+    'GET',
+    'HEAD',
+    'PUT',
+    'PATCH',
+    'POST',
+    'DELETE',
+    'OPTIONS'
+  ],
+
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization'
+  ]
 }));
 
 // Body parsing
@@ -69,15 +145,30 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Swagger UI middleware
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+
 // ============================================================================
 // API ROUTES
 // ============================================================================
 
 app.use('/api/users', userRoutes);
+app.use('/api/auth', userRoutes);
+app.use('/api', bookingRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/medications', medicationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/inventory', inventoryRoutes);
+
+// These three were written but never mounted, so every route in them 404'd.
+// The prefixes are the ones their own controllers document. Most visibly this
+// is what lets a patient record their medical aid at all — without it
+// medical_aid_schemes could never be written, and a doctor search filtered by
+// cover could never match anybody.
+app.use('/api/profile', profileRoutes);
+app.use('/api/legal', legalRoutes);
+app.use('/api/support', supportRoutes);
 
 // ============================================================================
 // UTILITY ENDPOINTS
@@ -153,6 +244,14 @@ async function startServer() {
     // Start appointment cleanup service (auto-cancel expired pending payments)
     // Runs every 15 minutes, cancels payments pending for more than 30 minutes
     AppointmentCleanupService.start(15, 30);
+
+    // Initialize appointment reminder scheduler
+    // Checks for due reminders every 5 minutes and sends notifications
+    ReminderSchedulerService.initialize();
+
+    // Initialize compliance tracking service
+    // Monitors pharmacy performance and auto-suspends non-compliant agreements
+    await ComplianceTrackingService.initialize();
     
     // Create raw HTTP server so Socket.IO can attach.
     const httpServer = http.createServer(app);
@@ -169,6 +268,7 @@ async function startServer() {
       console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
       console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
       console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+      console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
       console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
       console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
       console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
@@ -192,6 +292,10 @@ startServer();
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing HTTP server');
+  
+  // Stop reminder scheduler
+  ReminderSchedulerService.stop();
+  
   pool.end(() => {
     console.log('Database pool closed');
   });

@@ -47,17 +47,20 @@ async function addGeolocationToAuditLogs() {
     console.log('   • Automatic impossible travel detection');
     console.log('   • Fraud detection capabilities');
     
-    process.exit(0);
   } catch (error) {
     console.error('❌ Migration error:', error.message);
-    if (error.code === '42701') {
-      console.log('ℹ️  Column already exists, continuing...');
-      process.exit(0);
-    }
-    process.exit(1);
+    if (error.code !== '42701') throw error;
+    console.log('ℹ️  Column already exists, continuing...');
   } finally {
     client.release();
   }
 }
 
-addGeolocationToAuditLogs();
+if (require.main === module) {
+  addGeolocationToAuditLogs().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = addGeolocationToAuditLogs;

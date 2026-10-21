@@ -9,6 +9,7 @@
  */
 
 const { query } = require('./db');
+const { auditEventTypeList } = require('./auditEventTypes');
 
 async function run() {
   console.log('🔧 Updating audit_logs.event_type CHECK constraint...');
@@ -24,13 +25,7 @@ async function run() {
     await query(`
       ALTER TABLE audit_logs
       ADD CONSTRAINT audit_logs_event_type_check
-      CHECK (event_type IN (
-        'signup', 'login', 'logout', 'login_failed', 'password_change',
-        'password_reset', 'otp_generated', 'otp_verified', 'otp_failed',
-        'session_created', 'session_revoked', 'profile_updated',
-        'unauthorized_access', 'account_locked', 'account_unlocked',
-        'email_verification_sent', 'email_verification', 'email_verification_resend'
-      ));
+      CHECK (event_type IN (${auditEventTypeList()}));
     `);
 
     console.log('✅ audit_logs.event_type constraint updated successfully');

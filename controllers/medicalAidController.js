@@ -1,16 +1,23 @@
-const fs = require('fs');
 const path = require('path');
 const { query } = require('../config/db');
+const storage = require('../services/storage');
 const AuditLog = require('../models/AuditLog');
 const { encrypt, decryptAndMask } = require('../utils/encryption');
 const { sign: signUrl, verify: verifyUrl } = require('../utils/signedUrl');
 
-const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads');
-const CARD_DIR = path.join(UPLOAD_ROOT, 'medical-aid');
+// Where medical aid cards live within the store, whichever driver backs it.
+const CARD_FOLDER = 'medical-aid';
 
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
+/**
+ * Claims and invoices each carry one supporting document. The two differ only
+ * in which table owns the row, so the upload is written once and driven from
+ * here -- which also keeps the folder, the audit wording and the ownership
+ * check from drifting apart.
+ */
+const DOCUMENT_TARGETS = {
+  claim: { table: 'medical_aid_claims', folder: 'medical-aid/claims', label: 'Claim' },
+  invoice: { table: 'invoices', folder: 'medical-aid/invoices', label: 'Invoice' },
+};
 
 function buildSchemeResponse(row) {
   if (!row) return null;
@@ -29,15 +36,6 @@ function buildSchemeResponse(row) {
     has_card_back: !!row.card_back_path,
     updated_at: row.updated_at
   };
-}
-
-function relativeFromAbsolute(absPath) {
-  // Storage path stored relative to uploads/ for portability
-  return path.relative(UPLOAD_ROOT, absPath).split(path.sep).join('/');
-}
-
-function absoluteFromRelative(relPath) {
-  return path.join(UPLOAD_ROOT, relPath);
 }
 
 // SCHEME
@@ -171,14 +169,10 @@ async function uploadCard(req, res) {
       });
     }
 
-    ensureDir(CARD_DIR);
-
-    const writeFile = (file, side) => {
+    const storeCard = (file, side) => {
       const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
       const filename = `patient_${patientId}_${side}_${Date.now()}${ext}`;
-      const abs = path.join(CARD_DIR, filename);
-      fs.writeFileSync(abs, file.buffer);
-      return relativeFromAbsolute(abs);
+      return storage.put(file, CARD_FOLDER, filename);
     };
 
     const fields = [];
@@ -186,11 +180,11 @@ async function uploadCard(req, res) {
     let i = 1;
     if (front) {
       fields.push(`card_front_path = $${i++}`);
-      values.push(writeFile(front, 'front'));
+      values.push(await storeCard(front, 'front'));
     }
     if (back) {
       fields.push(`card_back_path = $${i++}`);
-      values.push(writeFile(back, 'back'));
+      values.push(await storeCard(back, 'back'));
     }
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(patientId);
@@ -409,13 +403,20 @@ async function downloadFile(req, res) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const abs = absoluteFromRelative(payload.path);
-    // Path-traversal guard
-    if (!abs.startsWith(UPLOAD_ROOT)) {
+    // The key came out of a signed token, but it is still screened: a driver
+    // must never be handed a key that climbs out of its store.
+    if (!storage.isSafeKey(payload.path)) {
       return res.status(400).json({ success: false, message: 'Invalid path' });
     }
-    if (!fs.existsSync(abs)) {
-      return res.status(404).json({ success: false, message: 'File not found' });
+
+    let stored;
+    try {
+      stored = await storage.get(payload.path);
+    } catch (err) {
+      if (err && err.code === 'STORAGE_NOT_FOUND') {
+        return res.status(404).json({ success: false, message: 'File not found' });
+      }
+      throw err;
     }
 
     // Best-effort audit (no req.user here)
@@ -428,11 +429,115 @@ async function downloadFile(req, res) {
       );
     } catch (_) { /* swallow */ }
 
-    res.download(abs);
+    res.setHeader('Content-Type', stored.contentType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${path.basename(payload.path)}"`
+    );
+    res.send(stored.buffer);
   } catch (error) {
     console.error('downloadFile error:', error);
     res.status(500).json({ success: false, message: 'Failed to download file' });
   }
+}
+
+/**
+ * Attach the supporting document to a claim or an invoice.
+ *
+ * `kind` is set by the route, never by the request, so there is no way to
+ * point an upload at a table the caller chose.
+ */
+async function uploadDocument(req, res, kind) {
+  try {
+    const target = DOCUMENT_TARGETS[kind];
+    if (!target) {
+      return res.status(500).json({ success: false, message: 'Unknown document kind' });
+    }
+
+    const patientId = req.user.id;
+    const patientEmail = req.user.email;
+    const file = req.file;
+    const recordId = parseInt(req.params.id, 10);
+
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'document file is required' });
+    }
+    if (!Number.isInteger(recordId)) {
+      return res.status(400).json({ success: false, message: 'Invalid id' });
+    }
+
+    // The row has to exist and be this patient's before anything is stored,
+    // so a bad id cannot leave a file behind with nothing pointing at it.
+    const existing = await query(
+      `SELECT document_path FROM ${target.table} WHERE id = $1 AND patient_id = $2`,
+      [recordId, patientId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: `${target.label} not found`
+      });
+    }
+    const previousPath = existing.rows[0].document_path;
+
+    const ext = (path.extname(file.originalname) || '').toLowerCase() || '.pdf';
+    const filename = `patient_${patientId}_${kind}_${recordId}_${Date.now()}${ext}`;
+    const storedPath = await storage.put(file, target.folder, filename);
+
+    await query(
+      `UPDATE ${target.table}
+          SET document_path = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND patient_id = $3`,
+      [storedPath, recordId, patientId]
+    );
+
+    // Only once the row points at the new object is the old one disposable.
+    if (previousPath && previousPath !== storedPath && storage.isSafeKey(previousPath)) {
+      await storage.remove(previousPath);
+    }
+
+    await AuditLog.logSecurityEvent(
+      req, patientId, 'patient', patientEmail,
+      'medical_aid_document_uploaded', 'success',
+      `kind=${kind} id=${recordId}`
+    );
+
+    // By this point the document is stored and the row points at it, so the
+    // upload has succeeded whatever happens next. Handing back a link is a
+    // convenience: if signing one fails the caller is told the truth and can
+    // ask for a link separately, rather than being told the upload failed.
+    let documentUrl = null;
+    try {
+      const token = signUrl({
+        userId: patientId, path: storedPath, kind, ttlSeconds: 600
+      });
+      documentUrl = `${req.protocol}://${req.get('host')}`
+        + `/api/profile/medical-aid/files/download?token=${token}`;
+    } catch (signingError) {
+      console.error('document uploaded but could not be signed:', signingError);
+    }
+
+    res.json({
+      success: true,
+      message: `${target.label} document uploaded`,
+      document_url: documentUrl,
+      document_url_expires_in: documentUrl ? 600 : null,
+      replaced_previous: Boolean(previousPath)
+    });
+  } catch (error) {
+    console.error(`upload ${kind} document error:`, error);
+    res.status(500).json({ success: false, message: 'Failed to upload document' });
+  }
+}
+
+/** POST /api/profile/medical-aid/claims/:id/document */
+async function uploadClaimDocument(req, res) {
+  return uploadDocument(req, res, 'claim');
+}
+
+/** POST /api/profile/medical-aid/invoices/:id/document */
+async function uploadInvoiceDocument(req, res) {
+  return uploadDocument(req, res, 'invoice');
 }
 
 module.exports = {
@@ -442,7 +547,9 @@ module.exports = {
   getCardSignedUrl,
   listClaims,
   getClaim,
+  uploadClaimDocument,
   listInvoices,
   getInvoice,
+  uploadInvoiceDocument,
   downloadFile
 };

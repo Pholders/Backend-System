@@ -30,12 +30,16 @@ async function setupEnhancedFeatures() {
     console.log('   ✓ File integrity verification');
     console.log('   ✓ Access logging for files');
     console.log('   ✓ Audit reports & compliance');
-    
-    process.exit(0);
   } catch (error) {
-    console.error('❌ Migration error:', error.message);
-    process.exit(1);
+    throw error;
   }
 }
 
-setupEnhancedFeatures();
+if (require.main === module) {
+  setupEnhancedFeatures().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration error:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = setupEnhancedFeatures;

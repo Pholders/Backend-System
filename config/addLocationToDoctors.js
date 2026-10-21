@@ -27,11 +27,16 @@ async function addLocationToDoctors() {
     console.log('✅ Location index created');
 
     console.log('✨ Migration completed successfully!');
-    process.exit(0);
   } catch (error) {
-    console.error('❌ Migration failed:', error);
-    process.exit(1);
+    throw error;
   }
 }
 
-addLocationToDoctors();
+if (require.main === module) {
+  addLocationToDoctors().then(() => process.exit(0)).catch(err => {
+    console.error('❌ Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = addLocationToDoctors;

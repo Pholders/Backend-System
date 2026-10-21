@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, pool } = require('../config/db');
 const Doctor = require('../models/Doctor');
+const MedicalAid = require('../models/MedicalAid');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -10,6 +11,29 @@ const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
+const storage = require('../services/storage');
+const { normalizeSupportedImage } = require('../utils/imageUpload');
+
+const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
+
+function buildProfileImageUrl(req, filename) {
+  return `${req.protocol}://${req.get('host')}/api/users/doctor/profile-images/${filename}`;
+}
+
+function profileImageStorageKey(profileImageUrl) {
+  if (typeof profileImageUrl !== 'string') return null;
+
+  try {
+    const match = new URL(profileImageUrl).pathname
+      .match(/\/api\/users\/doctor\/profile-images\/([^/]+)$/);
+    if (!match) return null;
+
+    const key = `${DOCTOR_PROFILE_IMAGE_FOLDER}/${decodeURIComponent(match[1])}`;
+    return storage.isSafeKey(key) ? key : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /**
  * Build a display-ready doctor name with the "Dr" title prefix.
@@ -479,6 +503,29 @@ class DoctorController {
   /**
    * Get Doctor Profile
    */
+  /**
+   * The medical aid schemes a doctor can say they accept.
+   *
+   * Any signed-in role can read it: the doctor needs it to populate the
+   * picker, and the patient app needs the names to show cover.
+   */
+  static async getMedicalAidCatalogue(req, res) {
+    try {
+      const schemes = await MedicalAid.listCatalogue();
+      res.status(200).json({
+        success: true,
+        data: { total: schemes.length, schemes }
+      });
+    } catch (error) {
+      console.error('Get medical aid catalogue error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching medical aid schemes',
+        error: error.message
+      });
+    }
+  }
+
   static async getProfile(req, res) {
     try {
       const doctorId = req.user.id;
@@ -493,6 +540,10 @@ class DoctorController {
 
       delete doctor.password_hash;
 
+      // Which medical aids this doctor accepts. Phase 1 needs it so patients
+      // can find a doctor covered by their plan.
+      doctor.medicalAids = await MedicalAid.getForDoctor(doctorId);
+
       res.status(200).json({
         success: true,
         data: doctor
@@ -503,6 +554,117 @@ class DoctorController {
       res.status(500).json({
         success: false,
         message: 'Error fetching profile',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/users/doctor/profile-images/:filename
+   *
+   * Doctor profile images appear in patient-facing provider listings. The
+   * random filename makes this public route unguessable while Cloudinary
+   * remains private behind the application proxy.
+   */
+  static async serveProfileImage(req, res) {
+    try {
+      const key = `${DOCTOR_PROFILE_IMAGE_FOLDER}/${req.params.filename}`;
+      if (!storage.isSafeKey(key)) {
+        return res.status(400).json({ success: false, message: 'Invalid path' });
+      }
+
+      let stored;
+      try {
+        stored = await storage.get(key);
+      } catch (error) {
+        if (error && error.code === 'STORAGE_NOT_FOUND') {
+          return res.status(404).json({ success: false, message: 'Profile image not found' });
+        }
+        throw error;
+      }
+
+      res.setHeader('Content-Type', stored.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.send(stored.buffer);
+    } catch (error) {
+      console.error('Serve doctor profile image error:', error);
+      return res.status(500).json({ success: false, message: 'Error loading profile image' });
+    }
+  }
+
+  /**
+   * PUT /api/users/doctor/profile/image
+   */
+  static async uploadProfileImage(req, res) {
+    let uploadedKey = null;
+
+    try {
+      const doctorId = req.user.id;
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No image file provided (field: image)'
+        });
+      }
+      const image = normalizeSupportedImage(req.file);
+      if (!image) {
+        return res.status(400).json({
+          success: false,
+          message: 'Only valid JPEG, PNG, or WEBP images are allowed for profile images'
+        });
+      }
+
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+
+      const suffix = crypto.randomBytes(8).toString('hex');
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${image.extension}`;
+      uploadedKey = await storage.put(req.file, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
+
+      const profileImageUrl = buildProfileImageUrl(req, filename);
+      const updatedDoctor = await Doctor.update(doctorId, { profile_image: profileImageUrl });
+      if (!updatedDoctor) {
+        await storage.remove(uploadedKey);
+        uploadedKey = null;
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+      uploadedKey = null;
+
+      const previousKey = profileImageStorageKey(doctor.profile_image);
+      let cleanupWarning = null;
+      if (previousKey) {
+        try {
+          await storage.remove(previousKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove replaced doctor profile image:', cleanupError);
+          cleanupWarning = 'Your profile image was updated, but the previous image could not be removed.';
+        }
+      }
+
+      await AuditLog.logSecurityEvent(
+        req, doctorId, 'doctor', updatedDoctor.email, 'avatar_updated', 'success'
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Profile image updated successfully',
+        data: { profile_image: profileImageUrl },
+        warning: cleanupWarning
+      });
+    } catch (error) {
+      if (uploadedKey) {
+        try {
+          await storage.remove(uploadedKey);
+        } catch (cleanupError) {
+          console.error('Unable to remove orphaned doctor profile image:', cleanupError);
+        }
+      }
+      console.error('Upload doctor profile image error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error uploading profile image',
         error: error.message
       });
     }
@@ -521,8 +683,124 @@ class DoctorController {
       delete updateData.email;
       delete updateData.hpcsa_number;
       delete updateData.created_at;
+      delete updateData.profile_image;
 
-      const updatedDoctor = await Doctor.update(doctorId, updateData);
+      // Accepted schemes live in their own table, so they must not reach
+      // Doctor.update — it maps every remaining key to a doctors column.
+      const medicalAids = updateData.medicalAids;
+      delete updateData.medicalAids;
+
+      if (medicalAids !== undefined && !Array.isArray(medicalAids)) {
+        return res.status(400).json({
+          success: false,
+          message: 'medicalAids must be an array of scheme ids'
+        });
+      }
+
+      const timeRegex = /^\d{2}:\d{2}$/;
+      if (updateData.opens_at && !timeRegex.test(updateData.opens_at)) {
+        return res.status(400).json({
+          success: false,
+          message: 'opens_at must use HH:MM format'
+        });
+      }
+
+      if (updateData.closes_at && !timeRegex.test(updateData.closes_at)) {
+        return res.status(400).json({
+          success: false,
+          message: 'closes_at must use HH:MM format'
+        });
+      }
+
+      if (updateData.opens_at && updateData.closes_at && updateData.closes_at <= updateData.opens_at) {
+        return res.status(400).json({
+          success: false,
+          message: 'closes_at must be later than opens_at'
+        });
+      }
+
+      if (updateData.availability !== undefined) {
+        const weekdayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        const isValidAvailability =
+          updateData.availability &&
+          typeof updateData.availability === 'object' &&
+          !Array.isArray(updateData.availability) &&
+          Object.entries(updateData.availability).every(([day, windows]) => {
+            if (!weekdayKeys.includes(day) || !Array.isArray(windows)) {
+              return false;
+            }
+
+            return windows.every((window) => typeof window === 'string' && /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(window));
+          });
+
+        if (!isValidAvailability) {
+          return res.status(400).json({
+            success: false,
+            message: 'availability must be an object like { monday: ["09:00-12:00", "13:00-17:00"] }'
+          });
+        }
+      }
+
+      // Re-geocode when the practice moves. Signup geocodes the address, but
+      // this endpoint used to write clinic_address and leave the coordinates
+      // alone, so a doctor who relocated stayed discoverable at their old
+      // position — which works directly against "find doctor nearest to them".
+      //
+      // Unlike signup this never fails the save. The geocoder resolves place
+      // names far more reliably than street addresses, so refusing the whole
+      // profile update over it would block a doctor from correcting their own
+      // details. The city is tried as a fallback, and the response says
+      // whether the pin actually moved.
+      let locationUpdated = false;
+      let locationWarning = null;
+
+      const movedPractice =
+        updateData.clinic_address !== undefined ||
+        updateData.city !== undefined ||
+        updateData.province !== undefined;
+
+      if (movedPractice && updateData.latitude === undefined) {
+        const existing = await Doctor.findById(doctorId);
+        const address = updateData.clinic_address ?? (existing && existing.clinic_address);
+        const city = updateData.city ?? (existing && existing.city);
+        const province = updateData.province ?? (existing && existing.province);
+
+        // Most precise first, then progressively coarser.
+        const candidates = [
+          address,
+          [city, province, 'South Africa'].filter(Boolean).join(', '),
+        ].filter((value) => value && String(value).trim());
+
+        for (const candidate of candidates) {
+          try {
+            const result = await GeocodingService.processLocation({
+              clinic_address: candidate
+            });
+            if (result.success) {
+              updateData.latitude = result.latitude;
+              updateData.longitude = result.longitude;
+              locationUpdated = true;
+              break;
+            }
+          } catch (geoError) {
+            console.error('Geocoding error on profile update:', geoError);
+          }
+        }
+
+        if (!locationUpdated) {
+          locationWarning =
+            'The practice address could not be placed on the map, so your '
+            + 'location is unchanged. Patients will still find you at your '
+            + 'previous address.';
+        }
+      }
+
+      // Saving only the scheme list is legitimate, and Doctor.update builds
+      // no valid statement from an empty object.
+      const updatedDoctor = Object.keys(updateData).length > 0
+        ? await Doctor.update(doctorId, updateData)
+        : await Doctor.findById(doctorId);
+
       if (!updatedDoctor) {
         return res.status(404).json({
           success: false,
@@ -532,11 +810,17 @@ class DoctorController {
 
       delete updatedDoctor.password_hash;
 
+      updatedDoctor.medicalAids = medicalAids === undefined
+          ? await MedicalAid.getForDoctor(doctorId)
+          : await MedicalAid.setForDoctor(doctorId, medicalAids);
+
       await AuditLog.logSecurityEvent(req, doctorId, 'doctor', updatedDoctor.email, 'profile_updated', 'success');
 
       res.status(200).json({
         success: true,
         message: 'Profile updated successfully',
+        location_updated: locationUpdated,
+        ...(locationWarning ? { location_warning: locationWarning } : {}),
         data: updatedDoctor
       });
 
@@ -556,7 +840,10 @@ class DoctorController {
    */
   static async getNearbyDoctors(req, res) {
     try {
-      const { latitude, longitude, radius = 15 } = req.body;
+      // The patient app sends radius_km; earlier callers send radius. Taking
+      // only one of them silently ignored whatever the patient chose.
+      const { latitude, longitude, coveredByMyMedicalAid } = req.body;
+      const radius = req.body.radius ?? req.body.radius_km ?? 15;
       const userId = req.user ? req.user.id : null;
 
       // Validate required location parameters
@@ -636,6 +923,31 @@ class DoctorController {
         delete doc.password_hash;
       });
 
+      // Phase 1: "find doctor nearest to them (if under medical aid, doctor
+      // that's covered by medical plan)". The patient's scheme is free text,
+      // so it is matched against the catalogue rather than compared directly.
+      let medicalAidFilter = null;
+      if (coveredByMyMedicalAid && userId) {
+        const schemeName = await MedicalAid.getPatientSchemeName(userId);
+        const scheme = await MedicalAid.findSchemeByName(schemeName);
+        if (scheme) {
+          const accepting = new Set(await MedicalAid.doctorIdsAccepting(scheme.id));
+          medicalAidFilter = scheme;
+          for (let i = nearbyDoctors.length - 1; i >= 0; i--) {
+            if (!accepting.has(nearbyDoctors[i].id)) nearbyDoctors.splice(i, 1);
+          }
+        }
+      }
+
+      // Always say which schemes each doctor takes, so the patient can see
+      // cover even when they have not asked to filter by it.
+      const acceptedByDoctor = await MedicalAid.getForDoctors(
+        nearbyDoctors.map(d => d.id)
+      );
+      nearbyDoctors.forEach(doc => {
+        doc.medicalAids = acceptedByDoctor[doc.id] || [];
+      });
+
       // Log search for analytics
       if (userId) {
         await AuditLog.logSecurityEvent(
@@ -658,6 +970,11 @@ class DoctorController {
             longitude
           },
           radius_km: radius,
+          // Null when the caller did not ask to filter, or when their scheme
+          // did not match the catalogue. The client must not present an
+          // unfiltered list as "covered by your plan".
+          medical_aid_filter: medicalAidFilter,
+          medical_aid_filter_applied: medicalAidFilter !== null,
           doctors_count: nearbyDoctors.length,
           doctors: nearbyDoctors
         }
@@ -677,14 +994,15 @@ class DoctorController {
    * GET /doctors
    *
    * Public doctor listing for the patient "Find doctors near you" screen.
-   * Patient sends their current GPS coordinates as query params and we
-   * return active doctors sorted by distance, with optional specialty,
-   * max-fee and radius filters plus pagination.
+   * Returns active doctors for patient discovery. Coordinates are optional:
+   * when present we compute distance and optionally apply a radius filter;
+   * otherwise we return all active doctors subject to text/fee filters.
    *
    * Query params:
-   *   lat         (required, number)  - patient latitude
-   *   lng         (required, number)  - patient longitude
-   *   radius_km   (optional, number)  - default 5, max 100
+   *   lat         (optional, number)  - patient latitude
+   *   lng         (optional, number)  - patient longitude
+   *   radius_km   (optional, number)  - default 5, max 100, only used with lat/lng
+   *   location    (optional, string)  - matches city/province/clinic name/address
    *   specialty   (optional, string)  - matches doctors.specialization
    *   max_fee     (optional, number)  - max consultation_fee (inclusive)
    *   page        (optional, int)     - default 1
@@ -692,34 +1010,38 @@ class DoctorController {
    */
   static async listDoctors(req, res) {
     try {
-      const lat = parseFloat(req.query.lat);
-      const lng = parseFloat(req.query.lng);
+      const hasLat = req.query.lat !== undefined && req.query.lat !== '';
+      const hasLng = req.query.lng !== undefined && req.query.lng !== '';
+      const lat = hasLat ? parseFloat(req.query.lat) : null;
+      const lng = hasLng ? parseFloat(req.query.lng) : null;
+      const hasCoordinates = hasLat || hasLng;
       const radiusKm = req.query.radius_km !== undefined ? parseFloat(req.query.radius_km) : 5;
+      const location = req.query.location ? String(req.query.location).trim() : null;
       const specialty = req.query.specialty ? String(req.query.specialty).trim() : null;
       const maxFee = req.query.max_fee !== undefined ? parseFloat(req.query.max_fee) : null;
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-      // Validate coordinates
-      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      // Validate coordinates only when the client sends them.
+      if (hasCoordinates && (!hasLat || !hasLng || Number.isNaN(lat) || Number.isNaN(lng))) {
         return res.status(400).json({
           success: false,
-          message: 'lat and lng query parameters are required and must be numbers'
+          message: 'lat and lng must both be provided as valid numbers when using distance filters'
         });
       }
-      if (lat < -90 || lat > 90) {
+      if (hasCoordinates && (lat < -90 || lat > 90)) {
         return res.status(400).json({
           success: false,
           message: 'lat must be between -90 and 90'
         });
       }
-      if (lng < -180 || lng > 180) {
+      if (hasCoordinates && (lng < -180 || lng > 180)) {
         return res.status(400).json({
           success: false,
           message: 'lng must be between -180 and 180'
         });
       }
-      if (Number.isNaN(radiusKm) || radiusKm < 1 || radiusKm > 100) {
+      if (req.query.radius_km !== undefined && (Number.isNaN(radiusKm) || radiusKm < 1 || radiusKm > 100)) {
         return res.status(400).json({
           success: false,
           message: 'radius_km must be a number between 1 and 100'
@@ -732,14 +1054,21 @@ class DoctorController {
         });
       }
 
-      // Fetch a generous batch of active doctors with location data and
-      // filter/sort in memory. We do not enable PostGIS so distance must be
-      // computed in app code via the Haversine formula. The DB-side
-      // specialty/fee filter keeps the working set small.
+      // Fetch active doctors and apply DB-side text/fee filters first.
       const params = ['active'];
-      let whereSql = `WHERE status = $1
-        AND latitude IS NOT NULL
-        AND longitude IS NOT NULL`;
+      let whereSql = `WHERE status = $1`;
+
+      if (location) {
+        params.push(`%${location}%`);
+        whereSql += `
+        AND (
+          city ILIKE $${params.length}
+          OR province ILIKE $${params.length}
+          OR clinic_name ILIKE $${params.length}
+          OR clinic_address ILIKE $${params.length}
+          OR address ILIKE $${params.length}
+        )`;
+      }
 
       if (specialty) {
         params.push(specialty);
@@ -755,33 +1084,49 @@ class DoctorController {
         params
       );
 
-      // Compute distance and apply radius filter
-      const withinRadius = [];
+      // When coordinates are present, compute distance and optionally apply
+      // the radius filter; otherwise return the filtered set as-is.
+      const visibleDoctors = [];
       for (const doctor of result.rows) {
-        const distance = GeolocationService.calculateDistance(
-          lat,
-          lng,
-          parseFloat(doctor.latitude),
-          parseFloat(doctor.longitude)
-        );
-        if (distance <= radiusKm) {
-          delete doctor.password_hash;
-          withinRadius.push({
-            ...doctor,
-            display_name: buildDisplayName(doctor),
-            distance_km: parseFloat(distance.toFixed(2))
-          });
+        delete doctor.password_hash;
+
+        const doctorData = {
+          ...doctor,
+          display_name: buildDisplayName(doctor)
+        };
+
+        if (hasCoordinates) {
+          const hasDoctorCoordinates = doctor.latitude !== null && doctor.longitude !== null;
+          if (!hasDoctorCoordinates) {
+            continue;
+          }
+
+          const distance = GeolocationService.calculateDistance(
+            lat,
+            lng,
+            parseFloat(doctor.latitude),
+            parseFloat(doctor.longitude)
+          );
+
+          if (distance > radiusKm) {
+            continue;
+          }
+
+          doctorData.distance_km = parseFloat(distance.toFixed(2));
         }
+
+        visibleDoctors.push(doctorData);
       }
 
-      // Sort by distance (closest first)
-      withinRadius.sort((a, b) => a.distance_km - b.distance_km);
+      if (hasCoordinates) {
+        visibleDoctors.sort((a, b) => a.distance_km - b.distance_km);
+      }
 
       // Paginate
-      const total = withinRadius.length;
+      const total = visibleDoctors.length;
       const totalPages = Math.max(1, Math.ceil(total / limit));
       const offset = (page - 1) * limit;
-      const pageItems = withinRadius.slice(offset, offset + limit);
+      const pageItems = visibleDoctors.slice(offset, offset + limit);
 
       res.status(200).json({
         success: true,
@@ -798,7 +1143,8 @@ class DoctorController {
           filters: {
             lat,
             lng,
-            radius_km: radiusKm,
+            location,
+            radius_km: hasCoordinates ? radiusKm : null,
             specialty: specialty || null,
             max_fee: maxFee
           }

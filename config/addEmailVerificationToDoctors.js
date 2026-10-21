@@ -38,8 +38,11 @@ async function addEmailVerificationToDoctors() {
   }
 }
 
-// Run migration
-addEmailVerificationToDoctors().catch(err => {
-  console.error('Migration failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  addEmailVerificationToDoctors().then(() => process.exit(0)).catch(err => {
+    console.error('Migration failed:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = addEmailVerificationToDoctors;

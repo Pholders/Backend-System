@@ -2,6 +2,7 @@ const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const AuditLog = require('../models/AuditLog');
+const notificationService = require('../services/notificationService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 
 class PaymentController {
@@ -80,7 +81,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       // Create payment record
       const paymentData = {
@@ -199,13 +200,25 @@ class PaymentController {
       }
 
       try {
-        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId);
+        const expectedPaymentIntentId = payment.stripe_payment_intent_id || payment.stripe_transaction_id;
+        if (expectedPaymentIntentId && expectedPaymentIntentId !== stripePaymentIntentId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Stripe Payment Intent does not match this payment'
+          });
+        }
+
+        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
+          expand: ['latest_charge']
+        });
 
         if (intent.status === 'succeeded') {
+          const charge = intent.latest_charge;
+
           // Update payment status to completed
           const updatedPayment = await Payment.updatePaymentStatus(paymentId, 'completed', {
-            stripe_transaction_id: intent.charges.data[0].id,
-            receipt_url: intent.charges.data[0].receipt_url
+            stripe_transaction_id: typeof charge === 'string' ? charge : charge?.id || null,
+            receipt_url: typeof charge === 'string' ? null : charge?.receipt_url || null
           });
 
           // Confirm payment and change appointment status from pending_payment to scheduled
@@ -220,6 +233,15 @@ class PaymentController {
             'success',
             `Stripe payment confirmed for appointment ${payment.appointment_id}`
           );
+
+          // Notify patient of confirmed payment — fire-and-forget
+          notificationService.sendToPatient({
+            patientId,
+            type: 'appointment',
+            title: 'Payment Confirmed — Appointment Scheduled',
+            body: `Your payment of R${payment.amount} has been confirmed. Your appointment is now scheduled.`,
+            data: { appointmentId: payment.appointment_id, paymentId: payment.id }
+          }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
           return res.status(200).json({
             success: true,
@@ -329,6 +351,15 @@ class PaymentController {
         `Cash on arrival payment confirmed for appointment ${payment.appointment_id}`
       );
 
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Appointment Confirmed — Pay on Arrival',
+        body: `Your appointment is confirmed. Please bring R${payment.amount} on the day of your visit.`,
+        data: { appointmentId: payment.appointment_id, paymentId: payment.id }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
       return res.status(200).json({
         success: true,
         message: 'Cash payment confirmed. You will pay during the appointment.',
@@ -426,6 +457,15 @@ class PaymentController {
         'success',
         `Medical aid payment confirmed - Provider: ${medicalAidProvider}`
       );
+
+      // Notify patient — fire-and-forget
+      notificationService.sendToPatient({
+        patientId,
+        type: 'appointment',
+        title: 'Medical Aid Claim Submitted',
+        body: `Your medical aid claim has been submitted to ${medicalAidProvider}. Your appointment is confirmed.`,
+        data: { appointmentId: payment.appointment_id, paymentId }
+      }).catch(err => console.error('Notification error (non-blocking):', err.message));
 
       return res.status(200).json({
         success: true,
@@ -727,7 +767,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       const StripeService = require('../services/stripeService');
 
@@ -1089,7 +1129,7 @@ class PaymentController {
       }
 
       const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = doctor.consultation_fee || 0;
+      const consultationFee = Doctor.consultationFeeFor(doctor);
 
       const StripeService = require('../services/stripeService');
       const breakdown = StripeService.calculatePaymentBreakdown(consultationFee);

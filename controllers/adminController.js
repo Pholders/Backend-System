@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const Admin = require('../models/Admin');
+const Pharmacy = require('../models/Pharmacy');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -298,6 +299,97 @@ class AdminController {
   /**
    * Get Admin Profile
    */
+  /**
+   * Every pharmacy on the platform.
+   *
+   * Nothing listed pharmacies before, so the admin directory was assembled
+   * from partnership group membership and a pharmacy belonging to no group
+   * was invisible. Pharmacy.findAll already existed with nothing routed to
+   * it.
+   */
+  static async listPharmacies(req, res) {
+    try {
+      const { limit = 100, offset = 0, status } = req.query;
+      const pharmacies = await Pharmacy.findAll(parseInt(limit), parseInt(offset));
+
+      const visible = status
+        ? pharmacies.filter((p) => p.status === status)
+        : pharmacies;
+
+      visible.forEach((p) => { delete p.password_hash; });
+
+      res.status(200).json({
+        success: true,
+        message: 'Pharmacies retrieved',
+        data: { total: visible.length, pharmacies: visible }
+      });
+    } catch (error) {
+      console.error('List pharmacies error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching pharmacies',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Approve, suspend or block a pharmacy.
+   *
+   * Phase 1 asks for a pharmacy partnership network, which means somebody has
+   * to admit a pharmacy to it and remove one that misbehaves. Nothing wrote
+   * pharmacies.status, so the controls were taken out of the admin app rather
+   * than left decorative.
+   */
+  static async setPharmacyStatus(req, res) {
+    const ALLOWED = ['active', 'suspended', 'blocked', 'pending'];
+    try {
+      const { pharmacyId } = req.params;
+      const { status } = req.body;
+
+      if (!ALLOWED.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `status must be one of: ${ALLOWED.join(', ')}`
+        });
+      }
+
+      const pharmacy = await Pharmacy.findById(pharmacyId);
+      if (!pharmacy) {
+        return res.status(404).json({
+          success: false,
+          message: 'Pharmacy not found'
+        });
+      }
+
+      const updated = await Pharmacy.update(pharmacyId, { status });
+      if (updated) delete updated.password_hash;
+
+      await AuditLog.logSecurityEvent(
+        req,
+        req.user.id,
+        'admin',
+        req.user.email,
+        'pharmacy_status_changed',
+        'success',
+        `Pharmacy ${pharmacyId} ${pharmacy.status} -> ${status}`
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Pharmacy ${status}`,
+        data: updated
+      });
+    } catch (error) {
+      console.error('Set pharmacy status error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error updating pharmacy status',
+        error: error.message
+      });
+    }
+  }
+
   static async getProfile(req, res) {
     try {
       const adminId = req.user.id;

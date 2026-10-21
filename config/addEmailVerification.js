@@ -70,4 +70,16 @@ if (require.main === module) {
     });
 }
 
+if (require.main === module) {
+  addEmailVerificationColumns()
+    .then(() => {
+      console.log('✅ Email verification migration completed');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('❌ Migration failed:', err);
+      process.exit(1);
+    });
+}
+
 module.exports = addEmailVerificationColumns;

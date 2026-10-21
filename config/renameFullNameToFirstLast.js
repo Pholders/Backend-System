@@ -26,4 +26,13 @@ const runMigration = async () => {
   }
 };
 
-runMigration();
+// Only when run directly. Requiring this file must not execute it.
+
+
+if (require.main === module) {
+
+
+  runMigration();
+
+
+}

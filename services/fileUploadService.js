@@ -1,7 +1,8 @@
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const { query } = require('../config/db');
+const storage = require('./storage');
 
 /**
  * Secure File Upload Service
@@ -10,7 +11,6 @@ const { query } = require('../config/db');
 
 class FileUploadService {
   constructor() {
-    this.uploadsDir = path.join(__dirname, '../uploads');
     this.allowedMimeTypes = [
       'application/pdf',
       'image/jpeg',
@@ -23,9 +23,40 @@ class FileUploadService {
     this.maxFileSize = 10 * 1024 * 1024; // 10MB
     this.allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.txt'];
 
-    // Ensure uploads directory exists
-    if (!fs.existsSync(this.uploadsDir)) {
-      fs.mkdirSync(this.uploadsDir, { recursive: true });
+    // Where these files live inside the store. The storage driver owns the
+    // rest of the path, so this is a prefix and not a directory on disk.
+    this.folder = 'patient-files';
+  }
+
+  /**
+   * Rows written before file storage moved behind a driver hold an absolute
+   * path on the machine that took the upload. Those files are gone on an
+   * ephemeral host, but a developer's local ones still work, so read them
+   * where they are instead of failing.
+   */
+  static isLegacyPath(stored) {
+    return !storage.isSafeKey(stored);
+  }
+
+  /**
+   * The bytes behind a stored file, from the configured store or, for an
+   * old row, from the absolute path it was written to.
+   */
+  async readBytes(stored) {
+    if (FileUploadService.isLegacyPath(stored)) {
+      if (!fs.existsSync(stored)) {
+        throw new Error('File not found on disk');
+      }
+      return fs.readFileSync(stored);
+    }
+    try {
+      const object = await storage.get(stored);
+      return object.buffer;
+    } catch (error) {
+      if (error.code === 'STORAGE_NOT_FOUND') {
+        throw new Error('File not found on disk');
+      }
+      throw error;
     }
   }
 
@@ -137,17 +168,11 @@ class FileUploadService {
   }
 
   /**
-   * Calculate file hash (SHA256)
+   * Calculate file hash (SHA256) over the bytes themselves, so it works the
+   * same whether they came off a disk or out of a bucket.
    */
-  calculateFileHash(filePath) {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath);
-
-      stream.on('data', (data) => hash.update(data));
-      stream.on('end', () => resolve(hash.digest('hex')));
-      stream.on('error', reject);
-    });
+  calculateFileHash(buffer) {
+    return crypto.createHash('sha256').update(buffer).digest('hex');
   }
 
   /**
@@ -163,24 +188,17 @@ class FileUploadService {
 
       // Generate secure filename
       const secureFilename = this.generateSecureFilename(file.originalname);
-      const filePath = path.join(this.uploadsDir, `patient_${patientId}`, secureFilename);
 
-      // Create patient-specific directory
-      const patientDir = path.dirname(filePath);
-      if (!fs.existsSync(patientDir)) {
-        fs.mkdirSync(patientDir, { recursive: true });
-      }
+      // Hand the bytes to whichever store is configured. What comes back is
+      // a key, not a path -- the only thing worth keeping, because it stays
+      // valid if the driver changes underneath.
+      const storageKey = await storage.put(
+        file,
+        `${this.folder}/patient_${patientId}`,
+        secureFilename
+      );
 
-      // Save file
-      await new Promise((resolve, reject) => {
-        fs.writeFile(filePath, file.buffer, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      // Calculate file hash
-      const fileHash = await this.calculateFileHash(filePath);
+      const fileHash = this.calculateFileHash(file.buffer);
 
       // Store metadata in database
       const insertQuery = `
@@ -197,7 +215,7 @@ class FileUploadService {
         file.originalname,
         file.mimetype,
         file.size,
-        filePath,
+        storageKey,
         fileHash,
         category,
         description,
@@ -234,18 +252,11 @@ class FileUploadService {
       }
 
       const fileRecord = result.rows[0];
-      const filePath = fileRecord.file_path;
-
-      // Check if file exists
-      if (!fs.existsSync(filePath)) {
-        throw new Error('File not found on disk');
-      }
+      const fileBuffer = await this.readBytes(fileRecord.file_path);
 
       // Log access
       await this.logFileAccess(fileId, patientId);
 
-      // Return file buffer
-      const fileBuffer = fs.readFileSync(filePath);
       return {
         buffer: fileBuffer,
         mimetype: fileRecord.file_type,
@@ -301,14 +312,22 @@ class FileUploadService {
         throw new Error('File not found or access denied');
       }
 
-      const filePath = result.rows[0].file_path;
+      const stored = result.rows[0].file_path;
 
       // Delete from database
       await query('DELETE FROM patient_files WHERE id = $1', [fileId]);
 
-      // Delete from disk
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      // Then the bytes. The metadata row is what grants access, so losing it
+      // first is the safe order: an orphaned object is a tidiness problem,
+      // an orphaned row would be a reachable file nobody can account for.
+      if (FileUploadService.isLegacyPath(stored)) {
+        try {
+          if (fs.existsSync(stored)) fs.unlinkSync(stored);
+        } catch (_) {
+          // Best effort on a path from the old scheme.
+        }
+      } else {
+        await storage.remove(stored);
       }
 
       return { success: true, message: 'File deleted successfully' };
@@ -368,7 +387,7 @@ class FileUploadService {
       const { file_path, file_hash } = result.rows[0];
 
       // Calculate current hash
-      const currentHash = await this.calculateFileHash(file_path);
+      const currentHash = this.calculateFileHash(await this.readBytes(file_path));
 
       const isIntact = currentHash === file_hash;
 

@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const OTP = require('../models/OTP');
 const Doctor = require('../models/Doctor');
 const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
@@ -9,9 +10,21 @@ const DeviceToken = require('../models/DeviceToken');
 const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
+const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
+const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
+// Exports the function directly, unlike the { runMigration } modules above.
+const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+const { runMigration: createChecklistTables } = require('./createChecklistTables');
+const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
+const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
+const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
+const AppointmentReminder = require('../models/AppointmentReminder');
+const PharmacyGroup = require('../models/PharmacyGroup');
+const PharmacyAgreement = require('../models/PharmacyAgreement');
+const AgreementCompliance = require('../models/AgreementCompliance');
 const DoctorReview = require('../models/DoctorReview');
 const Payment = require('../models/Payment');
 const Prescription = require('../models/Prescription');
@@ -21,7 +34,14 @@ const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
+const { addPrescriptionPdfSnapshots } = require('./addPrescriptionPdfSnapshots');
 const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
+const { migrate: addUserTypeToOTP } = require('./addUserTypeToOTP');
+const addAppointmentReminders = require('./addAppointmentReminders');
+const addPharmacyPartnerships = require('./addPharmacyPartnerships');
+const addPharmacyTierFeatures = require('./addPharmacyTierFeatures');
+const updatePharmacyTierConstraint = require('./updatePharmacyTierConstraint');
+const initializePharmacyGroups = require('./initPharmacyGroups');
 
 /**
  * Initialize Database Tables
@@ -41,15 +61,19 @@ const initializeDatabase = async () => {
     // Create Pharmacies table
     await Pharmacy.createTable();
 
+    // Create OTP table
+    await OTP.createTable();
+    await addUserTypeToOTP();
+
     // Create Account Deletion Tokens table
     await AccountDeletionToken.createTable();
 
     // Action tokens (generic single-use tokens: email change, account unfreeze, 2FA enable)
     await ActionToken.createTable();
 
-    // Add profile/security columns to patients (avatar_url, suburb, id_number_encrypted,
-    // password_changed_at, password_strength, biometric/2FA flags, account_frozen)
-    await addProfileSecurityColumns();
+    // Create Sessions and Audit Logs early — many migrations alter audit_logs constraints
+    await Session.createTable();
+    await AuditLog.createTable();
 
     // Linked services (connected_doctors, connected_pharmacies, family_dependents)
     await createLinkedServicesTables();
@@ -57,8 +81,16 @@ const initializeDatabase = async () => {
     // Medical aid (medical_aid_schemes, medical_aid_claims, invoices)
     await createMedicalAidTables();
 
+    // Which medical aids a doctor accepts, so patients can filter on cover.
+    // Runs after the doctors table exists.
+    await addDoctorMedicalAids();
+
     // Support tickets
     await createSupportTicketsTable();
+    await createChecklistTables();
+    await createStoredFilesTable();
+    await createPatientMedicationTables();
+    await fixStoredImageUrls();
 
     // Notifications stack
     await Notification.createTable();
@@ -74,11 +106,8 @@ const initializeDatabase = async () => {
     // Create Payments table
     await Payment.createTable();
 
-    // Create Sessions table (for session tracking)
-    await Session.createTable();
-
-    // Create Audit Logs table
-    await AuditLog.createTable();
+    // Add profile/security columns to patients
+    await addProfileSecurityColumns();
 
     // Add pending_payment status to appointments
     await addPendingPaymentStatus();
@@ -95,12 +124,41 @@ const initializeDatabase = async () => {
 
     // Add session-based signature support
     await addSessionBasedSignatures();
+    await addPrescriptionPdfSnapshots();
 
     // Add pharmacy dispensing support
     await addPharmacyDispensingSupport();
 
     // Orders v1 (orders table, status history, link claims to orders, add 'order' notification type)
     await createOrdersTables();
+
+    // Create appointment reminders tables
+    await AppointmentReminder.createTable();
+    await AppointmentReminder.createNotificationHistoryTable();
+
+    // Run appointment reminders migration
+    await addAppointmentReminders();
+
+    // In-app reminders. Runs after patients and appointments exist, since it
+    // references both.
+    await createInAppNotifications();
+
+    // prescription_qr_access, which every prescription QR link depends on.
+    // The migration existed and was never registered here, so the table was
+    // never created and no QR token could be stored.
+    await addQRCodeOneTimeUse();
+
+    // Create pharmacy partnership tables
+    await addPharmacyPartnerships();
+
+    // Add pharmacy tier features columns
+    await addPharmacyTierFeatures();
+
+    // Update tier constraint to include 'enterprise'
+    await updatePharmacyTierConstraint();
+
+    // Initialize default pharmacy groups and tiers
+    await initializePharmacyGroups();
     
     console.log('✅ Database initialization completed successfully');
     return true;

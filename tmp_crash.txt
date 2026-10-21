@@ -1,0 +1,10 @@
+﻿Ôùç injected env (26) from .env // tip: Ôîü auth for agents [www.vestauth.com]
+Ôùç injected env (0) from .env // tip: Ôîÿ multiple files { path: ['.env.local', '.env'] }
+­ƒöä Starting database initialization...
+Ô£à Connected to PostgreSQL database
+­ƒöä Starting migration: Adding user_type to OTP table...
+
+Ô£à user_type column added to otps table
+
+Ô£à Migration completed successfully!
+
