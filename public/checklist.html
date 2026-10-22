@@ -742,10 +742,10 @@
       id: "pharmacy",
       track: "solo",
       name: "The pharmacy website",
-      blurb: "The least tested part of the whole platform. Everything behind the screens is proven to work, but nobody has yet clicked through the screens themselves — so this is where something is most likely to turn up.",
+      blurb: "The least tested part of the whole platform. Everything behind the screens is proven to work, but nobody has yet clicked through the screens themselves — so this is where something is most likely to turn up. You do not have to register one to test: ten pharmacy accounts already exist and are switched on, seed.pharm1@seed.test through seed.pharm10@seed.test, all with the password Test@1234.",
       stories: [
-        ["P1", "Pharmacy", "Approve a pharmacy, then sign in as it", "It reaches its own dashboard", true, "Admin site approves the pharmacy, then sign in as that pharmacy"],
-        ["P2", "Pharmacy", "Get a new code when the sign-up email never arrived", "A fresh code is sent, and it works", false, "Pharmacy sign-in → ask for the code again → then use the new one"],
+        ["P1", "Pharmacy", "Register a pharmacy and sign in with it", "The code emailed at sign-up switches the account on, and it reaches its dashboard. No admin approval is needed, and you only do the code once. Use a real email address you can open — the code is only ever emailed, never shown on screen, so a made-up address leaves the account stuck", true, "Pharmacy website → Sign up → open the email → enter the code → sign in"],
+        ["P2", "Pharmacy", "Get a new code when the sign-up email never arrived", "A fresh code is sent, and it works. The reply is deliberately vague about whether the account exists, so it says the same thing either way", false, "Pharmacy sign-in → ask for the code again → then use the new one"],
         ["P3", "Pharmacy", "Open the orders queue", "Orders are listed, each with the patient's name and the prescription reference", false, "Pharmacy website → Orders"],
         ["P4", "Pharmacy", "Accept an order and give it a total", "It moves to Processing", false, "Orders → a new row → Accept → type a total"],
         ["P5", "Pharmacy", "Turn an order down, with a reason", "It moves to Cancelled, and the patient can read the reason", false, "Orders → a new row → Decline → give a reason"],
