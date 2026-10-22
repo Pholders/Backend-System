@@ -740,12 +740,15 @@ class PrescriptionController {
       // Store QR code access record for one-time use tracking
       await Prescription.generateQRCodeAccess(prescriptionId, qrCodeData.qrToken, 90);
 
+      const qrImage = await QRCodeService.toDataURL(qrCodeData.qrString);
+
       res.status(200).json({
         success: true,
         message: 'QR code generated successfully',
         data: {
           prescriptionId,
           qrCode: qrCodeData.qrString,
+          qrImage,
           accessLink: qrCodeData.accessLink,
           expiresIn: '90 days',
           validUntil: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
