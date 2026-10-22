@@ -730,7 +730,11 @@
         ["D7", "Doctor", "Change consulting hours, and close a day", "It saves. A time that makes no sense is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
         ["D10", "Doctor", "Upload a profile photo", "It appears straight away, and is still there after a reload", true, "Settings → Account → Upload photo → pick a JPEG or PNG"],
         ["D11", "Doctor", "Try a file that is not a picture, then one bigger than 5MB", "Both refused, each saying why", false, "Settings → Account → Upload photo → pick a PDF, then pick a very large photo"],
-        ["D12", "Doctor", "Upload a second photo, then reload", "The new one shows. The old one is deleted, so its old address no longer opens", false, "Upload another photo, reload, then try the first photo's address"]
+        ["D12", "Doctor", "Upload a second photo, then reload", "The new one shows. The old one is deleted, so its old address no longer opens", false, "Upload another photo, reload, then try the first photo's address"],
+        ["D16", "Doctor", "Print a prescription you wrote", "The print dialog opens on the real document — the doctor, the patient, the medicines and the signature. Until now the button did nothing at all", true, "Doctor website → Prescriptions → open a signed one → the printer icon"],
+        ["D17", "Doctor", "Download a prescription you wrote", "The same document saves as a PDF", true, "Doctor website → Prescriptions → open a signed one → the share icon"],
+        ["D18", "Doctor", "Open a patient from your list", "Their real name, email, phone, last visit and reason. No vitals, no blood group, no ward, and no visit history — those belong to the patient's own record, which is a later phase. Until now every patient read as a 32-year-old woman in Cardiology on bed #00125", true, "Doctor website → Patients → click any patient"],
+        ["D19", "Doctor", "Paste a patient address for someone who has never booked with you", "Patient not found. It used to show an invented patient called Maria Wilson whoever you asked for", true, "Put /doctor/patients/99999 in the address bar"]
       ]
     },
     {
@@ -857,6 +861,7 @@
         ["XC2", "Doctor",   "Sign out, then sign in as a different doctor", "No prescriptions, bookings or rating carried over from the first doctor", true, "Sign out of the doctor website, sign in as another doctor, open Prescriptions"],
         ["XC3", "Doctor",   "Try to reach a pharmacy page while signed in as a doctor", "Refused", false, "Signed in as a doctor, paste a pharmacy page address into the address bar"],
         ["XC4", "Patient",  "Try to reach an admin page while signed in as a patient", "Refused", false, "Signed in as a patient, try to open an admin page"],
+        ["XC9", "Doctor",   "Try to print another doctor's prescription", "Refused. Printing was opened up to the prescriber, and to nobody else", true, "Change the number in a print or download address to a prescription you did not write"],
         ["XC5", "Any",      "Reload the page in the middle of doing something", "Still signed in, still in the same place", false, "Reload on any page inside the app"],
         ["XC6", "Patient",  "Scan a prescription QR code with a phone", "It opens", true, "Scan the QR code from the box that appeared when the doctor signed"],
         ["XC8", "Any",      "Check that photos actually appear", "Profile photos and avatars load. An empty grey box where a photo should be means the picture's address is wrong", true, "Look at a doctor's photo on the doctor website and in the patient app"],

@@ -45,6 +45,25 @@ class PrescriptionController {
   }
 
   /**
+   * Who may read a prescription's document: the patient it was written for,
+   * and the doctor who wrote it. Phase 1 has the doctor releasing the script,
+   * so the prescriber needs the same paper the patient gets — but only for
+   * their own prescriptions, never another doctor's.
+   *
+   * Returns the prescription, or null, so callers answer 404 either way and
+   * never confirm that someone else's prescription exists.
+   */
+  static async loadPrescriptionForReader(prescriptionId, user) {
+    const prescription = await Prescription.getById(prescriptionId);
+    if (!prescription) return null;
+
+    if (user.role === 'doctor') {
+      return prescription.doctor_id === user.id ? prescription : null;
+    }
+    return prescription.patient_id === user.id ? prescription : null;
+  }
+
+  /**
    * Doctor: Create a new prescription (after appointment acceptance)
    */
   static async createPrescription(req, res) {
@@ -573,15 +592,17 @@ class PrescriptionController {
   }
 
   /**
-   * Patient: Download prescription as PDF
+   * Download a prescription as a PDF — the patient it belongs to, or the
+   * doctor who wrote it.
    */
   static async downloadPrescription(req, res) {
     try {
-      const patientId = req.user.id;
       const { prescriptionId } = req.params;
 
-      const prescription = await Prescription.getById(prescriptionId);
-      if (!prescription || prescription.patient_id !== patientId) {
+      const prescription = await PrescriptionController.loadPrescriptionForReader(
+        prescriptionId, req.user
+      );
+      if (!prescription) {
         return res.status(404).json({
           success: false,
           message: 'Prescription not found'
@@ -610,15 +631,17 @@ class PrescriptionController {
   }
 
   /**
-   * Patient: Print prescription
+   * The same document as the download, served inline to print from — again
+   * for the patient it belongs to or the doctor who wrote it.
    */
   static async printPrescription(req, res) {
     try {
-      const patientId = req.user.id;
       const { prescriptionId } = req.params;
 
-      const prescription = await Prescription.getById(prescriptionId);
-      if (!prescription || prescription.patient_id !== patientId) {
+      const prescription = await PrescriptionController.loadPrescriptionForReader(
+        prescriptionId, req.user
+      );
+      if (!prescription) {
         return res.status(404).json({
           success: false,
           message: 'Prescription not found'
