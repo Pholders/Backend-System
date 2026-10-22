@@ -419,6 +419,114 @@
     font-size: 12.5px;
     color: var(--ink-faint);
   }
+  /* ── two columns on a wide screen: the list, then the summary ─ */
+  .page {
+    display: grid;
+    gap: 28px;
+    align-items: start;
+  }
+  @media (min-width: 980px) {
+    .page { grid-template-columns: minmax(0, 1fr) 302px; }
+    .side { position: sticky; top: 24px; }
+  }
+  .side > .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 16px 18px;
+  }
+  .side h2 { margin: 0 0 12px; }
+
+  .verdict {
+    font-family: var(--display);
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0 0 5px;
+    text-wrap: balance;
+  }
+  .verdict.good { color: var(--pass); }
+  .verdict.bad { color: var(--fail); }
+  .verdict.wait { color: var(--ink-soft); }
+  .verdict-why {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+
+  .scores { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
+  .score {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13.5px;
+    padding: 3px 0;
+  }
+  .score span { color: var(--ink-soft); }
+  .score b { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
+  .score.r-pass b { color: var(--pass); }
+  .score.r-fail b { color: var(--fail); }
+  .score.r-blocked b { color: var(--blocked); }
+
+  .side .listing { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+  .side .listing h3 {
+    font-family: var(--display);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 8px;
+  }
+  .side .listing ul { margin: 0; padding: 0; list-style: none; }
+  .side .listing li {
+    font-size: 13px;
+    color: var(--ink-soft);
+    padding: 3px 0 3px 10px;
+    border-left: 2px solid var(--fail);
+    margin-bottom: 7px;
+  }
+  .side .listing li.is-blocked { border-left-color: var(--blocked); }
+  .side .listing li b { color: var(--ink); font-weight: 600; }
+  .side .quiet { font-size: 13px; color: var(--ink-faint); margin: 0; }
+
+  /* ── tracks: the ordered journey, then the standalone tests ─── */
+  .track { margin-top: 40px; }
+  .track-head {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 9px;
+    margin-bottom: 4px;
+  }
+  .track-head h2 {
+    font-size: 16px;
+    text-transform: none;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0;
+  }
+  .track-head p {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin: 6px 0 0;
+    max-width: 68ch;
+  }
+
+  .step {
+    font-family: var(--display);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent);
+    border-radius: 999px;
+    min-width: 21px;
+    height: 19px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+  }
+  .rid .code { display: block; margin-top: 3px; }
+
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
   }
@@ -427,123 +535,103 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>PHolders Phase 1 Testing</h1>
+  <h1>PHolders &mdash; what we built, and whether it works</h1>
   <p class="lede">
-    Phase 1 is one loop that crosses four apps. Every story below is checked
-    off by a person, with their name and any notes kept against it, so the
-    team can see what has actually been exercised rather than what was built.
+    PHolders is four apps that pass one job between them: a patient finds a
+    doctor, books, pays, the doctor writes a prescription and signs it, a
+    pharmacy fills it. Below is every part of that we have built, written as
+    something you can actually go and try. Mark each one Pass, Fail or
+    Blocked, and leave a note if something looks wrong &mdash; we read the
+    notes and fix what they raise.
   </p>
 
   <div class="ident">
     <label for="who">Your name</label>
-    <input id="who" type="text" placeholder="e.g. Oratile" autocomplete="name" spellcheck="false">
+    <input id="who" type="text" placeholder="e.g. Tiyani" autocomplete="name" spellcheck="false">
   </div>
   <div class="ident-note" id="ident-note"></div>
 
-  <h2>Where each app stands</h2>
+  <div class="page">
+  <main>
+
+  <div class="note">
+    <strong>How to use this page.</strong> There are two parts. The
+    <em>main journey</em> is numbered &mdash; do those in order, because each
+    step needs the one before it to have worked, and that same order is how we
+    demonstrate the product. The <em>standalone tests</em> underneath are not
+    part of that journey; each one stands alone and can be done at any time, on
+    its own, by one person.
+    <br><br>
+    <strong>Three buttons per line.</strong> Pass if it did what the line says.
+    Fail if it did something else. Blocked if you could not get far enough to
+    find out. Everyone with this link sees the same marks, straight away.
+    <br><br>
+    <strong>Notes are the useful part.</strong> Tap <em>Add a note</em> on any
+    line to tell us what you saw. That is what we work from, so a sentence in
+    your own words beats a Fail on its own.
+  </div>
+
+  <h2>What each app does</h2>
   <div class="apps">
     <div class="app">
       <h3>Doctor</h3>
-      <div class="state">CODE COMPLETE</div>
-      <p>All eight obligations the SRS sets out: account, discoverability, bookings, scripts, AES signing, release, medical aid, rating.</p>
+      <div class="state">BUILT</div>
+      <p>Sign up, set a fee and consulting hours, be found by patients, take bookings, write and sign prescriptions, see when a pharmacy has filled one, collect ratings.</p>
     </div>
     <div class="app">
       <h3>Patient</h3>
-      <div class="state">CODE COMPLETE</div>
-      <p>Search, booking, all four payment paths, prescriptions, sending a script to a pharmacy, reviews, reminders.</p>
+      <div class="state">BUILT</div>
+      <p>Find doctors nearby, book a time, pay by cash, card or medical aid, read prescriptions, send one to a pharmacy, set reminders, rate the doctor.</p>
     </div>
     <div class="app">
       <h3>Pharmacy</h3>
-      <div class="state">API VERIFIED · SCREENS UNTESTED</div>
-      <p>Dispensing queue and the order workflow. Claiming and dispensing are proven through the API; the screens themselves have not been used.</p>
+      <div class="state">BUILT · SCREENS NOT YET USED</div>
+      <p>See prescriptions sent to it, claim and fill them, run orders through to collection. The behind-the-scenes side is proven; nobody has clicked through the screens yet.</p>
     </div>
     <div class="app">
       <h3>Admin</h3>
-      <div class="state">CODE COMPLETE</div>
-      <p>Pharmacy directory, approve and suspend, groups, agreements, compliance, claim routing.</p>
+      <div class="state">BUILT</div>
+      <p>The pharmacy directory: approve, suspend, group them, record agreements, and decide where claims go.</p>
     </div>
   </div>
-
-  <div class="note">
-    <strong>The backend is deployed and the loop works end to end.</strong>
-    Proven on the live system: a doctor signs a script, the patient sends it to
-    a pharmacy, the pharmacy dispenses it, and the doctor sees it come back.
-    Also verified — patient doctor search, which used to fail for every
-    signed-in patient; the medical aid cover filter, including a scheme typed
-    differently to the doctor's; the QR code's one-time lifecycle; pharmacy
-    activation; and medical aid encryption.
-    <br><br>
-    <strong>One known gap.</strong> Prescription QR links still carry
-    <code>http://localhost:3000</code>, because the web app that serves them is
-    not deployed yet. The QR itself works — a pharmacy scanning the code is
-    unaffected — but the emailed link will not open. The stories in
-    <em>The prescription QR link</em> are expected to fail until that app ships.
-    <br><br>
-    <strong>New on 9 October.</strong> Downloading a prescription now produces
-    an actual PDF instead of JSON describing one, and claims and invoices
-    accept the supporting document their column was always meant to hold. File
-    storage moved behind a driver so it can point at Firebase instead of a disk
-    that does not survive a deploy. None of this has been exercised by anyone
-    yet, so <em>Documents and PDFs</em> is the newest and least trustworthy
-    section on this page.
-    <br><br>
-    <strong>New on 14 October.</strong> Uploaded files are kept in the database
-    instead of on the server's disk, which a deploy wipes. Firebase Storage was
-    the plan until it started requiring a paid billing account. Set
-    <code>STORAGE_DRIVER=postgres</code> on Render or uploads still go to the
-    disk that gets erased.
-    <br><br>
-    <strong>New on 15 October.</strong> A doctor can upload a profile photo:
-    Prince added the endpoints, and the button that had been opening a picker
-    and discarding the result is now wired to them. Image URLs also come back
-    as <code>https://</code> now &mdash; behind Render's proxy the server was
-    building them as <code>http://</code>, so every photo and avatar silently
-    failed to load, and stored URLs written before the fix are repaired on
-    boot.
-    <br><br>
-    <strong>What counts as phase 1.</strong> Every story here was checked
-    against SRS 3.2.1.1, the only part of the document that defines a phase.
-    Seven that are built but not asked for &mdash; security settings, devices
-    and login activity, 2FA and biometrics, support and legal pages, linked
-    services and dependents &mdash; now sit under <em>Beyond phase 1</em> so
-    they are not confused with what phase 1 owes.
-    <br><br>
-    <strong>Least tested:</strong> the pharmacy screens. The queue, claiming and
-    dispensing are all confirmed working through the API, but nobody has clicked
-    through the screens themselves, so that section is the most likely to turn
-    up something real.
-  </div>
-
-  <h2>Progress</h2>
-  <div class="progress" id="tallies">
-    <span class="tally">Loading results…</span>
-  </div>
-  <div class="bar" id="bar"></div>
 
   <div id="groups"></div>
 
   <div class="known">
-    <h2>Known, not defects</h2>
+    <h2>Known gaps &mdash; please don't log these</h2>
     <ul>
-      <li>SMS and push reminders are console stubs.</li>
-      <li>A doctor profile photo is not asked for by phase 1. It is here because it is new and worth a minute, not because the release waits on it.</li>
-      <li>Uploaded files need <code>STORAGE_DRIVER=postgres</code> set on Render. Without it the app writes to local disk, which every deploy erases. Firebase Storage was the original plan and has been removed; Cloudinary is being added in its place.</li>
-      <li>Nothing in the platform creates invoice rows, so an invoice has no document to attach to. Claims are created by the pharmacy order flow and do work.</li>
-      <li>A prescription PDF is generated on each request and never stored, so there is nothing to go stale.</li>
-      <li>Prescription QR links point at localhost until the web app is deployed.</li>
-      <li>Inventory has no backend at all — no routes, controller or model.</li>
-      <li>Refills do not exist as a concept anywhere.</li>
-      <li>Sick notes have no API. The requirement exists (FR-G-020) but is not in phase 1.</li>
-      <li>Doctor billing is out of scope in the SRS, twice.</li>
-      <li>Patient records (PHR) are phase 3.</li>
-      <li>Editing a signed prescription is forbidden by BR-123, by design.</li>
-      <li>Dispensing is not offered in the doctor app; pharmacies dispense, doctors display.</li>
+      <li>Reminders only go out by email. Text messages and phone notifications are not switched on yet.</li>
+      <li>A prescription's QR code works, but the link next to it will not open until the doctor website is published.</li>
+      <li>Nothing in the system creates invoices yet, so there is no invoice to attach a document to. Medical aid claims do work.</li>
+      <li>Pharmacy stock keeping does not exist yet &mdash; there is nothing behind that screen.</li>
+      <li>Repeat prescriptions are not built.</li>
+      <li>Sick notes are not built. They are a requirement, but not for this phase.</li>
+      <li>The doctor's own billing screens show sample figures. Billing is deliberately out of this phase.</li>
+      <li>Patient medical records that any doctor can read are phase 3, not now.</li>
+      <li>A doctor cannot change a prescription once it is signed. That is the law, and deliberate &mdash; cancelling it is the only way back.</li>
+      <li>Doctors do not dispense. Pharmacies fill prescriptions; the doctor only sees that it happened.</li>
+      <li>On the sign-up form the clinic address needs a place name, like &ldquo;Sandton&rdquo;, not a full street address.</li>
     </ul>
   </div>
 
+  </main>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>Results so far</h2>
+      <div id="verdict">
+        <p class="verdict wait">Loading&hellip;</p>
+      </div>
+      <div class="bar" id="bar"></div>
+      <div class="scores" id="scores"></div>
+      <div id="side-lists"></div>
+    </div>
+  </aside>
+  </div>
+
   <footer>
-    <div id="foot">Anyone with this link can tick and comment — no account needed. Results are shared, so what you mark is what everyone else sees.</div>
-    <div class="stamp">Served by the PHolders backend · results are shared live · reviewed against SRS 3.2.1.1 on 14 October 2026 · photo stories added 15 October</div>
+    <div id="foot">Anyone with this link can mark and comment &mdash; no account or password needed. What you mark is what everyone else sees.</div>
+    <div class="stamp">Served live by the PHolders backend &middot; last reviewed against the requirements document on 22 October 2026</div>
   </footer>
 </div>
 
@@ -561,191 +649,233 @@
   var STATUS_LABEL = Object.create(null);
   STATUSES.forEach(function (s) { STATUS_LABEL[s.key] = s.label; });
 
+  var TRACKS = [
+    {
+      id: "main",
+      continuous: true,
+      name: "The main journey — do these in order",
+      lede: "One patient, one doctor, one pharmacy, start to finish. Each step needs the one before it to have worked, so work down the list. This is also the order to demonstrate the product in."
+    },
+    {
+      id: "solo",
+      name: "Standalone tests — any order, any time",
+      lede: "These are not part of the journey above. Each one stands on its own, so you can pick any of them and try it whenever you have a few minutes. Where a group is numbered, do that group in order."
+    }
+  ];
+
   var GROUPS = [
     {
-      id: "loop",
-      name: "The phase 1 loop",
-      blurb: "The sentence the SRS opens phase 1 with, end to end. Every step is a different app; the handoffs are the point. L5, L10, L12 and L14 are the four that were broken.",
+      id: "setup",
+      track: "main",
+      ordered: true,
+      name: "Getting the two accounts ready",
+      blurb: "Before anything else can be tried, a doctor has to exist and have a price, and a patient has to exist. Do these three once.",
       stories: [
-        ["L1",  "Patient", "Search for a doctor nearby", "Doctors listed by distance, each with a fee", false, "Patient app → Find doctors → allow location"],
-        ["L2",  "Patient", "Book a slot", "Appointment created, status pending_payment", false, "Tap a doctor → pick a slot → Book"],
-        ["L3",  "Patient", "Pay — cash, card or medical aid", "Status becomes scheduled", false, "Pay sheet → choose a method → confirm"],
-        ["L4",  "Doctor",  "Open Appointments", "The booking is listed with the patient's name", false, "Doctor web → Appointments"],
-        ["L5",  "Doctor",  "Accept the booking", "It stays in the diary. Before the fix it vanished", true, "Tap the card → Accept → reload the page"],
-        ["L6",  "Doctor",  "Complete the consultation", "Status completed", false, "Same card → Complete"],
-        ["L7",  "Doctor",  "Create a script, add medicines, sign it", "QR and secure link shown once", false, "Prescriptions → New Prescription → pick the consultation → add a medicine → Sign"],
-        ["L8",  "Patient", "Open the prescription", "Listed and readable", false, "Patient app → Prescriptions"],
-        ["L9",  "Patient", "Send it to a pharmacy", "Pharmacy list appears; after confirming it reads claimed", false, "Open it → Send to a pharmacy → pick one → confirm"],
-        ["L10", "Pharmacy","Open the dispensing queue", "The script is there. This handoff has never worked", true, "Pharmacy web → Dispensing Queue"],
-        ["L11", "Pharmacy","Dispense it", "Moves to Dispensed", false, "Row → Dispense → confirm"],
-        ["L12", "Doctor",  "Reopen the prescription list", "Reads Dispensed, naming the pharmacy and date, read-only", true, "Doctor web → Prescriptions → check the row's status and the line under it"],
-        ["L13", "Patient", "Review the doctor", "Accepted", false, "Patient app → the doctor → Reviews tab → rate and write → Submit"],
-        ["L14", "Doctor",  "Open the dashboard", "Reviews tile shows count, stars and average", true, "Doctor web → Dashboard → Reviews tile"]
+        ["D13", "Doctor", "Create a doctor account", "The account is made and you can sign in with it right away. No email code is sent, and you do not need one — if you sit waiting for a code, nothing will come", true, "Doctor website → Sign up → fill in every field → Submit → then sign in with the same email and password. For the clinic address type a place name like \"Sandton\", not a street address"],
+        ["D8",  "Doctor", "Set what the doctor charges", "The price saves and is still there after you reload the page. Without a price, no patient can book this doctor at all", false, "Doctor website → Settings → Practice → Fees → type an amount → Save"],
+        ["S1",  "Patient", "Create a patient account on the phone", "The account is made and you can sign in with it", true, "Patient app → Sign up → fill in your details → Submit → then sign in"]
+      ]
+    },
+    {
+      id: "loop",
+      track: "main",
+      ordered: true,
+      name: "Finding a doctor through to a filled prescription",
+      blurb: "This is the product in one run. Every few steps you change who you are signed in as — patient on the phone, doctor on the website, then pharmacy on the website. The handovers between them are the whole point.",
+      stories: [
+        ["L1",  "Patient", "Find a doctor near you", "A list of doctors comes back, closest first, each showing what they charge", false, "Patient app → Find doctors → let the app use your location"],
+        ["L2",  "Patient", "Book a time with that doctor", "The booking is made, and shows as waiting for payment", false, "Tap the doctor → pick a time → Book"],
+        ["L3",  "Patient", "Pay for the consultation", "Once it is paid, the booking shows as confirmed", false, "On the payment screen → pick cash, card or medical aid → confirm"],
+        ["L4",  "Doctor",  "Open Appointments on the doctor website", "The booking is listed, with the patient's name on it", false, "Doctor website → Appointments"],
+        ["L5",  "Doctor",  "Accept the booking", "It is still there after you reload the page. It used to vanish", true, "Click the booking → Accept → reload the page"],
+        ["L6",  "Doctor",  "Mark the consultation as done", "It shows as completed", false, "Same booking → Complete"],
+        ["L7",  "Doctor",  "Write the prescription and sign it", "A QR code and a private link appear. You only see that link once, so copy it somewhere before closing the box", false, "Doctor website → Prescriptions → New Prescription → pick the consultation → add a medicine → Sign"],
+        ["L8",  "Patient", "Open the prescription on the phone", "It is listed, and you can read the medicines on it", false, "Patient app → Prescriptions"],
+        ["L9",  "Patient", "Send it to a pharmacy", "A list of pharmacies comes up. After you confirm, the prescription shows as claimed", false, "Open the prescription → Send to a pharmacy → pick one → confirm"],
+        ["L10", "Pharmacy","Open the pharmacy's queue", "The prescription is waiting there. This handover is the one that has never worked before, so look closely", true, "Pharmacy website → Dispensing Queue"],
+        ["L11", "Pharmacy","Fill the prescription", "It moves across to Dispensed", false, "Click the row → Dispense → confirm"],
+        ["L12", "Doctor",  "Look at the doctor's prescription list again", "It now reads Dispensed, and names the pharmacy and the date. The doctor can no longer change it", true, "Doctor website → Prescriptions → read the row, and the small line under it"],
+        ["L13", "Patient", "Rate the doctor", "The rating is accepted", false, "Patient app → the doctor → Reviews → give stars, write a line → Submit"],
+        ["L14", "Doctor",  "Open the doctor's dashboard", "The Reviews tile shows how many ratings, the stars, and the average", true, "Doctor website → Dashboard → the Reviews tile"]
       ]
     },
     {
       id: "mustfail",
-      name: "The loop — what must fail",
-      blurb: "Each of these should be refused. A success here is a defect.",
+      track: "main",
+      name: "Things the system must refuse",
+      blurb: "Try these straight after the journey above, on the same prescription. Every one of them should be turned down, with a message saying why. If any of them is allowed through, that is a real problem — mark it Fail and leave a note.",
       stories: [
-        ["F1", "Patient", "Claim the same script at a second pharmacy", "Refused — one pharmacy per script", false, "Patient app → the same script → Send to a pharmacy again"],
-        ["F2", "Pharmacy","Dispense a script claimed elsewhere", "Refused", false, "Sign in as a different pharmacy → try to dispense that script"],
-        ["F3", "Pharmacy","Dispense the same script twice", "Refused", false, "Pharmacy web → Dispensed tab → try to dispense it again"],
-        ["F4", "Doctor",  "Sign a prescription with no medicines", "Refused", false, "Create a prescription, add no medicines, Sign"],
-        ["F5", "Doctor",  "Edit a signed prescription", "No such action exists — revoke is the only withdrawal", false, "Doctor web → a signed script → row menu"],
-        ["F6", "Patient", "Review the same doctor twice", "Refused", false, "Patient app → the same doctor → submit a second review"]
-      ]
-    },
-    {
-      id: "cover",
-      name: "Found by cover",
-      blurb: "\"If under medical aid, doctor that's covered by medical plan.\" Spans three apps and fails silently if any one is wrong.",
-      stories: [
-        ["C1", "Doctor",  "Tick accepted schemes in Professional Details, save", "Persists across a reload", false, "Doctor web → Settings → Account → Professional Details → Medical Aids → Save"],
-        ["C2", "Patient", "Record a medical aid", "Saved on the device and on the server", false, "Patient app → Medical aid → add a scheme → Save"],
-        ["C3", "Patient", "Search with the cover filter on", "Only doctors accepting that scheme", false, "Patient app → Find doctors → turn on the cover filter"],
-        ["C4", "Patient", "Check the response flag", "medical_aid_filter_applied is true", false, "Same search, check medical_aid_filter_applied in the response"],
-        ["C5", "Patient", "Book and pay by medical aid", "Appointment scheduled", false, "Book → pay → choose Medical aid"],
-        ["C6", "Patient", "Record \"Discovery\" where the doctor picked \"Discovery Health Medical Scheme\"", "They still match — both normalise to the same key", true, "Save the scheme as plain \"Discovery\", then search with the filter on"],
-        ["C7", "Patient", "Record a scheme not in the catalogue, then search", "Every doctor returned, flag false. The screen must not say \"covered by your plan\"", true, "Save a scheme the catalogue has no entry for, then search with the filter on"]
-      ]
-    },
-    {
-      id: "network",
-      name: "The pharmacy network",
-      blurb: "Phase 1 bullet 6. All admin, but it decides what the pharmacy app can do at all.",
-      stories: [
-        ["N1", "Admin", "Open the pharmacy directory", "Every pharmacy listed, including any in no group", false, "Admin → Pharmacies"],
-        ["N2", "Admin", "Approve a pending pharmacy", "Status becomes active; it can now sign in", true, "Admin → Pharmacies → a pending one → Approve, then sign in as it"],
-        ["N3", "Admin", "Suspend one", "It can no longer sign in", false, "Admin → Pharmacies → Suspend, then try to sign in as it"],
-        ["N4", "Admin", "Create a group and add pharmacies", "Membership persists", false, "Admin → Partnerships → Groups → New → add pharmacies"],
-        ["N5", "Admin", "Create an agreement and activate it", "Status reflects it", false, "Admin → Partnerships → Agreements → New → Activate"],
-        ["N6", "Admin", "Search groups, list expiring agreements", "Both return results — they were unreachable through a route-ordering fault", true, "Admin → Groups → search; Agreements → Expiring"],
-        ["N7", "Admin", "Open compliance and claim routing", "Dashboards populate", false, "Admin → Compliance, then Claim routing"]
-      ]
-    },
-    {
-      id: "withdraw",
-      name: "Withdrawal",
-      blurb: "What happens when a doctor revokes a script the patient already holds. Crosses three apps and nobody has run it.",
-      stories: [
-        ["W1", "Doctor",  "Revoke a signed, unclaimed script with a reason", "Returns 200, not a 500 for work it did", true, "Doctor web → a signed script → row menu → Revoke → give a reason"],
-        ["W2", "Doctor",  "Check the prescription list", "Reads Revoked, with the reason", false, "Doctor web → Prescriptions → that row"],
-        ["W3", "Patient", "Open that prescription", "Reflects the revoke", false, "Patient app → Prescriptions → that script"],
-        ["W4", "Patient", "Try to send it to a pharmacy", "Refused", false, "Same script → Send to a pharmacy"]
-      ]
-    },
-    {
-      id: "reminders",
-      name: "Reminders",
-      blurb: "R3 is new — the table it writes to did not exist until this deploy, and the insert was caught and logged, so it silently did nothing.",
-      stories: [
-        ["R1", "Patient", "Set a reminder on an upcoming appointment", "Saved", false, "Patient app → an upcoming appointment → Remind me"],
-        ["R2", "—",       "Wait for it to fire", "Email arrives", false, "Wait for the reminder window, then check the inbox"],
-        ["R3", "Patient", "Open notifications", "The in-app reminder is there", true, "Patient app → Notifications"]
+        ["F1", "Patient", "Send the same prescription to a second pharmacy", "Refused. A prescription belongs to one pharmacy only", false, "Patient app → that same prescription → Send to a pharmacy again"],
+        ["F2", "Pharmacy","Fill a prescription another pharmacy has already claimed", "Refused", false, "Sign in as a different pharmacy, then try to fill that prescription"],
+        ["F3", "Pharmacy","Fill the same prescription twice", "Refused", false, "Pharmacy website → Dispensed → try to fill it a second time"],
+        ["F4", "Doctor",  "Sign a prescription with no medicines on it", "Refused", false, "Make a prescription, add no medicines, then Sign"],
+        ["F5", "Doctor",  "Change a prescription after it has been signed", "There is no way to do it, on purpose — the law does not allow it. Cancelling it is the only way back", false, "Doctor website → a signed prescription → the menu on its row"],
+        ["F6", "Patient", "Rate the same doctor twice", "Refused", false, "Patient app → that same doctor → try to submit a second rating"]
       ]
     },
     {
       id: "doctor",
-      name: "Doctor on its own",
-      blurb: "Needs no other role. Runnable the moment the deploy lands, and will catch most regressions. Signing up is here too: a doctor account is the prerequisite for everything else phase 1 asks of the doctor.",
+      track: "solo",
+      name: "The doctor website on its own",
+      blurb: "One person, nobody else needed, and the quickest way to catch something that has broken. All of it is on the doctor website.",
       stories: [
-        ["D1", "Doctor", "Sign in", "Lands on the dashboard; a reload keeps the session", false, "Doctor web → sign in → reload"],
-        ["D13", "Doctor", "Sign up as a doctor", "The account is created and you can sign in straight away. No verification code is sent, and none is needed — waiting for one is a dead end", true, "Doctor web → Sign up → fill every field → submit → then sign in with the same details"],
-        ["D14", "Doctor", "Sign up using a real street address", "Refused. Only a place name geocodes, so use \"Sandton\" rather than \"12 Rivonia Road, Sandton\"", true, "Doctor web → Sign up → put a full street address in the clinic address"],
-        ["D15", "Doctor", "Open the province and city pickers on the signup form", "Both open and a value can be chosen, at any window size", true, "Doctor web → Sign up → tap Province, then City"],
-        ["D2", "Doctor", "Open a deep link while signed out", "Login screen, not the page", false, "Sign out, then paste /doctor/prescriptions into the address bar"],
-        ["D3", "Doctor", "Edit personal information", "Persists. Email and HPCSA stay read-only", false, "Settings → Account → Personal Information → change a field → Save → reload"],
-        ["D4", "Doctor", "Edit professional details", "Persists, and nothing untouched is blanked", false, "Settings → Account → Professional Details → change one field → Save → reload"],
-        ["D5", "Doctor", "Save the profile of a doctor whose address moved", "Coordinates move with it — the test doctor sits ~10km out", true, "Professional Details → Save with no changes → re-read the profile's coordinates"],
-        ["D6", "Doctor", "Untick every medical aid and save", "Persists as \"accepts none\", not as unchanged", false, "Professional Details → untick every scheme → Save → reload"],
-        ["D7", "Doctor", "Change consulting hours, including closing a day", "Persists. A malformed time is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
-        ["D8",  "Doctor", "Set a consultation fee", "Persists. Without one a patient cannot book", false, "Settings → Practice → Fees → set a fee → Save"],
-        ["D10", "Doctor", "Upload a profile photo", "It appears straight away and survives a reload. Until 15 October the picker opened and the file was thrown away", true, "Settings → Account → Upload photo → pick a JPEG or PNG"],
-        ["D11", "Doctor", "Upload something that is not an image, then one over 5MB", "Refused before anything is sent, naming the reason", false, "Settings → Account → Upload photo → pick a PDF, then a large photo"],
-        ["D12", "Doctor", "Replace the photo, then reload", "The new one shows. The old file is deleted server-side, so an old link stops working", false, "Upload a second photo, reload, then open the first photo URL"]
+        ["D1", "Doctor", "Sign in", "You land on the dashboard, and reloading the page keeps you signed in", false, "Doctor website → sign in → reload the page"],
+        ["D14", "Doctor", "Try to sign up with a full street address", "Refused. Only a place name works, so \"Sandton\" rather than \"12 Rivonia Road, Sandton\". This is a known limit rather than a fault — if it is refused, that is a Pass", true, "Doctor website → Sign up → put a full street address as the clinic address"],
+        ["D15", "Doctor", "Open the province and city lists on the sign-up form", "Both open, and you can pick a value, whatever size the window is", true, "Doctor website → Sign up → tap Province, then City"],
+        ["D2", "Doctor", "Paste the address of an inside page while signed out", "You get the sign-in screen, not the page", false, "Sign out, then paste a page address like /doctor/prescriptions into the address bar"],
+        ["D3", "Doctor", "Change personal information", "It saves, and is still there after a reload. Email address and HPCSA number cannot be changed", false, "Settings → Account → Personal Information → change something → Save → reload"],
+        ["D4", "Doctor", "Change professional details", "It saves, and nothing you did not touch gets wiped", false, "Settings → Account → Professional Details → change one thing → Save → reload"],
+        ["D5", "Doctor", "Save the profile of a doctor who has moved", "The map position moves with the address. Our test doctor is sitting about 10km away from where they should be", true, "Professional Details → Save without changing anything → then check where the doctor shows on the map"],
+        ["D6", "Doctor", "Untick every medical aid, then save", "It saves as accepting none — not as if you had changed nothing", false, "Professional Details → untick every scheme → Save → reload"],
+        ["D7", "Doctor", "Change consulting hours, and close a day", "It saves. A time that makes no sense is refused with a message", false, "Professional Details → Consulting Hours → untick a day, change a time → Save"],
+        ["D10", "Doctor", "Upload a profile photo", "It appears straight away, and is still there after a reload", true, "Settings → Account → Upload photo → pick a JPEG or PNG"],
+        ["D11", "Doctor", "Try a file that is not a picture, then one bigger than 5MB", "Both refused, each saying why", false, "Settings → Account → Upload photo → pick a PDF, then pick a very large photo"],
+        ["D12", "Doctor", "Upload a second photo, then reload", "The new one shows. The old one is deleted, so its old address no longer opens", false, "Upload another photo, reload, then try the first photo's address"]
       ]
     },
     {
       id: "pharmacy",
-      name: "Pharmacy",
-      blurb: "None of this has ever run. The app called nothing until this week.",
+      track: "solo",
+      name: "The pharmacy website",
+      blurb: "The least tested part of the whole platform. Everything behind the screens is proven to work, but nobody has yet clicked through the screens themselves — so this is where something is most likely to turn up.",
       stories: [
-        ["P1", "Pharmacy", "Activate a pharmacy and sign in", "Reaches its dashboard", true, "Admin approves the pharmacy, then sign in as it"],
-        ["P2", "Pharmacy", "Recover from a lost signup email", "resend-verification issues a code verify-otp accepts", false, "Pharmacy sign-in → Forgot code → resend, then verify with the new one"],
-        ["P3", "Pharmacy", "Open the orders queue", "Orders listed with patient name and script reference", false, "Pharmacy web → Orders"],
-        ["P4", "Pharmacy", "Accept an order, quoting a total", "Moves to Processing", false, "Orders → a New row → Accept → enter a total"],
-        ["P5", "Pharmacy", "Decline an order with a reason", "Moves to Cancelled; the patient sees the reason", false, "Orders → a New row → Decline → give a reason"],
-        ["P6", "Pharmacy", "Walk an order through to collected", "Each transition sticks", false, "Orders → Accept → Start preparing → Mark ready → Collected"]
+        ["P1", "Pharmacy", "Approve a pharmacy, then sign in as it", "It reaches its own dashboard", true, "Admin site approves the pharmacy, then sign in as that pharmacy"],
+        ["P2", "Pharmacy", "Get a new code when the sign-up email never arrived", "A fresh code is sent, and it works", false, "Pharmacy sign-in → ask for the code again → then use the new one"],
+        ["P3", "Pharmacy", "Open the orders queue", "Orders are listed, each with the patient's name and the prescription reference", false, "Pharmacy website → Orders"],
+        ["P4", "Pharmacy", "Accept an order and give it a total", "It moves to Processing", false, "Orders → a new row → Accept → type a total"],
+        ["P5", "Pharmacy", "Turn an order down, with a reason", "It moves to Cancelled, and the patient can read the reason", false, "Orders → a new row → Decline → give a reason"],
+        ["P6", "Pharmacy", "Take one order all the way to collected", "Every step sticks", false, "Orders → Accept → Start preparing → Mark ready → Collected"]
       ]
     },
     {
-      id: "new",
-      name: "Newly reachable",
-      blurb: "46 routes returned 404 until recently. These two carry medical aid, which phase 1 asks for; the rest of what was unblocked sits under Beyond phase 1.",
+      id: "cover",
+      track: "solo",
+      ordered: true,
+      name: "Medical aid — finding doctors your plan covers",
+      blurb: "A patient on a medical aid should only be shown doctors their plan pays for. It runs across three apps and goes wrong quietly, so these are numbered — do them in order.",
       stories: [
-        ["X1", "Patient", "Record a medical aid through the API", "Saved and readable back", false, "PUT /api/profile/medical-aid, then GET it back"],
-        ["X8", "Patient", "Medical aid card upload, claims, invoices, signed download", "Upload works, and the signed link refuses someone else's token", true, "Patient app → Medical aid → upload a card, then open the signed link"]
+        ["C1", "Doctor",  "Tick which medical aids the doctor accepts, then save", "Still ticked after you reload", false, "Doctor website → Settings → Account → Professional Details → Medical Aids → Save"],
+        ["C2", "Patient", "Add your medical aid on the phone", "Saved, and still there if you close and reopen the app", false, "Patient app → Medical aid → add your scheme → Save"],
+        ["C3", "Patient", "Search with the cover filter switched on", "Only doctors who accept your scheme come back", false, "Patient app → Find doctors → switch on the cover filter"],
+        ["C4", "Patient", "Check the screen tells you the list is filtered", "It says the results are limited to doctors your plan covers, rather than leaving you to guess", false, "Same search — read what the screen says above the list"],
+        ["C5", "Patient", "Book and pay using medical aid", "The booking is confirmed", false, "Book a doctor → at payment choose Medical aid"],
+        ["C6", "Patient", "Write the scheme name the short way", "It still matches. \"Discovery\" and \"Discovery Health Medical Scheme\" must count as the same scheme", true, "Save your scheme as just \"Discovery\", then search with the filter on"],
+        ["C7", "Patient", "Use a scheme that is not on our list, then search", "Every doctor comes back, and the screen must NOT claim they are covered by your plan. Saying they are covered when we do not know is the fault to watch for", true, "Save a scheme we have no record of, then search with the filter on"]
+      ]
+    },
+    {
+      id: "withdraw",
+      track: "solo",
+      ordered: true,
+      name: "Cancelling a prescription the patient already has",
+      blurb: "What happens when a doctor takes back a prescription the patient is already holding. It touches three apps and nobody has run it yet. Numbered — do them in order.",
+      stories: [
+        ["W1", "Doctor",  "Cancel a signed prescription that no pharmacy has claimed, giving a reason", "It is cancelled, and you get no error message", true, "Doctor website → a signed prescription → the menu on its row → Cancel → type a reason"],
+        ["W2", "Doctor",  "Check the doctor's prescription list", "That row reads Cancelled, and shows the reason", false, "Doctor website → Prescriptions → find that row"],
+        ["W3", "Patient", "Open that prescription on the phone", "It shows as cancelled", false, "Patient app → Prescriptions → that prescription"],
+        ["W4", "Patient", "Try to send it to a pharmacy anyway", "Refused", false, "Same prescription → Send to a pharmacy"]
       ]
     },
     {
       id: "qr",
-      name: "The prescription QR link",
-      blurb: "Signing mints a one-time code. Until 5d07354 the token was never stored, so every code ever issued was dead — and the link still needs FRONTEND_URL pointed at the web app.",
+      track: "solo",
+      ordered: true,
+      name: "The prescription QR code",
+      blurb: "Signing a prescription creates a QR code and a link, and both are meant to work once only. The link needs the doctor website to be published before it can open, so expect the link ones to fail for now — mark them Blocked.",
       stories: [
-        ["Q1", "Doctor",  "Sign a prescription", "The dialog shows a QR and a link, and qrAvailable is true", true, "Doctor web → Prescriptions → Sign → read the dialog"],
-        ["Q2", "Anyone",  "Open the link before tapping anything", "The page asks first — it does not open the prescription on load", true, "Paste the link in a browser; a link preview must not spend it"],
-        ["Q3", "Anyone",  "Tap Open the prescription", "Medicines, prescriber and signature shown", false, "Same page → Open the prescription"],
-        ["Q4", "Anyone",  "Open the same link again", "Refused — a QR works once", true, "Reload the page"],
-        ["Q5", "Patient", "Email the script to yourself", "It arrives", false, "Patient app → a prescription → Share by email"]
+        ["Q1", "Doctor",  "Sign a prescription", "A QR code and a link appear in the box that pops up", true, "Doctor website → Prescriptions → Sign → read the box that appears"],
+        ["Q2", "Anyone",  "Open the link, but do not tap anything on the page", "The page asks you first. Simply opening it must not use up the prescription", true, "Paste the link into a browser and just look at it"],
+        ["Q3", "Anyone",  "Tap Open the prescription", "The medicines, the doctor and the signature are all shown", false, "Same page → Open the prescription"],
+        ["Q4", "Anyone",  "Open the same link a second time", "Refused. The code is meant to work once", true, "Reload that page"],
+        ["Q5", "Patient", "Email a prescription to yourself", "It arrives", false, "Patient app → a prescription → Share by email"]
       ]
     },
     {
       id: "docs",
-      name: "Documents and PDFs",
-      blurb: "Prescription PDFs, and the documents a medical aid asks for. Built on 9 October, with file storage moved into the database on 14 October. None of it has run live yet.",
+      track: "solo",
+      name: "Prescription PDFs and medical aid documents",
+      blurb: "Printing a prescription properly, and attaching the paperwork a medical aid asks for. The newest part of the platform and the least used, so the most likely to surprise us.",
       stories: [
-        ["DX1",  "Patient", "Download a prescription", "A real PDF opens, not JSON describing one. Prescriber with HPCSA number, patient, diagnosis, a card per medicine with its schedule, and a signature fingerprint", true, "Patient app -> a signed prescription -> Download"],
-        ["DX2",  "Patient", "Print a prescription", "The same document, opened in a viewer to print from rather than dropped in Downloads", false, "Patient app -> a prescription -> Print"],
-        ["DX3",  "Patient", "Download one that is not signed", "It still opens, but every page is watermarked and it banners NOT SIGNED - NOT VALID FOR DISPENSING", true, "Doctor creates a script and does not sign it, then download it as the patient"],
-        ["DX4",  "Patient", "Check the signing time printed on it", "South African time, with SAST after it. A time two hours early means the server timezone is leaking through", true, "Compare the PDF against the time the doctor signed"],
-        ["DX5",  "Patient", "Download another patient's prescription", "Refused, and no bytes come back", false, "Change the id in the download URL to a prescription you do not own"],
-        ["DX6",  "Patient", "Attach a PDF to a claim", "Accepted, with a link to it in the response", true, "POST /api/profile/medical-aid/claims/:id/document, file field named document"],
-        ["DX7",  "Patient", "Open the link it returned", "The document downloads", false, "Open document_url from the upload response"],
-        ["DX8",  "Patient", "Attach a second document to the same claim", "It replaces the first, and replaced_previous comes back true", false, "Upload again to the same claim id"],
-        ["DX9",  "Patient", "Attach a document to someone else's claim", "Refused, and nothing is stored", true, "Use a claim id belonging to another patient"],
-        ["DX10", "Patient", "Attach something that is not a document", "Refused on type, and refused again on size over 10MB", false, "Try an .exe, then try a file larger than 10MB"],
-        ["DX11", "Patient", "Attach a document to an invoice", "Expected to fail: nothing in the platform creates invoice rows, so there is no invoice to attach to", true, "POST .../invoices/:id/document and see that no invoice exists"],
-        ["DX12", "Any",     "Upload a document, redeploy, open it again", "It still opens. Files live in the database now, so a deploy no longer erases them. Fails if STORAGE_DRIVER is not set to postgres", true, "Upload a claim document, redeploy the backend, then open the link"]
+        ["DX1",  "Patient", "Download a prescription", "A proper PDF opens: the doctor with their HPCSA number, the patient, the diagnosis, a block for each medicine, and a signature code at the bottom. Not a page of computer text", true, "Patient app → a signed prescription → Download"],
+        ["DX2",  "Patient", "Print a prescription", "The same document, but opened in something you can print from rather than just dropped into Downloads", false, "Patient app → a prescription → Print"],
+        ["DX3",  "Patient", "Download one that has not been signed yet", "It still opens, but every page is stamped across the middle and the top says NOT SIGNED — NOT VALID FOR DISPENSING", true, "Have the doctor make a prescription and not sign it, then download it on the phone"],
+        ["DX4",  "Patient", "Check the signing time printed on it", "South African time, with SAST next to it. A time two hours early means the server's own clock is showing through", true, "Compare the time on the PDF against the time the doctor actually signed"],
+        ["DX5",  "Patient", "Try to download another patient's prescription", "Refused, and no file comes back at all", false, "Change the number in the download address to a prescription that is not yours"],
+        ["DX6",  "Patient", "Attach a PDF to a medical aid claim", "Accepted, and you get a link to the attached file", true, "Patient app → Medical aid → a claim → attach a document"],
+        ["DX7",  "Patient", "Open the link it gave you", "The document downloads", false, "Open the link from the step before"],
+        ["DX8",  "Patient", "Attach a second document to the same claim", "It replaces the first one, and says so", false, "Attach another document to that same claim"],
+        ["DX9",  "Patient", "Try to attach a document to someone else's claim", "Refused, and nothing is saved", true, "Use a claim that belongs to a different patient"],
+        ["DX10", "Patient", "Try something that is not a document, then one over 10MB", "Both refused, each saying why", false, "Try a program file, then try a file bigger than 10MB"],
+        ["DX11", "Patient", "Attach a document to an invoice", "Expected to fail. Nothing in the system creates invoices yet, so there is no invoice to attach anything to. Mark it Blocked", true, "Try to attach a document to an invoice and see that no invoice exists"],
+        ["DX12", "Any",     "Upload a document, have us publish a new version, then open it again", "It still opens. Files are kept in the database now, so publishing no longer wipes them", true, "Attach a claim document, ask us to publish, then open the link again"]
       ]
     },
     {
-      id: "beyond",
-      name: "Beyond phase 1",
-      blurb: "Built and reachable, but not asked for by SRS 3.2.1.1, which is the only part of the document that defines a phase. Worth testing when there is time; not worth holding phase 1 for. Nothing here blocks the loop.",
+      id: "medaid",
+      track: "solo",
+      name: "The medical aid card",
+      blurb: "Storing a patient's medical aid, and the photo of their card. The card is private, so the link to it must refuse everyone else.",
       stories: [
-        ["D9", "Doctor",  "Open Security", "Recent sign-ins and active sessions listed", false, "Settings → Security → Login Activity and Device Management"],
-        ["X2", "Any",     "Terms and privacy", "Both return content", false, "GET /api/legal/terms and /api/legal/privacy"],
-        ["X3", "Patient", "Support ticket, contact, FAQ", "All four routes answer", false, "POST /api/support/tickets and /contact; GET /faq and /tickets"],
-        ["X4", "Patient", "Profile, avatar, password, 2FA, biometrics", "Each saves and reads back", false, "Patient app → Profile → each section in turn"],
-        ["X5", "Patient", "Devices and login activity", "Listed; revoke one, revoke others", false, "Patient app → Security → Devices and Login activity"],
-        ["X6", "Patient", "Report suspicious, freeze, unfreeze, audit export", "Each completes", false, "Patient app → Security → Report suspicious, then Freeze"],
-        ["X7", "Patient", "Linked doctors, pharmacies, dependents", "List, link, unlink", false, "Patient app → Linked services → each of the three tabs"]
+        ["X1", "Patient", "Save a medical aid, close the app, open it again", "It comes back exactly as you typed it", false, "Patient app → Medical aid → fill it in → Save → close and reopen the app"],
+        ["X8", "Patient", "Photograph your medical aid card and upload it", "The upload works, and the private link to it refuses anybody else who tries to open it", true, "Patient app → Medical aid → upload the card, then open the link it gives you"]
+      ]
+    },
+    {
+      id: "network",
+      track: "solo",
+      name: "The pharmacy network (admin site)",
+      blurb: "All on the admin site. It decides which pharmacies exist and what the pharmacy website is allowed to do at all, so if this is wrong, nothing on the pharmacy side works.",
+      stories: [
+        ["N1", "Admin", "Open the list of pharmacies", "Every pharmacy is there, including any that are not in a group", false, "Admin site → Pharmacies"],
+        ["N2", "Admin", "Approve a pharmacy that is waiting", "It becomes active, and can now sign in", true, "Admin site → Pharmacies → one that is waiting → Approve → then sign in as it"],
+        ["N3", "Admin", "Suspend a pharmacy", "It can no longer sign in", false, "Admin site → Pharmacies → Suspend → then try to sign in as it"],
+        ["N4", "Admin", "Make a group and put pharmacies in it", "They are still in it afterwards", false, "Admin site → Partnerships → Groups → New → add pharmacies"],
+        ["N5", "Admin", "Record an agreement and switch it on", "The status shows that it is on", false, "Admin site → Partnerships → Agreements → New → Activate"],
+        ["N6", "Admin", "Search the groups, and list agreements about to run out", "Both give you results. Neither could be reached at all until recently", true, "Admin site → Groups → search; then Agreements → Expiring"],
+        ["N7", "Admin", "Open compliance, then claim routing", "Both pages fill with information", false, "Admin site → Compliance, then Claim routing"]
+      ]
+    },
+    {
+      id: "reminders",
+      track: "solo",
+      ordered: true,
+      name: "Appointment reminders",
+      blurb: "Reminders go out by email only for now. Text messages and phone notifications are not switched on, so do not log those as missing.",
+      stories: [
+        ["R1", "Patient", "Switch on a reminder for a booking coming up", "It saves", false, "Patient app → a booking coming up → Remind me"],
+        ["R2", "—",       "Wait for the reminder to go out", "An email arrives", false, "Wait until the reminder is due, then check your inbox"],
+        ["R3", "Patient", "Open notifications in the app", "The reminder is listed there too", true, "Patient app → Notifications"]
       ]
     },
     {
       id: "cross",
-      name: "Cross-cutting",
-      blurb: "Run once, in any journey.",
+      track: "solo",
+      name: "Things to check once, anywhere",
+      blurb: "Do each of these once, during whichever test you happen to be doing. They are about keeping one person's information away from another's.",
       stories: [
-        ["XC1", "Pharmacy", "Sign out, sign in as a different pharmacy", "The previous queue and orders are gone", true, "Sign out of the pharmacy, sign in as another, open Dispensing Queue"],
-        ["XC2", "Doctor",   "Sign out, sign in as a different doctor", "No prescriptions, appointments or rating carried over", true, "Sign out of the doctor, sign in as another, open Prescriptions"],
-        ["XC3", "Doctor",   "Call a pharmacy route with a doctor token", "Refused", false, "Call /prescriptions/pharmacy/claimed with a doctor token"],
-        ["XC4", "Patient",  "Call an admin route with a patient token", "Refused", false, "Call /users/admin/pharmacies with a patient token"],
-        ["XC5", "Any",      "Reload mid-session", "Still signed in, same place", false, "Reload on any inner page"],
-        ["XC6", "Patient",  "Scan a prescription QR", "Opens. Still localhost means FRONTEND_URL was not set", true, "Scan the QR, or open the accessLink from the signing dialog"],
-        ["XC8", "Any",      "Check an image URL the server hands back", "It starts https://. An http:// URL is the proxy bug returning — the browser will not load it and the photo stays blank", true, "Open a doctor profile response and read profile_image, or check the Network tab for a 301"],
-        ["XC7", "Any",      "Check the deploy log on boot", "Every migration reports a tick and none reports an error. stored_files and the checklist tables are among them", false, "Render → the service → Logs, at boot"]
+        ["XC1", "Pharmacy", "Sign out, then sign in as a different pharmacy", "The first pharmacy's queue and orders are completely gone", true, "Sign out of the pharmacy, sign in as another one, open the queue"],
+        ["XC2", "Doctor",   "Sign out, then sign in as a different doctor", "No prescriptions, bookings or rating carried over from the first doctor", true, "Sign out of the doctor website, sign in as another doctor, open Prescriptions"],
+        ["XC3", "Doctor",   "Try to reach a pharmacy page while signed in as a doctor", "Refused", false, "Signed in as a doctor, paste a pharmacy page address into the address bar"],
+        ["XC4", "Patient",  "Try to reach an admin page while signed in as a patient", "Refused", false, "Signed in as a patient, try to open an admin page"],
+        ["XC5", "Any",      "Reload the page in the middle of doing something", "Still signed in, still in the same place", false, "Reload on any page inside the app"],
+        ["XC6", "Patient",  "Scan a prescription QR code with a phone", "It opens", true, "Scan the QR code from the box that appeared when the doctor signed"],
+        ["XC8", "Any",      "Check that photos actually appear", "Profile photos and avatars load. An empty grey box where a photo should be means the picture's address is wrong", true, "Look at a doctor's photo on the doctor website and in the patient app"],
+        ["XC7", "Any",      "Check the start-up log after we publish", "Every set-up step reports a tick, and none reports an error", false, "Ask us for the start-up log after the next publish"]
+      ]
+    },
+    {
+      id: "beyond",
+      track: "solo",
+      name: "Built, but not part of this phase",
+      blurb: "These work and you are welcome to try them, but this phase does not ask for them. Nothing here should hold up the release, so if something is rough, a note is enough.",
+      stories: [
+        ["D9", "Doctor",  "Open the doctor's Security page", "Recent sign-ins and the devices currently signed in are listed", false, "Doctor website → Settings → Security → Login Activity and Devices"],
+        ["X2", "Any",     "Read the terms and the privacy notice", "Both open and have content in them", false, "Either app → the terms and privacy links"],
+        ["X3", "Patient", "Send a support message, and read the FAQ", "The message is accepted and the FAQ has content", false, "Patient app → Support → send a message; then the FAQ"],
+        ["X4", "Patient", "Change your profile, photo, password, and switch on fingerprint sign-in", "Each one saves and is still set when you come back", false, "Patient app → Profile → each section in turn"],
+        ["X5", "Patient", "Look at your devices and recent sign-ins", "Listed, and you can sign one of them out", false, "Patient app → Security → Devices and recent sign-ins"],
+        ["X6", "Patient", "Report something suspicious, then freeze and unfreeze the account", "Each one goes through", false, "Patient app → Security → Report suspicious, then Freeze"],
+        ["X7", "Patient", "Link a doctor, a pharmacy, and a dependent", "You can add them, see them listed, and remove them", false, "Patient app → Linked services → each of the three tabs"]
       ]
     }
   ];
@@ -754,6 +884,17 @@
   GROUPS.forEach(function (g) {
     g.stories.forEach(function (s) {
       ALL.push({ id: s[0], group: g.id, role: s[1], what: s[2], expect: s[3], key: s[4], how: s[5] });
+    });
+  });
+
+  // The numbered demo path, in order. The summary panel reports on this
+  // rather than on all 97 stories, because "can it be shown working end to
+  // end" is the one question someone outside the team is actually asking.
+  var JOURNEY = [];
+  GROUPS.forEach(function (g) {
+    if (g.track !== "main" || !g.ordered) return;
+    g.stories.forEach(function (s) {
+      JOURNEY.push({ step: JOURNEY.length + 1, id: s[0], role: s[1], what: s[2] });
     });
   });
 
@@ -798,7 +939,9 @@
   var dropped = null;
 
   var groupsEl = document.getElementById("groups");
-  var talliesEl = document.getElementById("tallies");
+  var verdictEl = document.getElementById("verdict");
+  var scoresEl = document.getElementById("scores");
+  var sideListsEl = document.getElementById("side-lists");
   var barEl = document.getElementById("bar");
   var footEl = document.getElementById("foot");
   var whoEl = document.getElementById("who");
@@ -1081,29 +1224,58 @@
     if (dropped) identNoteEl.style.color = "var(--blocked)";
   }
 
-  function renderTallies() {
+  /**
+   * The panel beside the list, written for someone who is not going to run
+   * the tests: one plain sentence on whether the product can be shown
+   * working, then the numbers, then exactly what is waiting on us.
+   */
+  function renderSide() {
     var counts = { pass: 0, fail: 0, blocked: 0, notrun: 0 };
     ALL.forEach(function (s) { counts[statusOf(s.id)]++; });
 
-    talliesEl.textContent = "";
-    [["Pass", "pass"], ["Fail", "fail"], ["Blocked", "blocked"], ["Not run", "notrun"]]
-      .forEach(function (pair) {
-        var span = document.createElement("span");
-        span.className = "tally";
-        var dot = document.createElement("span");
-        dot.className = "dot " + (pair[1] === "notrun" ? "" : pair[1]);
-        span.appendChild(dot);
-        var b = document.createElement("b");
-        b.textContent = String(counts[pair[1]]);
-        span.appendChild(b);
-        span.appendChild(document.createTextNode(" " + pair[0]));
-        talliesEl.appendChild(span);
-      });
+    // The first step that is not passing is the only one worth naming: the
+    // steps after it cannot be judged until it is fixed.
+    var firstBad = null;
+    var unrun = 0;
+    JOURNEY.forEach(function (j) {
+      var st = statusOf(j.id);
+      if (st === "notrun") unrun++;
+      else if (st !== "pass" && !firstBad) firstBad = { at: j, status: st };
+    });
 
-    var totalSpan = document.createElement("span");
-    totalSpan.className = "tally";
-    totalSpan.textContent = ALL.length + " stories";
-    talliesEl.appendChild(totalSpan);
+    verdictEl.textContent = "";
+    var head = document.createElement("p");
+    var why = document.createElement("p");
+    why.className = "verdict-why";
+
+    if (!loaded) {
+      head.className = "verdict wait";
+      head.textContent = "Loading…";
+    } else if (firstBad) {
+      head.className = "verdict bad";
+      head.textContent = (firstBad.status === "fail" ? "Breaks at step " : "Blocked at step ")
+        + firstBad.at.step;
+      why.textContent = firstBad.at.role + " — " + firstBad.at.what
+        + ". The steps after this one cannot be judged until it is sorted out.";
+    } else if (unrun === JOURNEY.length) {
+      head.className = "verdict wait";
+      head.textContent = "Not tried yet";
+      why.textContent = "All " + JOURNEY.length + " steps of the main journey are "
+        + "still waiting for someone to run them.";
+    } else if (unrun) {
+      head.className = "verdict wait";
+      head.textContent = (JOURNEY.length - unrun) + " of " + JOURNEY.length
+        + " steps proven";
+      why.textContent = "Everything run so far has worked. " + unrun
+        + (unrun === 1 ? " step is" : " steps are") + " still to go.";
+    } else {
+      head.className = "verdict good";
+      head.textContent = "The whole journey works";
+      why.textContent = "All " + JOURNEY.length + " steps have been run, and every "
+        + "one of them passed.";
+    }
+    verdictEl.appendChild(head);
+    if (why.textContent) verdictEl.appendChild(why);
 
     barEl.textContent = "";
     [["pass", "var(--pass)"], ["fail", "var(--fail)"], ["blocked", "var(--blocked)"]]
@@ -1114,6 +1286,61 @@
         seg.style.background = pair[1];
         barEl.appendChild(seg);
       });
+
+    scoresEl.textContent = "";
+    [["Working", "pass"], ["Not working", "fail"],
+     ["Could not test", "blocked"], ["Still to try", "notrun"]]
+      .forEach(function (pair) {
+        var row = document.createElement("div");
+        row.className = "score r-" + pair[1];
+        var label = document.createElement("span");
+        label.textContent = pair[0];
+        var b = document.createElement("b");
+        b.textContent = String(counts[pair[1]]);
+        row.appendChild(label);
+        row.appendChild(b);
+        scoresEl.appendChild(row);
+      });
+
+    sideListsEl.textContent = "";
+    var block = document.createElement("div");
+    block.className = "listing";
+    var h3 = document.createElement("h3");
+    h3.textContent = "Needs our attention";
+    block.appendChild(h3);
+
+    var bad = ALL.filter(function (s) {
+      var st = statusOf(s.id);
+      return st === "fail" || st === "blocked";
+    });
+
+    if (!bad.length) {
+      var quiet = document.createElement("p");
+      quiet.className = "quiet";
+      quiet.textContent = loaded
+        ? "Nothing has been reported as broken."
+        : "…";
+      block.appendChild(quiet);
+    } else {
+      var ul = document.createElement("ul");
+      bad.forEach(function (s) {
+        var st = statusOf(s.id);
+        var li = document.createElement("li");
+        if (st === "blocked") li.className = "is-blocked";
+        var b = document.createElement("b");
+        b.textContent = s.what;
+        li.appendChild(b);
+        var tail = st === "fail" ? " — not working" : " — could not test";
+        var who = latestRun(s.id);
+        if (who && who.tester) tail += ", per " + who.tester;
+        var n = notesFor(s.id).length;
+        if (n) tail += " (" + n + (n === 1 ? " note" : " notes") + ")";
+        li.appendChild(document.createTextNode(tail));
+        ul.appendChild(li);
+      });
+      block.appendChild(ul);
+    }
+    sideListsEl.appendChild(block);
   }
 
   function renderThread(story, host) {
@@ -1198,7 +1425,16 @@
 
     var rid = document.createElement("div");
     rid.className = "rid";
-    rid.textContent = story.id;
+    if (story.step) {
+      var step = document.createElement("span");
+      step.className = "step";
+      step.textContent = String(story.step);
+      rid.appendChild(step);
+    }
+    var code = document.createElement("span");
+    code.className = "code";
+    code.textContent = story.id;
+    rid.appendChild(code);
     main.appendChild(rid);
 
     var text = document.createElement("div");
@@ -1291,42 +1527,72 @@
   function render() {
     groupsEl.textContent = "";
 
-    GROUPS.forEach(function (g) {
-      var wrap = document.createElement("section");
-      wrap.className = "group";
+    TRACKS.forEach(function (t) {
+      var belong = GROUPS.filter(function (g) { return g.track === t.id; });
+      if (!belong.length) return;
 
-      var head = document.createElement("div");
-      head.className = "group-head";
-      var h2 = document.createElement("h2");
-      h2.textContent = g.name;
-      head.appendChild(h2);
-      var done = g.stories.filter(function (s) { return statusOf(s[0]) !== "notrun"; }).length;
-      var count = document.createElement("span");
-      count.className = "count";
-      count.textContent = done + " / " + g.stories.length + " run";
-      head.appendChild(count);
-      wrap.appendChild(head);
+      var track = document.createElement("section");
+      track.className = "track";
 
-      if (g.blurb) {
-        var blurb = document.createElement("p");
-        blurb.className = "blurb";
-        blurb.textContent = g.blurb;
-        wrap.appendChild(blurb);
+      var th = document.createElement("div");
+      th.className = "track-head";
+      var h = document.createElement("h2");
+      h.textContent = t.name;
+      th.appendChild(h);
+      if (t.lede) {
+        var lede = document.createElement("p");
+        lede.textContent = t.lede;
+        th.appendChild(lede);
       }
+      track.appendChild(th);
 
-      var rows = document.createElement("div");
-      rows.className = "rows";
-      g.stories.forEach(function (s) {
-        rows.appendChild(buildRow({
-          id: s[0], role: s[1], what: s[2], expect: s[3], key: s[4], how: s[5]
-        }));
+      // On the main journey the numbers run straight through the groups, so
+      // it reads as one list of steps. Elsewhere each group is its own short
+      // run, so its numbering starts again at 1.
+      var running = 0;
+
+      belong.forEach(function (g) {
+        var wrap = document.createElement("section");
+        wrap.className = "group";
+
+        var head = document.createElement("div");
+        head.className = "group-head";
+        var h2 = document.createElement("h2");
+        h2.textContent = g.name;
+        head.appendChild(h2);
+        var done = g.stories.filter(function (s) { return statusOf(s[0]) !== "notrun"; }).length;
+        var count = document.createElement("span");
+        count.className = "count";
+        count.textContent = done + " of " + g.stories.length + " tried";
+        head.appendChild(count);
+        wrap.appendChild(head);
+
+        if (g.blurb) {
+          var blurb = document.createElement("p");
+          blurb.className = "blurb";
+          blurb.textContent = g.blurb;
+          wrap.appendChild(blurb);
+        }
+
+        if (!t.continuous) running = 0;
+
+        var rows = document.createElement("div");
+        rows.className = "rows";
+        g.stories.forEach(function (s) {
+          rows.appendChild(buildRow({
+            id: s[0], role: s[1], what: s[2], expect: s[3], key: s[4], how: s[5],
+            step: g.ordered ? ++running : null
+          }));
+        });
+
+        wrap.appendChild(rows);
+        track.appendChild(wrap);
       });
 
-      wrap.appendChild(rows);
-      groupsEl.appendChild(wrap);
+      groupsEl.appendChild(track);
     });
 
-    renderTallies();
+    renderSide();
     renderIdentNote();
   }
 
