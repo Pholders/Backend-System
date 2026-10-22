@@ -648,9 +648,12 @@
     {
       id: "doctor",
       name: "Doctor on its own",
-      blurb: "Needs no other role. Runnable the moment the deploy lands, and will catch most regressions.",
+      blurb: "Needs no other role. Runnable the moment the deploy lands, and will catch most regressions. Signing up is here too: a doctor account is the prerequisite for everything else phase 1 asks of the doctor.",
       stories: [
         ["D1", "Doctor", "Sign in", "Lands on the dashboard; a reload keeps the session", false, "Doctor web → sign in → reload"],
+        ["D13", "Doctor", "Sign up as a doctor", "The account is created and you can sign in straight away. No verification code is sent, and none is needed — waiting for one is a dead end", true, "Doctor web → Sign up → fill every field → submit → then sign in with the same details"],
+        ["D14", "Doctor", "Sign up using a real street address", "Refused. Only a place name geocodes, so use \"Sandton\" rather than \"12 Rivonia Road, Sandton\"", true, "Doctor web → Sign up → put a full street address in the clinic address"],
+        ["D15", "Doctor", "Open the province and city pickers on the signup form", "Both open and a value can be chosen, at any window size", true, "Doctor web → Sign up → tap Province, then City"],
         ["D2", "Doctor", "Open a deep link while signed out", "Login screen, not the page", false, "Sign out, then paste /doctor/prescriptions into the address bar"],
         ["D3", "Doctor", "Edit personal information", "Persists. Email and HPCSA stay read-only", false, "Settings → Account → Personal Information → change a field → Save → reload"],
         ["D4", "Doctor", "Edit professional details", "Persists, and nothing untouched is blanked", false, "Settings → Account → Professional Details → change one field → Save → reload"],
