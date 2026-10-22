@@ -4,7 +4,14 @@
  * Usage:   node config/seedUsers.js
  * 
  * Safety:
- *   - Refuses to run when NODE_ENV === 'production'
+ *   - Runs ONLY when invoked directly, never on require. It used to call
+ *     itself at module scope, so anything that merely imported this file --
+ *     a module-load check, a tooling scan, an editor -- deleted every
+ *     patient. That is not hypothetical: it happened on 21 October 2026
+ *     against the live database.
+ *   - Refuses to run against a remote database. The NODE_ENV guard below is
+ *     kept but is not enough on its own: the deployed service runs with
+ *     NODE_ENV=development, so it has never once fired where it mattered.
  *   - Deletes ALL existing patients/users (be careful!)
  *   - Creates a fresh test patient with known credentials
  */
@@ -15,6 +22,21 @@ const { pool } = require('./db');
 async function seedUsers() {
   if (process.env.NODE_ENV === 'production') {
     console.error('❌ SAFETY GUARD: Refusing to run in production environment');
+    process.exit(1);
+  }
+
+  // The real guard. DB_HOST points at the live Render database in the usual
+  // .env, and NODE_ENV there says "development", so refusing on NODE_ENV
+  // alone protects nothing. Deleting every patient is only ever meant for a
+  // database on this machine.
+  const host = String(process.env.DB_HOST || '');
+  const isLocal = host === '' || host === 'localhost' || host === '127.0.0.1';
+  if (!isLocal) {
+    console.error(
+      `❌ SAFETY GUARD: Refusing to wipe patients on a remote database (${host}).
+` +
+      '   Point DB_HOST at a local database if you really mean to seed.'
+    );
     process.exit(1);
   }
 
@@ -74,4 +96,10 @@ async function seedUsers() {
   }
 }
 
-seedUsers();
+// Only when run as `node config/seedUsers.js`. Requiring this file must not
+// delete anything.
+if (require.main === module) {
+  seedUsers();
+}
+
+module.exports = { seedUsers };

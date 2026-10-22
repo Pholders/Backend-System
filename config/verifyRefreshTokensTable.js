@@ -53,4 +53,13 @@ async function checkRefreshTokensTable() {
   }
 }
 
-checkRefreshTokensTable();
+// Only when run directly. Requiring this file must not execute it.
+
+
+if (require.main === module) {
+
+
+  checkRefreshTokensTable();
+
+
+}
