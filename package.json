@@ -38,6 +38,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@imgly/background-removal-node": "1.4.5",
     "@scure/base": "1.1.6",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.8.0",

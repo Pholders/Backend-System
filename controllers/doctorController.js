@@ -13,6 +13,7 @@ const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
+const { stripBackground } = require('../utils/backgroundRemoval');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
@@ -619,9 +620,22 @@ class DoctorController {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
 
+      // The background is cut out before anything is stored, so the original
+      // photo is never kept. Cut-outs are transparent PNGs, hence the extension.
+      let cutout;
+      try {
+        cutout = await stripBackground(req.file.buffer, image.mimeType);
+      } catch (backgroundError) {
+        console.error('Doctor profile background removal failed:', backgroundError);
+        return res.status(422).json({
+          success: false,
+          message: 'We could not process this photo. Please try a different picture.'
+        });
+      }
+
       const suffix = crypto.randomBytes(8).toString('hex');
-      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${image.extension}`;
-      uploadedKey = await storage.put(req.file, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}.png`;
+      uploadedKey = await storage.put({ buffer: cutout, mimetype: 'image/png' }, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
 
       const profileImageUrl = buildProfileImageUrl(req, filename);
       const updatedDoctor = await Doctor.update(doctorId, { profile_image: profileImageUrl });
