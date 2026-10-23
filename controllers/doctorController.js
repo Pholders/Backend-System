@@ -17,6 +17,51 @@ const { stripBackground } = require('../utils/backgroundRemoval');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
+// Doctor.update writes every key it is given straight into the SQL as a
+// column name, so profile updates may only reach these columns.
+const EDITABLE_PROFILE_COLUMNS = new Set([
+  'first_name', 'last_name', 'phone', 'specialization', 'experience',
+  'clinic_name', 'city', 'province', 'suburb', 'qualification', 'address',
+  'clinic_address', 'zip_code', 'consultation_fee', 'currency', 'bio',
+  'details', 'availability', 'opens_at', 'closes_at', 'latitude', 'longitude'
+]);
+
+// Fields a client may echo back from GET /doctor/profile but cannot change
+// here. They are dropped rather than rejected.
+const READ_ONLY_PROFILE_COLUMNS = new Set([
+  'id', 'email', 'password_hash', 'hpcsa_number', 'profile_image', 'status',
+  'email_verified', 'email_verified_at', 'rating', 'review_count', 'full_name',
+  'created_at', 'updated_at'
+]);
+
+// Names from the published API docs that don't follow from camelCase alone.
+const PROFILE_FIELD_ALIASES = {
+  years_of_experience: 'experience',
+  hospital_affiliation: 'clinic_name'
+};
+
+/**
+ * Maps a profile update body onto doctors columns, accepting snake_case or
+ * camelCase keys. Returns the unrecognised keys so the caller can refuse them.
+ */
+function toProfileColumns(body) {
+  const columns = {};
+  const unknown = [];
+
+  for (const [key, value] of Object.entries(body)) {
+    const snake = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    const column = PROFILE_FIELD_ALIASES[snake] || snake;
+
+    if (EDITABLE_PROFILE_COLUMNS.has(column)) {
+      columns[column] = value;
+    } else if (!READ_ONLY_PROFILE_COLUMNS.has(column)) {
+      unknown.push(key);
+    }
+  }
+
+  return { columns, unknown };
+}
+
 function buildProfileImageUrl(req, filename) {
   return `${req.protocol}://${req.get('host')}/api/users/doctor/profile-images/${filename}`;
 }
@@ -690,19 +735,17 @@ class DoctorController {
   static async updateProfile(req, res) {
     try {
       const doctorId = req.user.id;
-      const updateData = req.body;
-
-      delete updateData.id;
-      delete updateData.password_hash;
-      delete updateData.email;
-      delete updateData.hpcsa_number;
-      delete updateData.created_at;
-      delete updateData.profile_image;
-
       // Accepted schemes live in their own table, so they must not reach
       // Doctor.update — it maps every remaining key to a doctors column.
-      const medicalAids = updateData.medicalAids;
-      delete updateData.medicalAids;
+      const { medicalAids, ...body } = req.body || {};
+
+      const { columns: updateData, unknown } = toProfileColumns(body);
+      if (unknown.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `These profile fields cannot be updated: ${unknown.join(', ')}`
+        });
+      }
 
       if (medicalAids !== undefined && !Array.isArray(medicalAids)) {
         return res.status(400).json({
