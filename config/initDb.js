@@ -18,6 +18,7 @@ const { runMigration: createSupportTicketsTable } = require('./createSupportTick
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
+const { runMigration: createMedicalHistoryTables } = require('./createMedicalHistoryTables');
 const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
@@ -91,6 +92,7 @@ const initializeDatabase = async () => {
     await createChecklistTables();
     await createStoredFilesTable();
     await createPatientMedicationTables();
+    await createMedicalHistoryTables();
     await fixStoredImageUrls();
 
     // Notifications stack

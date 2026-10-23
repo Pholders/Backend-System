@@ -160,13 +160,13 @@ class PHR {
         `SELECT 
           id,
           allergen,
-          reaction,
+          reaction_description AS reaction,
           severity,
           notes,
-          identified_at
+          date_identified AS identified_at
         FROM patient_allergies
-        WHERE patient_id = $1
-        ORDER BY severity DESC, identified_at DESC`,
+        WHERE patient_id = $1 AND is_active IS NOT FALSE
+        ORDER BY severity DESC, date_identified DESC NULLS LAST`,
         [patientId]
       );
 
@@ -186,14 +186,14 @@ class PHR {
         `SELECT 
           id,
           condition_name,
-          diagnosis_date,
+          date_diagnosed AS diagnosis_date,
           status,
           severity,
           notes,
-          icd10_code
+          condition_code AS icd10_code
         FROM patient_medical_conditions
         WHERE patient_id = $1
-        ORDER BY diagnosis_date DESC`,
+        ORDER BY date_diagnosed DESC NULLS LAST`,
         [patientId]
       );
 
