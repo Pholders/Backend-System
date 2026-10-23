@@ -433,6 +433,14 @@ class EnhancedProfileController {
 
     } catch (error) {
       console.error('Error uploading file:', error);
+      // A rejected file is the patient's to fix, so say why instead of a 500.
+      if (error.message.startsWith('File validation failed')) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
+      // patient_files only accepts its fixed list of categories.
+      if (error.code === '23514') {
+        return res.status(400).json({ success: false, message: 'Invalid category' });
+      }
       res.status(500).json({
         success: false,
         message: 'Error uploading file',
@@ -457,6 +465,9 @@ class EnhancedProfileController {
 
     } catch (error) {
       console.error('Error retrieving file:', error);
+      if (error.message.startsWith('File not found')) {
+        return res.status(404).json({ success: false, message: 'File not found' });
+      }
       res.status(500).json({
         success: false,
         message: 'Error retrieving file',
@@ -504,6 +515,9 @@ class EnhancedProfileController {
 
     } catch (error) {
       console.error('Error deleting file:', error);
+      if (error.message.startsWith('File not found')) {
+        return res.status(404).json({ success: false, message: 'File not found' });
+      }
       res.status(500).json({
         success: false,
         message: 'Error deleting file',
