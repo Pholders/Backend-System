@@ -13,7 +13,6 @@ const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
-const { stripBackground } = require('../utils/backgroundRemoval');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
@@ -36,6 +35,16 @@ const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
  */
 function backgroundRemovalEnabled() {
   return String(process.env.DOCTOR_BG_REMOVAL || '').toLowerCase() === 'server';
+}
+
+/**
+ * Loaded only when the feature is switched on, because requiring it pulls
+ * the ONNX runtime and its model into the process at startup — a cost every
+ * boot pays for something that is normally never called.
+ */
+function loadStripBackground() {
+  // eslint-disable-next-line global-require
+  return require('../utils/backgroundRemoval').stripBackground;
 }
 
 // Doctor.update writes every key it is given straight into the SQL as a
@@ -695,7 +704,7 @@ class DoctorController {
       if (backgroundRemovalEnabled()) {
         try {
           stored = {
-            buffer: await stripBackground(req.file.buffer, image.mimeType),
+            buffer: await loadStripBackground()(req.file.buffer, image.mimeType),
             mimetype: 'image/png'
           };
           extension = '.png';
