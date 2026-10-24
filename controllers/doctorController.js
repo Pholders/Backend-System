@@ -17,6 +17,27 @@ const { stripBackground } = require('../utils/backgroundRemoval');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
+/**
+ * Whether to cut the background out here, on the server.
+ *
+ * Off unless explicitly switched on, because it cannot run on a small
+ * instance. One removal peaks at about 1 GB of resident memory — measured,
+ * and the same at 128x128 as at 1024x1024, because it is the model weights
+ * and the ONNX arena that cost, not the picture. Our container has 512 MB,
+ * so the kernel killed the process part-way through every upload: the
+ * request died with an empty 502 and the whole API went down with it for
+ * about a minute, taking the patient and pharmacy apps with it. An
+ * out-of-memory kill cannot be caught, which is why the try/catch around it
+ * never fired.
+ *
+ * The doctor web app cuts the background out in the browser before
+ * uploading, where there is memory to spare, and sends a transparent PNG.
+ * Set DOCTOR_BG_REMOVAL=server only on an instance with 2 GB or more.
+ */
+function backgroundRemovalEnabled() {
+  return String(process.env.DOCTOR_BG_REMOVAL || '').toLowerCase() === 'server';
+}
+
 // Doctor.update writes every key it is given straight into the SQL as a
 // column name, so profile updates may only reach these columns.
 const EDITABLE_PROFILE_COLUMNS = new Set([
@@ -665,22 +686,29 @@ class DoctorController {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
 
-      // The background is cut out before anything is stored, so the original
-      // photo is never kept. Cut-outs are transparent PNGs, hence the extension.
-      let cutout;
-      try {
-        cutout = await stripBackground(req.file.buffer, image.mimeType);
-      } catch (backgroundError) {
-        console.error('Doctor profile background removal failed:', backgroundError);
-        return res.status(422).json({
-          success: false,
-          message: 'We could not process this photo. Please try a different picture.'
-        });
+      // A photo cut out in the browser already arrives as a transparent PNG
+      // and is stored as it is. Cutting out here is off by default — see
+      // backgroundRemovalEnabled above for why.
+      let stored = { buffer: req.file.buffer, mimetype: image.mimeType };
+      let extension = image.extension;
+
+      if (backgroundRemovalEnabled()) {
+        try {
+          stored = {
+            buffer: await stripBackground(req.file.buffer, image.mimeType),
+            mimetype: 'image/png'
+          };
+          extension = '.png';
+        } catch (backgroundError) {
+          // Keep the photo rather than lose the upload over its background.
+          console.error('Doctor profile background removal failed, storing the '
+            + 'photo as uploaded:', backgroundError);
+        }
       }
 
       const suffix = crypto.randomBytes(8).toString('hex');
-      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}.png`;
-      uploadedKey = await storage.put({ buffer: cutout, mimetype: 'image/png' }, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${extension}`;
+      uploadedKey = await storage.put(stored, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
 
       const profileImageUrl = buildProfileImageUrl(req, filename);
       const updatedDoctor = await Doctor.update(doctorId, { profile_image: profileImageUrl });
