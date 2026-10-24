@@ -13,28 +13,58 @@ const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
+const { containerMemoryLimitBytes } = require('../utils/containerMemory');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
+
+// One removal peaks at roughly 1GB of resident memory, so anything under
+// this has no business attempting it. The margin is for the rest of the
+// server, which still has to answer every other request while it runs.
+const BACKGROUND_REMOVAL_MIN_BYTES = 2 * 1024 * 1024 * 1024;
+
+let memoryVerdictLogged = false;
 
 /**
  * Whether to cut the background out here, on the server.
  *
- * Off unless explicitly switched on, because it cannot run on a small
- * instance. One removal peaks at about 1 GB of resident memory — measured,
- * and the same at 128x128 as at 1024x1024, because it is the model weights
- * and the ONNX arena that cost, not the picture. Our container has 512 MB,
- * so the kernel killed the process part-way through every upload: the
- * request died with an empty 502 and the whole API went down with it for
- * about a minute, taking the patient and pharmacy apps with it. An
- * out-of-memory kill cannot be caught, which is why the try/catch around it
- * never fired.
+ * Off unless switched on with DOCTOR_BG_REMOVAL=server, and refused anyway
+ * on a machine too small to survive it. Both halves matter: the flag was
+ * switched on once in good faith, and every doctor photo uploaded after
+ * that killed the API — an empty 502 for them and about a minute of
+ * downtime for the patient and pharmacy apps too, because an out-of-memory
+ * kill is not an exception and no try/catch can see it coming.
  *
- * The doctor web app cuts the background out in the browser before
- * uploading, where there is memory to spare, and sends a transparent PNG.
- * Set DOCTOR_BG_REMOVAL=server only on an instance with 2 GB or more.
+ * A setting that can take the platform down should not be taken at its
+ * word, so the machine is asked as well, and the reason goes in the boot
+ * log rather than appearing later as a mystery.
+ *
+ * None of this costs the feature anything: the doctor web app cuts the
+ * background out in the browser and uploads a transparent PNG.
  */
 function backgroundRemovalEnabled() {
-  return String(process.env.DOCTOR_BG_REMOVAL || '').toLowerCase() === 'server';
+  if (String(process.env.DOCTOR_BG_REMOVAL || '').toLowerCase() !== 'server') {
+    return false;
+  }
+
+  const limit = containerMemoryLimitBytes();
+  const enough = limit === null || limit >= BACKGROUND_REMOVAL_MIN_BYTES;
+
+  if (!memoryVerdictLogged) {
+    memoryVerdictLogged = true;
+    const gb = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(1);
+    if (enough) {
+      console.log('🖼️  Doctor profile background removal: ON, on the server '
+        + `(${limit === null ? 'memory limit unknown' : gb(limit) + 'GB available'})`);
+    } else {
+      console.warn('⚠️  DOCTOR_BG_REMOVAL=server is set, but this machine has '
+        + `only ${gb(limit)}GB and one removal needs about 1GB. Ignoring it: `
+        + 'enabling it here kills the whole API on every photo upload. The '
+        + 'doctor web app does this in the browser instead, so nothing is '
+        + 'lost. Remove the variable, or move to a 2GB instance.');
+    }
+  }
+
+  return enough;
 }
 
 /**
