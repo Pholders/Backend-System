@@ -816,6 +816,39 @@
       ]
     },
     {
+      id: "orders",
+      track: "solo",
+      ordered: true,
+      name: "Ordering medicine from a pharmacy",
+      blurb: "After a prescription is sent to a pharmacy, the patient can place an order for it and follow it through to collection. The behind-the-scenes side passes 29 checks, including the medical aid claim; none of the screens has been used. Numbered — do them in order, and you need the patient app and the pharmacy website side by side.",
+      stories: [
+        ["O1", "Patient", "Order the medicine on a prescription", "The order is made and shows as waiting for the pharmacy", true, "Patient app → a signed prescription → Order from a pharmacy → pick one → choose Cash"],
+        ["O2", "Patient", "Try to order the same prescription twice", "Refused. One open order per prescription", true, "Order the same prescription again without cancelling the first"],
+        ["O3", "Pharmacy", "Open the orders queue", "The order is there, with the patient and the medicines", true, "Pharmacy website → Orders"],
+        ["O4", "Pharmacy", "Accept it and give a total", "It moves to Accepted and the patient can see the amount", true, "Orders → the new order → Accept → type a total"],
+        ["O5", "Pharmacy", "Move it to Preparing, then Ready", "Each step sticks, and the patient sees it change", true, "Orders → that order → Start preparing → Mark ready"],
+        ["O6", "Pharmacy", "Mark it collected", "It moves to Collected. That is the end — nothing comes after it", true, "Orders → that order → Collected"],
+        ["O7", "Patient", "Try to cancel it after collection", "Refused. It is already done", true, "Patient app → that order → Cancel"],
+        ["O8", "Patient", "Look at the order's history", "Every step is listed in the order it happened", true, "Patient app → that order → the history or timeline"],
+        ["O9", "Patient", "Cancel an order the pharmacy has not accepted yet", "It cancels, and you can order that prescription again afterwards", true, "Place a new order, then cancel it before the pharmacy accepts"],
+        ["O10", "Pharmacy", "Turn down an order you cannot fill, with a reason", "It moves to Rejected and the patient can read why", true, "Orders → a new order → Reject → give a reason"]
+      ]
+    },
+    {
+      id: "orderclaims",
+      track: "solo",
+      ordered: true,
+      name: "Ordering on a medical aid",
+      blurb: "An order paid by medical aid waits on the claim before the pharmacy prepares it. The part worth watching is a claim that is turned down: the patient must still be able to pay for it themselves rather than being stuck.",
+      stories: [
+        ["OC1", "Patient", "Order a prescription and choose Medical aid", "The order is made, the same as a cash one", true, "Patient app → a prescription → Order → choose Medical aid"],
+        ["OC2", "Pharmacy", "Accept it, then send the claim", "It moves to Waiting on the claim", true, "Orders → Accept with a total → then Submit claim"],
+        ["OC3", "Pharmacy", "Record the claim as approved", "It moves on, and the pharmacy can start preparing", true, "Orders → that order → record the claim outcome as approved"],
+        ["OC4", "Pharmacy", "On another order, record the claim as turned down", "It says so, and the patient is told why", true, "Repeat with a second order and record the claim as rejected"],
+        ["OC5", "Patient", "Go ahead and pay for it yourself after a refused claim", "You can. A refused claim must not be a dead end", true, "That rejected-claim order → continue and pay in full"]
+      ]
+    },
+    {
       id: "medaid",
       track: "solo",
       name: "The medical aid card",
