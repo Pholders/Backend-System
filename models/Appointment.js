@@ -222,7 +222,8 @@ class Appointment {
     const result = await query(
       `SELECT a.*, 
               d.first_name as doctor_first_name, d.last_name as doctor_last_name, 
-              d.specialization, d.phone as doctor_phone,
+              d.specialization, d.phone as doctor_phone, d.clinic_name, d.city,
+              d.profile_image as doctor_profile_image,
               u.first_name as patient_first_name, u.last_name as patient_last_name
        FROM appointments a
        LEFT JOIN doctors d ON a.doctor_id = d.id
@@ -247,7 +248,8 @@ class Appointment {
     const result = await query(
       `SELECT a.*, 
               d.first_name as doctor_first_name, d.last_name as doctor_last_name, 
-              d.specialization, d.phone as doctor_phone, d.clinic_name, d.city
+              d.specialization, d.phone as doctor_phone, d.clinic_name, d.city,
+              d.profile_image as doctor_profile_image
        FROM appointments a
        LEFT JOIN doctors d ON a.doctor_id = d.id
        WHERE a.patient_id = $1
@@ -346,17 +348,19 @@ class Appointment {
 
   /**
    * Get patient's upcoming appointments
+   * Includes ones still awaiting payment so the app can offer "Pay now"
    */
   static async getUpcomingAppointments(patient_id, limit = 10) {
     const result = await query(
       `SELECT a.*, 
               d.first_name as doctor_first_name, d.last_name as doctor_last_name, 
-              d.specialization, d.phone as doctor_phone, d.clinic_name, d.city
+              d.specialization, d.phone as doctor_phone, d.clinic_name, d.city,
+              d.profile_image as doctor_profile_image
        FROM appointments a
        LEFT JOIN doctors d ON a.doctor_id = d.id
        WHERE a.patient_id = $1 
        AND a.appointment_date >= CURRENT_DATE
-       AND a.status IN ('scheduled', 'rescheduled')
+       AND a.status IN ('pending_payment', 'scheduled', 'rescheduled')
        ORDER BY a.appointment_date ASC, a.time_slot ASC
        LIMIT $2`,
       [patient_id, limit]
@@ -533,29 +537,31 @@ class Appointment {
   }
 
   /**
-   * Auto-cancel pending payments that have expired (default: 30 minutes)
-   * Returns count of cancelled appointments
+   * Appointments still awaiting payment after the timeout (default: 30 minutes)
    */
-  static async autoCancelExpiredPendingPayments(timeoutMinutes = 30) {
-    try {
-      const result = await query(
-        `UPDATE appointments 
-         SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-         WHERE status = 'pending_payment'
-         AND created_at < NOW() - INTERVAL '${timeoutMinutes} minutes'
-         RETURNING id`,
-        []
-      );
-      
-      const count = result.rows.length;
-      if (count > 0) {
-        console.log(`✅ Auto-cancelled ${count} expired pending payment appointments`);
-      }
-      return count;
-    } catch (error) {
-      console.error('Error auto-cancelling expired pending payments:', error);
-      return 0;
-    }
+  static async findExpiredPendingPayments(timeoutMinutes = 30) {
+    const result = await query(
+      `SELECT id FROM appointments
+       WHERE status = 'pending_payment'
+       AND created_at < NOW() - ($1::int * INTERVAL '1 minute')
+       ORDER BY created_at ASC`,
+      [timeoutMinutes]
+    );
+    return result.rows;
+  }
+
+  /**
+   * Cancel an appointment only if it is still awaiting payment
+   */
+  static async cancelIfPendingPayment(appointment_id) {
+    const result = await query(
+      `UPDATE appointments 
+       SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND status = 'pending_payment'
+       RETURNING *`,
+      [appointment_id]
+    );
+    return result.rows[0] || null;
   }
 }
 

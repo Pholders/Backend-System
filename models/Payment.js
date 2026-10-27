@@ -121,6 +121,108 @@ class Payment {
   }
 
   /**
+   * Get the pending payment for an appointment, if there is one
+   */
+  static async findPendingByAppointment(appointmentId) {
+    const query = `
+      SELECT * FROM payments
+      WHERE appointment_id = $1 AND payment_status = 'pending'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1;
+    `;
+
+    try {
+      const result = await pool.query(query, [appointmentId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error fetching pending payment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * The Stripe PaymentIntent behind a payment.
+   * Older rows kept the PaymentIntent ID in stripe_transaction_id until the
+   * charge ID replaced it, so fall back to that while it still looks like one.
+   */
+  static stripeIntentIdOf(payment) {
+    if (!payment) return null;
+    if (payment.stripe_payment_intent_id) return payment.stripe_payment_intent_id;
+    const legacyId = payment.stripe_transaction_id;
+    return legacyId && legacyId.startsWith('pi_') ? legacyId : null;
+  }
+
+  /**
+   * Attach the Stripe PaymentIntent created for a payment
+   */
+  static async setStripePaymentIntent(paymentId, stripePaymentIntentId) {
+    const query = `
+      UPDATE payments
+      SET stripe_payment_intent_id = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *;
+    `;
+
+    try {
+      const result = await pool.query(query, [paymentId, stripePaymentIntentId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error saving Stripe payment intent:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark a Stripe payment completed.
+   * A cancelled row is completed too: if its PaymentIntent succeeded anyway, the
+   * patient was charged and the record has to say so.
+   * Returns null when another request (or the webhook) already completed it,
+   * so callers only schedule the appointment and notify once.
+   */
+  static async markStripeCompleted(paymentId, { stripePaymentIntentId, chargeId = null, receiptUrl = null }) {
+    const query = `
+      UPDATE payments
+      SET
+        payment_status = 'completed',
+        stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $2),
+        stripe_transaction_id = $3,
+        receipt_url = $4,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND payment_status IN ('pending', 'failed', 'cancelled')
+      RETURNING *;
+    `;
+
+    try {
+      const result = await pool.query(query, [paymentId, stripePaymentIntentId, chargeId, receiptUrl]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error completing Stripe payment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel a payment only while it is still pending.
+   * Returns null if it had already moved on (e.g. completed).
+   */
+  static async cancelIfPending(paymentId) {
+    const query = `
+      UPDATE payments
+      SET payment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND payment_status = 'pending'
+      RETURNING *;
+    `;
+
+    try {
+      const result = await pool.query(query, [paymentId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error cancelling pending payment:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get payment by ID
    */
   static async getById(paymentId) {
@@ -334,7 +436,11 @@ class Payment {
    */
   static async getByStripeIntent(stripePaymentIntentId) {
     const query = `
-      SELECT * FROM payments WHERE stripe_payment_intent_id = $1;
+      SELECT * FROM payments
+      WHERE stripe_payment_intent_id = $1
+      OR (stripe_payment_intent_id IS NULL AND stripe_transaction_id = $1)
+      ORDER BY id DESC
+      LIMIT 1;
     `;
 
     try {

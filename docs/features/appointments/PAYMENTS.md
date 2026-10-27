@@ -163,11 +163,26 @@ POST /payments/initialize
     "amount": 500,
     "paymentMethod": "stripe",
     "status": "pending",
+    "resumed": false,
     "stripeClientSecret": "pi_1234567890_secret_1234567890",
+    "stripePaymentIntentId": "pi_1234567890",
+    "stripeStatus": null,
     "stripePublicKey": "pk_live_1234567890"
   }
 }
 ```
+
+**Resuming a payment the patient left:** the appointment must still be `pending_payment` (otherwise `409`). If it already has a `pending` payment, that payment is reused instead of creating a new one, and `resumed` is `true`:
+
+| Existing payment | Response |
+|---|---|
+| Stripe, PaymentIntent `requires_payment_method` / `requires_confirmation` / `requires_action` / `processing` | Same `paymentId` and `stripeClientSecret`, `status: "pending"`, `stripeStatus` set |
+| Stripe, PaymentIntent `succeeded` | Payment marked completed, appointment `scheduled`, `status: "completed"` (don't open the payment sheet) |
+| Stripe, PaymentIntent `canceled` or missing | Old row `cancelled`, new payment created |
+| Same non-card method | Same `paymentId`, `status: "pending"` |
+| Different method | Old PaymentIntent cancelled and row `cancelled`, then a new payment. If the card payment is still `processing`, `409` |
+
+Only one `pending` payment can exist per appointment (unique index), so two quick taps return the same payment.
 
 **Response (Cash on Arrival):**
 ```json
@@ -231,6 +246,8 @@ POST /payments/confirm-stripe
   }
 }
 ```
+
+Calling this again for a payment that is already completed (for example, the first response was lost, or the webhook completed it first) returns `200` with `"message": "Payment already confirmed"` and `"alreadyConfirmed": true`. The appointment is scheduled and the patient notified only once.
 
 **Response (Processing):**
 ```json

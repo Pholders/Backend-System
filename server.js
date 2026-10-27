@@ -123,7 +123,15 @@ app.use(cors({
 }));
 
 // Body parsing
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // Stripe signs the exact bytes it sent, so keep them for webhook verification
+  verify: (req, res, buf) => {
+    if (req.originalUrl.startsWith('/api/') && req.originalUrl.includes('/payments/webhook/stripe')) {
+      req.rawBody = buf;
+    }
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging (must be early)

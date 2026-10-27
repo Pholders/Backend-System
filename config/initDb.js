@@ -33,6 +33,7 @@ const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const { addPendingPaymentStatus } = require('./addPendingPaymentStatus');
 const { addPaymentColumnsToAppointments } = require('./addPaymentColumnsToAppointments');
+const { addPendingPaymentUniqueIndex } = require('./addPendingPaymentUniqueIndex');
 const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 const { addPrescriptionPdfSnapshots } = require('./addPrescriptionPdfSnapshots');
@@ -117,6 +118,9 @@ const initializeDatabase = async () => {
 
     // Add payment_status and payment_method columns to appointments
     await addPaymentColumnsToAppointments();
+
+    // Allow only one pending payment per appointment
+    await addPendingPaymentUniqueIndex();
 
     // Create Prescription tables (required by PHR + session-based signatures + pharmacy dispensing)
     await Prescription.createTable();
