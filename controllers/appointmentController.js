@@ -4,6 +4,8 @@ const DoctorReview = require('../models/DoctorReview');
 const User = require('../models/User');
 const Payment = require('../models/Payment');
 const notificationService = require('../services/notificationService');
+const StripeService = require('../services/stripeService');
+const AppointmentCleanupService = require('../services/appointmentCleanupService');
 
 /**
  * Appointment Controller
@@ -388,6 +390,7 @@ class AppointmentController {
           total: appointments.length,
           appointments: appointments.map(apt => ({
             appointmentId: apt.id,
+            doctorId: apt.doctor_id,
             doctorName: `${apt.doctor_first_name} ${apt.doctor_last_name}`,
             specialization: apt.specialization,
             date: apt.appointment_date,
@@ -399,6 +402,7 @@ class AppointmentController {
             city: apt.city,
             reasonForVisit: apt.reason_for_visit,
             doctorPhone: apt.doctor_phone,
+            doctorProfileImage: apt.doctor_profile_image,
             createdAt: apt.created_at
           }))
         }
@@ -430,6 +434,7 @@ class AppointmentController {
           total: appointments.length,
           appointments: appointments.map(apt => ({
             appointmentId: apt.id,
+            doctorId: apt.doctor_id,
             doctorName: `${apt.doctor_first_name} ${apt.doctor_last_name}`,
             specialization: apt.specialization,
             date: apt.appointment_date,
@@ -439,7 +444,10 @@ class AppointmentController {
             status: apt.status,
             clinicName: apt.clinic_name,
             city: apt.city,
-            doctorPhone: apt.doctor_phone
+            reasonForVisit: apt.reason_for_visit,
+            doctorPhone: apt.doctor_phone,
+            doctorProfileImage: apt.doctor_profile_image,
+            createdAt: apt.created_at
           }))
         }
       });
@@ -493,6 +501,19 @@ class AppointmentController {
           success: false,
           message: 'Cannot cancel past appointments'
         });
+      }
+
+      // Retire any unfinished payment first so its PaymentIntent can't be paid later
+      if (appointment.status === 'pending_payment') {
+        const outcome = await StripeService.cancelPendingPaymentForAppointment(appointment.id);
+        if (outcome === 'completed' || outcome === 'processing') {
+          return res.status(409).json({
+            success: false,
+            message: outcome === 'completed'
+              ? 'Your card payment for this appointment has already gone through. Please refresh and try again.'
+              : 'Your card payment for this appointment is still processing. Please try again shortly.'
+          });
+        }
       }
 
       const cancelledAppointment = await Appointment.cancel(appointmentId);
@@ -680,6 +701,7 @@ class AppointmentController {
         message: 'Appointment details retrieved successfully',
         data: {
           appointmentId: appointment.id,
+          doctorId: appointment.doctor_id,
           doctorName: `${appointment.doctor_first_name} ${appointment.doctor_last_name}`,
           specialization: appointment.specialization,
           date: appointment.appointment_date,
@@ -692,6 +714,7 @@ class AppointmentController {
           clinicName: appointment.clinic_name,
           city: appointment.city,
           doctorPhone: appointment.doctor_phone,
+          doctorProfileImage: appointment.doctor_profile_image,
           createdAt: appointment.created_at,
           updatedAt: appointment.updated_at
         }
@@ -792,7 +815,7 @@ class AppointmentController {
       const { timeoutMinutes = 30 } = req.body;
 
       // Validate timeout is reasonable (between 5 and 1440 minutes / 1 day)
-      if (timeoutMinutes < 5 || timeoutMinutes > 1440) {
+      if (!Number.isFinite(Number(timeoutMinutes)) || timeoutMinutes < 5 || timeoutMinutes > 1440) {
         return res.status(400).json({
           success: false,
           message: 'Timeout must be between 5 and 1440 minutes'
@@ -800,7 +823,7 @@ class AppointmentController {
       }
 
       // Auto-cancel expired pending payments
-      const cancelledCount = await Appointment.autoCancelExpiredPendingPayments(timeoutMinutes);
+      const cancelledCount = await AppointmentCleanupService.cancelExpiredPendingPayments(timeoutMinutes);
 
       res.json({
         success: true,

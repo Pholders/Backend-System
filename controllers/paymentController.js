@@ -3,12 +3,16 @@ const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const AuditLog = require('../models/AuditLog');
 const notificationService = require('../services/notificationService');
+const StripeService = require('../services/stripeService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 
 class PaymentController {
   /**
    * Initialize payment (used before confirming appointment)
-   * Validates payment method and returns payment details
+   * Validates payment method and returns payment details.
+   * If the appointment already has a pending payment, it is resumed (same
+   * paymentId and Stripe client secret) rather than duplicated, so a patient
+   * can come back and finish a payment they left.
    */
   static async initializePayment(req, res) {
     try {
@@ -63,7 +67,7 @@ class PaymentController {
       if (paymentMethod === 'medical_aid') {
         // Check if patient has completed appointments before (is returning)
         const completedAppointments = await Appointment.getByPatientIdAndStatus(patientId, 'completed');
-        
+
         if (!completedAppointments || completedAppointments.length === 0) {
           return res.status(400).json({
             success: false,
@@ -80,74 +84,120 @@ class PaymentController {
         }
       }
 
-      const doctor = await Doctor.findById(appointment.doctor_id);
-      const consultationFee = Doctor.consultationFeeFor(doctor);
-
-      // Create payment record
-      const paymentData = {
-        appointment_id: appointmentId,
-        patient_id: patientId,
-        doctor_id: appointment.doctor_id,
-        amount: consultationFee,
-        payment_method: paymentMethod,
-        medical_aid_number: medicalAidNumber,
-        medical_aid_provider: medicalAidProvider
-      };
-
-      const payment = await Payment.create(paymentData);
-
-      // If Stripe, create Stripe intent
-      let stripeIntent = null;
-      if (paymentMethod === 'stripe') {
-        try {
-          stripeIntent = await stripe.paymentIntents.create({
-            amount: Math.round(consultationFee * 100), // Convert to cents
-            currency: 'zar',
-            metadata: {
-              appointmentId: appointmentId,
-              patientId: patientId,
-              doctorId: appointment.doctor_id,
-              paymentId: payment.id
-            }
-          });
-
-          // Update payment record with Stripe intent ID
-          await Payment.updatePaymentStatus(payment.id, 'pending', {
-            stripe_transaction_id: stripeIntent.id
-          });
-        } catch (stripeError) {
-          console.error('Stripe error:', stripeError);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to initialize Stripe payment',
-            error: stripeError.message
-          });
-        }
+      if (appointment.status !== 'pending_payment') {
+        return res.status(409).json({
+          success: false,
+          message: appointment.status === 'cancelled'
+            ? 'This appointment was cancelled and can no longer be paid for'
+            : 'This appointment is not awaiting payment'
+        });
       }
 
-      await AuditLog.logSecurityEvent(
-        req,
-        patientId,
-        'patient',
-        req.user.email,
-        'payment_init',
-        'success',
-        `Payment initialized for appointment ${appointmentId} - Method: ${paymentMethod}`
-      );
+      // Two attempts: if a parallel request creates the pending payment between our
+      // lookup and insert, the unique index rejects ours and we resume theirs instead.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const existing = await Payment.findPendingByAppointment(appointment.id);
+        if (existing) {
+          const resumed = await PaymentController._resumePendingPayment(existing, paymentMethod);
 
-      return res.status(200).json({
-        success: true,
-        message: 'Payment initialized successfully',
-        data: {
-          paymentId: payment.id,
-          appointmentId: appointmentId,
-          amount: consultationFee,
-          paymentMethod: paymentMethod,
-          status: 'pending',
-          stripeClientSecret: stripeIntent ? stripeIntent.client_secret : null,
-          stripePublicKey: process.env.STRIPE_PUBLIC_KEY || null
+          if (resumed?.error) {
+            return res.status(resumed.error).json({ success: false, message: resumed.message });
+          }
+
+          if (resumed) {
+            await AuditLog.logSecurityEvent(
+              req,
+              patientId,
+              'patient',
+              req.user.email,
+              'payment_init',
+              'success',
+              `Payment ${resumed.paymentId} resumed for appointment ${appointment.id} - Method: ${resumed.paymentMethod} - Status: ${resumed.status}`
+            );
+
+            return res.status(200).json({
+              success: true,
+              message: resumed.status === 'completed'
+                ? 'Payment already completed'
+                : 'Pending payment resumed',
+              data: resumed
+            });
+          }
         }
-      });
+
+        const doctor = await Doctor.findById(appointment.doctor_id);
+        const consultationFee = Doctor.consultationFeeFor(doctor);
+
+        // Create payment record
+        let payment;
+        try {
+          payment = await Payment.create({
+            appointment_id: appointment.id,
+            patient_id: patientId,
+            doctor_id: appointment.doctor_id,
+            amount: consultationFee,
+            payment_method: paymentMethod,
+            medical_aid_number: medicalAidNumber,
+            medical_aid_provider: medicalAidProvider
+          });
+        } catch (createError) {
+          if (createError.code === '23505' && attempt === 0) continue;
+          throw createError;
+        }
+
+        // If Stripe, create Stripe intent
+        let stripeIntent = null;
+        if (paymentMethod === 'stripe') {
+          try {
+            stripeIntent = await stripe.paymentIntents.create({
+              amount: Math.round(consultationFee * 100), // Convert to cents
+              currency: 'zar',
+              metadata: {
+                appointmentId: appointment.id,
+                patientId: patientId,
+                doctorId: appointment.doctor_id,
+                paymentId: payment.id
+              }
+            }, {
+              idempotencyKey: `appointment-payment-${payment.id}`
+            });
+
+            // Update payment record with Stripe intent ID
+            payment = await Payment.setStripePaymentIntent(payment.id, stripeIntent.id);
+          } catch (stripeError) {
+            console.error('Stripe error:', stripeError);
+            // Don't leave a pending row behind that has no PaymentIntent to resume
+            await Payment.cancelIfPending(payment.id);
+            return res.status(500).json({
+              success: false,
+              message: 'Failed to initialize Stripe payment',
+              error: stripeError.message
+            });
+          }
+        }
+
+        await AuditLog.logSecurityEvent(
+          req,
+          patientId,
+          'patient',
+          req.user.email,
+          'payment_init',
+          'success',
+          `Payment initialized for appointment ${appointment.id} - Method: ${paymentMethod}`
+        );
+
+        return res.status(200).json({
+          success: true,
+          message: 'Payment initialized successfully',
+          data: PaymentController._initPaymentData(payment, {
+            status: 'pending',
+            clientSecret: stripeIntent ? stripeIntent.client_secret : null,
+            resumed: false
+          })
+        });
+      }
+
+      throw new Error('Could not create or resume a payment for this appointment');
     } catch (error) {
       console.error('Error initializing payment:', error);
       return res.status(500).json({
@@ -159,7 +209,87 @@ class PaymentController {
   }
 
   /**
+   * Decide what to do with an appointment's existing pending payment.
+   * Returns the response data to resume it, `{ error, message }` when it can't
+   * be replaced yet, or null once it has been retired and a new payment is needed.
+   */
+  static async _resumePendingPayment(existing, paymentMethod) {
+    if (existing.payment_method !== paymentMethod) {
+      // Patient switched method: cancel the old PaymentIntent (if any) first
+      const outcome = await StripeService.cancelPendingPayment(existing);
+      if (outcome === 'completed') {
+        // The card payment went through after all, so there is nothing left to pay
+        const payment = await Payment.getById(existing.id);
+        return PaymentController._initPaymentData(payment, { status: 'completed', resumed: true });
+      }
+      if (outcome === 'processing') {
+        return {
+          error: 409,
+          message: 'Your card payment for this appointment is still processing. Please check again shortly.'
+        };
+      }
+      return null;
+    }
+
+    if (paymentMethod !== 'stripe') {
+      return PaymentController._initPaymentData(existing, { status: 'pending', resumed: true });
+    }
+
+    const intentId = Payment.stripeIntentIdOf(existing);
+    let intent = null;
+    if (intentId) {
+      try {
+        intent = await stripe.paymentIntents.retrieve(intentId, { expand: ['latest_charge'] });
+      } catch (stripeError) {
+        if (stripeError.code !== 'resource_missing') throw stripeError;
+      }
+    }
+
+    if (!intent || intent.status === 'canceled') {
+      // Nothing left to resume; retire the row so a fresh payment can be created
+      await Payment.cancelIfPending(existing.id);
+      return null;
+    }
+
+    if (intent.status === 'succeeded') {
+      const { payment } = await StripeService.completeFromIntent(existing, intent);
+      return PaymentController._initPaymentData(payment, {
+        status: 'completed',
+        clientSecret: intent.client_secret,
+        resumed: true
+      });
+    }
+
+    // requires_payment_method, requires_confirmation, requires_action, processing
+    return PaymentController._initPaymentData(existing, {
+      status: 'pending',
+      clientSecret: intent.client_secret,
+      resumed: true,
+      stripeStatus: intent.status
+    });
+  }
+
+  /**
+   * Response body for POST /payments/initialize
+   */
+  static _initPaymentData(payment, { status, clientSecret = null, resumed, stripeStatus = null }) {
+    return {
+      paymentId: payment.id,
+      appointmentId: payment.appointment_id,
+      amount: Number(payment.amount),
+      paymentMethod: payment.payment_method,
+      status,
+      resumed,
+      stripeClientSecret: clientSecret,
+      stripePaymentIntentId: Payment.stripeIntentIdOf(payment),
+      stripeStatus,
+      stripePublicKey: process.env.STRIPE_PUBLIC_KEY || null
+    };
+  }
+
+  /**
    * Confirm Stripe payment
+   * Safe to call again for a payment that is already completed.
    */
   static async confirmStripePayment(req, res) {
     try {
@@ -199,58 +329,73 @@ class PaymentController {
         });
       }
 
+      if (payment.payment_method !== 'stripe') {
+        return res.status(400).json({
+          success: false,
+          message: 'This payment is not a Stripe payment'
+        });
+      }
+
+      const expectedPaymentIntentId = Payment.stripeIntentIdOf(payment);
+      if (expectedPaymentIntentId && expectedPaymentIntentId !== stripePaymentIntentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Stripe Payment Intent does not match this payment'
+        });
+      }
+
+      // Already confirmed (an earlier confirm whose response was lost, or the webhook)
+      if (payment.payment_status === 'completed') {
+        return res.status(200).json({
+          success: true,
+          message: 'Payment already confirmed',
+          data: {
+            paymentId: payment.id,
+            status: 'completed',
+            transactionId: payment.stripe_transaction_id,
+            receiptUrl: payment.receipt_url,
+            alreadyConfirmed: true
+          }
+        });
+      }
+
       try {
-        const expectedPaymentIntentId = payment.stripe_payment_intent_id || payment.stripe_transaction_id;
-        if (expectedPaymentIntentId && expectedPaymentIntentId !== stripePaymentIntentId) {
+        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
+          expand: ['latest_charge']
+        });
+
+        // Without a stored PaymentIntent ID, make sure this one was made for this appointment
+        if (!expectedPaymentIntentId && String(intent.metadata?.appointmentId) !== String(payment.appointment_id)) {
           return res.status(400).json({
             success: false,
             message: 'Stripe Payment Intent does not match this payment'
           });
         }
 
-        const intent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
-          expand: ['latest_charge']
-        });
-
         if (intent.status === 'succeeded') {
-          const charge = intent.latest_charge;
+          const { payment: updatedPayment, newlyCompleted } = await StripeService.completeFromIntent(payment, intent);
 
-          // Update payment status to completed
-          const updatedPayment = await Payment.updatePaymentStatus(paymentId, 'completed', {
-            stripe_transaction_id: typeof charge === 'string' ? charge : charge?.id || null,
-            receipt_url: typeof charge === 'string' ? null : charge?.receipt_url || null
-          });
-
-          // Confirm payment and change appointment status from pending_payment to scheduled
-          await Appointment.confirmPaymentAndSchedule(payment.appointment_id);
-
-          await AuditLog.logSecurityEvent(
-            req,
-            patientId,
-            'patient',
-            req.user.email,
-            'payment_confirm',
-            'success',
-            `Stripe payment confirmed for appointment ${payment.appointment_id}`
-          );
-
-          // Notify patient of confirmed payment — fire-and-forget
-          notificationService.sendToPatient({
-            patientId,
-            type: 'appointment',
-            title: 'Payment Confirmed — Appointment Scheduled',
-            body: `Your payment of R${payment.amount} has been confirmed. Your appointment is now scheduled.`,
-            data: { appointmentId: payment.appointment_id, paymentId: payment.id }
-          }).catch(err => console.error('Notification error (non-blocking):', err.message));
+          if (newlyCompleted) {
+            await AuditLog.logSecurityEvent(
+              req,
+              patientId,
+              'patient',
+              req.user.email,
+              'payment_confirm',
+              'success',
+              `Stripe payment confirmed for appointment ${payment.appointment_id}`
+            );
+          }
 
           return res.status(200).json({
             success: true,
-            message: 'Payment confirmed successfully',
+            message: newlyCompleted ? 'Payment confirmed successfully' : 'Payment already confirmed',
             data: {
               paymentId: updatedPayment.id,
               status: 'completed',
               transactionId: updatedPayment.stripe_transaction_id,
-              receiptUrl: updatedPayment.receipt_url
+              receiptUrl: updatedPayment.receipt_url,
+              alreadyConfirmed: !newlyCompleted
             }
           });
         } else if (intent.status === 'processing') {
@@ -802,7 +947,10 @@ class PaymentController {
 
         case 'payment_intent.canceled':
           console.log('🚫 Payment canceled');
-          await Payment.updateByStripeIntent(event.data.object.id, 'cancelled');
+          const canceledPayment = await Payment.getByStripeIntent(event.data.object.id);
+          if (canceledPayment) {
+            await Payment.cancelIfPending(canceledPayment.id);
+          }
           break;
 
         case 'charge.dispute.created':

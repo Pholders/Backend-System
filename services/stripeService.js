@@ -1,6 +1,7 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
+const notificationService = require('./notificationService');
 
 /**
  * Stripe Service
@@ -84,29 +85,24 @@ class StripeService {
    */
   static async handlePaymentIntentWebhook(paymentIntentData) {
     try {
-      const { id: paymentIntentId, status, metadata, charges } = paymentIntentData;
-      const { appointmentId, patientId } = metadata;
+      const { id: paymentIntentId, status, metadata = {} } = paymentIntentData;
 
-      if (!appointmentId || !patientId) {
-        console.error('❌ Missing metadata in webhook');
-        return { success: false, message: 'Missing metadata' };
+      const payment = await Payment.getByStripeIntent(paymentIntentId)
+        || (metadata.paymentId ? await Payment.getById(metadata.paymentId) : null);
+
+      if (!payment) {
+        console.error(`❌ No payment found for PaymentIntent ${paymentIntentId}`);
+        return { success: false, message: 'Payment not found' };
       }
 
-      // Get transaction ID from charges
-      const transactionId = charges?.data?.[0]?.id || null;
-
       if (status === 'succeeded') {
-        // Payment successful - update payment record
-        const updateResult = await Payment.updateByStripeIntent(
-          paymentIntentId,
-          'completed',
-          transactionId
-        );
+        // The event object only carries the charge ID; fetch it for the receipt URL
+        const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+          expand: ['latest_charge']
+        });
+        await this.completeFromIntent(payment, intent);
 
-        // Update appointment status to 'confirmed'
-        await Appointment.updateStatus(appointmentId, 'confirmed');
-
-        console.log(`✅ Payment succeeded for appointment ${appointmentId}`);
+        console.log(`✅ Payment succeeded for appointment ${payment.appointment_id}`);
 
         return {
           success: true,
@@ -128,9 +124,9 @@ class StripeService {
           message: 'Payment is being processed'
         };
       } else if (status === 'requires_payment_method') {
-        // Payment failed
-        await Payment.updateByStripeIntent(paymentIntentId, 'failed', transactionId);
-        console.log(`❌ Payment failed for ${paymentIntentId}`);
+        // A failed attempt leaves the PaymentIntent reusable, so the payment stays
+        // pending and the patient can try another card from the same booking.
+        console.log(`❌ Payment attempt failed for ${paymentIntentId}`);
 
         return {
           success: false,
@@ -148,6 +144,81 @@ class StripeService {
       console.error('❌ Error handling payment webhook:', error);
       throw error;
     }
+  }
+
+  /**
+   * Record a succeeded PaymentIntent: mark the payment completed, move the
+   * appointment from pending_payment to scheduled and notify the patient.
+   * Safe to call more than once (confirm retries, webhook, resumed initialize);
+   * only the first call schedules and notifies.
+   * @returns {{ payment: object, newlyCompleted: boolean }}
+   */
+  static async completeFromIntent(payment, intent) {
+    const charge = intent.latest_charge;
+    const completed = await Payment.markStripeCompleted(payment.id, {
+      stripePaymentIntentId: intent.id,
+      chargeId: typeof charge === 'string' ? charge : charge?.id || null,
+      receiptUrl: typeof charge === 'string' ? null : charge?.receipt_url || null
+    });
+
+    if (!completed) {
+      return { payment: await Payment.getById(payment.id), newlyCompleted: false };
+    }
+
+    await Appointment.confirmPaymentAndSchedule(payment.appointment_id);
+
+    // Notify patient of confirmed payment — fire-and-forget
+    notificationService.sendToPatient({
+      patientId: payment.patient_id,
+      type: 'appointment',
+      title: 'Payment Confirmed — Appointment Scheduled',
+      body: `Your payment of R${payment.amount} has been confirmed. Your appointment is now scheduled.`,
+      data: { appointmentId: payment.appointment_id, paymentId: payment.id }
+    }).catch(err => console.error('Notification error (non-blocking):', err.message));
+
+    return { payment: completed, newlyCompleted: true };
+  }
+
+  /**
+   * Retire a pending payment so a new one can take its place.
+   * A card payment that already went through is completed instead, and one
+   * still processing is left alone because Stripe won't cancel it.
+   * @returns {'cancelled'|'completed'|'processing'}
+   */
+  static async cancelPendingPayment(payment) {
+    const intentId = Payment.stripeIntentIdOf(payment);
+
+    if (payment.payment_method === 'stripe' && intentId) {
+      let intent = null;
+      try {
+        intent = await stripe.paymentIntents.retrieve(intentId, { expand: ['latest_charge'] });
+      } catch (error) {
+        if (error.code !== 'resource_missing') throw error;
+      }
+
+      if (intent?.status === 'succeeded') {
+        await this.completeFromIntent(payment, intent);
+        return 'completed';
+      }
+      if (intent?.status === 'processing') {
+        return 'processing';
+      }
+      if (intent && intent.status !== 'canceled') {
+        await stripe.paymentIntents.cancel(intentId);
+      }
+    }
+
+    await Payment.cancelIfPending(payment.id);
+    return 'cancelled';
+  }
+
+  /**
+   * Retire the pending payment on an appointment, if it has one.
+   * @returns {'none'|'cancelled'|'completed'|'processing'}
+   */
+  static async cancelPendingPaymentForAppointment(appointmentId) {
+    const payment = await Payment.findPendingByAppointment(appointmentId);
+    return payment ? this.cancelPendingPayment(payment) : 'none';
   }
 
   /**

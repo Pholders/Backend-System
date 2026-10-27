@@ -5,6 +5,7 @@
  */
 
 const Appointment = require('../models/Appointment');
+const StripeService = require('./stripeService');
 
 class AppointmentCleanupService {
   static intervalId = null;
@@ -57,7 +58,7 @@ class AppointmentCleanupService {
       const timestamp = new Date().toLocaleTimeString();
       console.log(`[${timestamp}] 🧹 Running appointment cleanup...`);
 
-      const cancelledCount = await Appointment.autoCancelExpiredPendingPayments(timeoutMinutes);
+      const cancelledCount = await this.cancelExpiredPendingPayments(timeoutMinutes);
 
       if (cancelledCount > 0) {
         console.log(`[${timestamp}] ✅ Auto-cancelled ${cancelledCount} expired pending payment appointments`);
@@ -69,6 +70,36 @@ class AppointmentCleanupService {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Cancel appointments left in pending_payment past the timeout, together with
+   * their pending payment and its Stripe PaymentIntent, so a later
+   * /payments/initialize can't resume a payment for a cancelled booking.
+   * Returns count of cancelled appointments
+   */
+  static async cancelExpiredPendingPayments(timeoutMinutes = 30) {
+    const expired = await Appointment.findExpiredPendingPayments(timeoutMinutes);
+    let cancelledCount = 0;
+
+    for (const { id } of expired) {
+      try {
+        const outcome = await StripeService.cancelPendingPaymentForAppointment(id);
+
+        // Paid at the last moment (now scheduled), or Stripe is still settling it:
+        // either way the booking must stay. A processing one is retried next run.
+        if (outcome === 'completed' || outcome === 'processing') continue;
+
+        if (await Appointment.cancelIfPendingPayment(id)) {
+          cancelledCount++;
+        }
+      } catch (error) {
+        // Leave the appointment alone if we couldn't confirm its payment is dead
+        console.error(`❌ Could not auto-cancel appointment ${id}: ${error.message}`);
+      }
+    }
+
+    return cancelledCount;
   }
 
   /**
