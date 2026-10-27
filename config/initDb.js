@@ -18,6 +18,7 @@ const { runMigration: createSupportTicketsTable } = require('./createSupportTick
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
+const { runMigration: createMedicalHistoryTables } = require('./createMedicalHistoryTables');
 const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
@@ -36,6 +37,7 @@ const createPHRTables = require('./createPHRTables');
 const { addSessionBasedSignatures } = require('./addSessionBasedSignatures');
 const { addPrescriptionPdfSnapshots } = require('./addPrescriptionPdfSnapshots');
 const addPharmacyDispensingSupport = require('./addPharmacyDispensingSupport');
+const { linkMedicationsToPrescriptions } = require('./linkMedicationsToPrescriptions');
 const { migrate: addUserTypeToOTP } = require('./addUserTypeToOTP');
 const addAppointmentReminders = require('./addAppointmentReminders');
 const addPharmacyPartnerships = require('./addPharmacyPartnerships');
@@ -90,6 +92,7 @@ const initializeDatabase = async () => {
     await createChecklistTables();
     await createStoredFilesTable();
     await createPatientMedicationTables();
+    await createMedicalHistoryTables();
     await fixStoredImageUrls();
 
     // Notifications stack
@@ -128,6 +131,9 @@ const initializeDatabase = async () => {
 
     // Add pharmacy dispensing support
     await addPharmacyDispensingSupport();
+
+    // Dispensing a prescription creates active medications linked to its items
+    await linkMedicationsToPrescriptions();
 
     // Orders v1 (orders table, status history, link claims to orders, add 'order' notification type)
     await createOrdersTables();

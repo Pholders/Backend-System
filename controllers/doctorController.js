@@ -13,8 +13,114 @@ const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
+const { containerMemoryLimitBytes } = require('../utils/containerMemory');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
+
+// One removal peaks at roughly 1GB of resident memory, so anything under
+// this has no business attempting it. The margin is for the rest of the
+// server, which still has to answer every other request while it runs.
+const BACKGROUND_REMOVAL_MIN_BYTES = 2 * 1024 * 1024 * 1024;
+
+let memoryVerdictLogged = false;
+
+/**
+ * Whether to cut the background out here, on the server.
+ *
+ * Off unless switched on with DOCTOR_BG_REMOVAL=server, and refused anyway
+ * on a machine too small to survive it. Both halves matter: the flag was
+ * switched on once in good faith, and every doctor photo uploaded after
+ * that killed the API — an empty 502 for them and about a minute of
+ * downtime for the patient and pharmacy apps too, because an out-of-memory
+ * kill is not an exception and no try/catch can see it coming.
+ *
+ * A setting that can take the platform down should not be taken at its
+ * word, so the machine is asked as well, and the reason goes in the boot
+ * log rather than appearing later as a mystery.
+ *
+ * None of this costs the feature anything: the doctor web app cuts the
+ * background out in the browser and uploads a transparent PNG.
+ */
+function backgroundRemovalEnabled() {
+  if (String(process.env.DOCTOR_BG_REMOVAL || '').toLowerCase() !== 'server') {
+    return false;
+  }
+
+  const limit = containerMemoryLimitBytes();
+  const enough = limit === null || limit >= BACKGROUND_REMOVAL_MIN_BYTES;
+
+  if (!memoryVerdictLogged) {
+    memoryVerdictLogged = true;
+    const gb = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(1);
+    if (enough) {
+      console.log('🖼️  Doctor profile background removal: ON, on the server '
+        + `(${limit === null ? 'memory limit unknown' : gb(limit) + 'GB available'})`);
+    } else {
+      console.warn('⚠️  DOCTOR_BG_REMOVAL=server is set, but this machine has '
+        + `only ${gb(limit)}GB and one removal needs about 1GB. Ignoring it: `
+        + 'enabling it here kills the whole API on every photo upload. The '
+        + 'doctor web app does this in the browser instead, so nothing is '
+        + 'lost. Remove the variable, or move to a 2GB instance.');
+    }
+  }
+
+  return enough;
+}
+
+/**
+ * Loaded only when the feature is switched on, because requiring it pulls
+ * the ONNX runtime and its model into the process at startup — a cost every
+ * boot pays for something that is normally never called.
+ */
+function loadStripBackground() {
+  // eslint-disable-next-line global-require
+  return require('../utils/backgroundRemoval').stripBackground;
+}
+
+// Doctor.update writes every key it is given straight into the SQL as a
+// column name, so profile updates may only reach these columns.
+const EDITABLE_PROFILE_COLUMNS = new Set([
+  'first_name', 'last_name', 'phone', 'specialization', 'experience',
+  'clinic_name', 'city', 'province', 'suburb', 'qualification', 'address',
+  'clinic_address', 'zip_code', 'consultation_fee', 'currency', 'bio',
+  'details', 'availability', 'opens_at', 'closes_at', 'latitude', 'longitude'
+]);
+
+// Fields a client may echo back from GET /doctor/profile but cannot change
+// here. They are dropped rather than rejected.
+const READ_ONLY_PROFILE_COLUMNS = new Set([
+  'id', 'email', 'password_hash', 'hpcsa_number', 'profile_image', 'status',
+  'email_verified', 'email_verified_at', 'rating', 'review_count', 'full_name',
+  'created_at', 'updated_at'
+]);
+
+// Names from the published API docs that don't follow from camelCase alone.
+const PROFILE_FIELD_ALIASES = {
+  years_of_experience: 'experience',
+  hospital_affiliation: 'clinic_name'
+};
+
+/**
+ * Maps a profile update body onto doctors columns, accepting snake_case or
+ * camelCase keys. Returns the unrecognised keys so the caller can refuse them.
+ */
+function toProfileColumns(body) {
+  const columns = {};
+  const unknown = [];
+
+  for (const [key, value] of Object.entries(body)) {
+    const snake = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    const column = PROFILE_FIELD_ALIASES[snake] || snake;
+
+    if (EDITABLE_PROFILE_COLUMNS.has(column)) {
+      columns[column] = value;
+    } else if (!READ_ONLY_PROFILE_COLUMNS.has(column)) {
+      unknown.push(key);
+    }
+  }
+
+  return { columns, unknown };
+}
 
 function buildProfileImageUrl(req, filename) {
   return `${req.protocol}://${req.get('host')}/api/users/doctor/profile-images/${filename}`;
@@ -619,9 +725,29 @@ class DoctorController {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
 
+      // A photo cut out in the browser already arrives as a transparent PNG
+      // and is stored as it is. Cutting out here is off by default — see
+      // backgroundRemovalEnabled above for why.
+      let stored = { buffer: req.file.buffer, mimetype: image.mimeType };
+      let extension = image.extension;
+
+      if (backgroundRemovalEnabled()) {
+        try {
+          stored = {
+            buffer: await loadStripBackground()(req.file.buffer, image.mimeType),
+            mimetype: 'image/png'
+          };
+          extension = '.png';
+        } catch (backgroundError) {
+          // Keep the photo rather than lose the upload over its background.
+          console.error('Doctor profile background removal failed, storing the '
+            + 'photo as uploaded:', backgroundError);
+        }
+      }
+
       const suffix = crypto.randomBytes(8).toString('hex');
-      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${image.extension}`;
-      uploadedKey = await storage.put(req.file, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
+      const filename = `doctor_${doctorId}_${Date.now()}_${suffix}${extension}`;
+      uploadedKey = await storage.put(stored, DOCTOR_PROFILE_IMAGE_FOLDER, filename);
 
       const profileImageUrl = buildProfileImageUrl(req, filename);
       const updatedDoctor = await Doctor.update(doctorId, { profile_image: profileImageUrl });
@@ -676,19 +802,17 @@ class DoctorController {
   static async updateProfile(req, res) {
     try {
       const doctorId = req.user.id;
-      const updateData = req.body;
-
-      delete updateData.id;
-      delete updateData.password_hash;
-      delete updateData.email;
-      delete updateData.hpcsa_number;
-      delete updateData.created_at;
-      delete updateData.profile_image;
-
       // Accepted schemes live in their own table, so they must not reach
       // Doctor.update — it maps every remaining key to a doctors column.
-      const medicalAids = updateData.medicalAids;
-      delete updateData.medicalAids;
+      const { medicalAids, ...body } = req.body || {};
+
+      const { columns: updateData, unknown } = toProfileColumns(body);
+      if (unknown.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `These profile fields cannot be updated: ${unknown.join(', ')}`
+        });
+      }
 
       if (medicalAids !== undefined && !Array.isArray(medicalAids)) {
         return res.status(400).json({

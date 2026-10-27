@@ -1,12 +1,21 @@
 const crypto = require('crypto');
+const QRCode = require('qrcode');
 
 /**
  * QR Code Service
  * Generates secure QR codes for prescription sharing and access
- * For actual QR code generation, integrate with 'qrcode' npm package
  */
 
 class QRCodeService {
+  /**
+   * Render a string as a QR code PNG
+   * @param {string} text - Content to encode
+   * @returns {Promise<string>} - data:image/png;base64,... URI
+   */
+  static toDataURL(text) {
+    return QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin: 2, width: 512 });
+  }
+
   /**
    * Generate QR code data for prescription
    * @param {Object} prescriptionData - { id, number, patientEmail, doctorName }

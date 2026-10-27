@@ -93,9 +93,9 @@ const numericId = (param) => (req, res, next) => {
 
 router.get('/:prescriptionId', authMiddleware, requireRole('patient'), numericId('prescriptionId'), PrescriptionController.viewPrescription);
 
-router.get('/:prescriptionId/download', authMiddleware, requireRole('patient'), PrescriptionController.downloadPrescription);
+router.get('/:prescriptionId/download', authMiddleware, requireRole('patient', 'doctor'), PrescriptionController.downloadPrescription);
 
-router.get('/:prescriptionId/print', authMiddleware, requireRole('patient'), PrescriptionController.printPrescription);
+router.get('/:prescriptionId/print', authMiddleware, requireRole('patient', 'doctor'), PrescriptionController.printPrescription);
 
 router.get('/:prescriptionId/qrcode', authMiddleware, requireRole('patient'), PrescriptionController.generateQRCode);
 

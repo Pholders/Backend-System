@@ -1,5 +1,6 @@
- const { query } = require('../config/db');
+ const { query, pool } = require('../config/db');
 const crypto = require('crypto');
+const PrescriptionMedicationService = require('../services/prescriptionMedicationService');
 
 /**
  * Prescription Model
@@ -989,10 +990,14 @@ class Prescription {
       RETURNING id;
     `;
 
+    // Dispensing, its audit row and the patient's new medications commit together
+    const client = await pool.connect();
     try {
-      const result = await query(dispenseQuery, [prescriptionId, pharmacyId, pharmacyName, notes]);
+      await client.query('BEGIN');
+      const result = await client.query(dispenseQuery, [prescriptionId, pharmacyId, pharmacyName, notes]);
 
       if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
         return {
           success: false,
           message: 'Prescription not found, already dispensed, or not claimed'
@@ -1000,15 +1005,22 @@ class Prescription {
       }
 
       // Log the dispensing event
-      await query(auditQuery, [prescriptionId, pharmacyId, pharmacyName, staffName, notes]);
+      await client.query(auditQuery, [prescriptionId, pharmacyId, pharmacyName, staffName, notes]);
 
+      // The patient now has the medicine, so its medications become active
+      const medications = await PrescriptionMedicationService.createForDispensedPrescription(client, prescriptionId);
+
+      await client.query('COMMIT');
       return {
         success: true,
-        data: result.rows[0]
+        data: { ...result.rows[0], medications }
       };
     } catch (error) {
+      await client.query('ROLLBACK');
       console.error('❌ Error dispensing prescription:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 

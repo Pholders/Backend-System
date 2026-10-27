@@ -722,7 +722,14 @@ class PharmacyController {
           patientId: result.data.patient_id,
           dispensedAt: result.data.dispensed_at,
           dispensedBy: staffName,
-          pharmacy: pharmacyName
+          pharmacy: pharmacyName,
+          medicationsActivated: result.data.medications.map(m => ({
+            id: m.id,
+            name: m.name,
+            schedule: m.schedule,
+            startDate: m.start_date,
+            endDate: m.end_date
+          }))
         }
       });
     } catch (error) {

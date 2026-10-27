@@ -210,18 +210,27 @@ class FileUploadService {
         RETURNING *
       `;
 
-      const result = await query(insertQuery, [
-        patientId,
-        file.originalname,
-        file.mimetype,
-        file.size,
-        storageKey,
-        fileHash,
-        category,
-        description,
-        JSON.stringify(tags),
-        patientId
-      ]);
+      // tags is a text[] column; pg converts a JS array itself, whereas a
+      // JSON string is rejected as a malformed array literal.
+      let result;
+      try {
+        result = await query(insertQuery, [
+          patientId,
+          file.originalname,
+          file.mimetype,
+          file.size,
+          storageKey,
+          fileHash,
+          category,
+          description,
+          Array.isArray(tags) ? tags.map(String) : [],
+          patientId
+        ]);
+      } catch (insertError) {
+        // Without a row nothing can reach the stored bytes, so drop them.
+        await storage.remove(storageKey).catch(() => {});
+        throw insertError;
+      }
 
       return {
         success: true,
