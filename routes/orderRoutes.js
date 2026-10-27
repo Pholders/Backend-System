@@ -14,6 +14,13 @@ const OrderController = require('../controllers/orderController');
  * captured by `/:id`.
  */
 
+// -------- Meta (available to any authenticated role) --------
+router.get(
+  '/meta/statuses',
+  authMiddleware,
+  OrderController.getStatuses
+);
+
 // -------- Pharmacy --------
 router.get(
   '/pharmacy/queue',
@@ -48,6 +55,28 @@ router.post(
   authMiddleware,
   requireRole('pharmacy'),
   OrderController.pharmacyRecordClaim
+);
+
+// -------- Dispensing (pharmacy) --------
+router.get(
+  '/:id/dispense-suggestions',
+  authMiddleware,
+  requireRole('pharmacy'),
+  OrderController.dispenseSuggestions
+);
+
+router.post(
+  '/:id/dispense-items',
+  authMiddleware,
+  requireRole('pharmacy'),
+  OrderController.dispenseItems
+);
+
+router.get(
+  '/:id/dispensed',
+  authMiddleware,
+  requireRole('pharmacy'),
+  OrderController.getDispensed
 );
 
 // -------- Patient --------

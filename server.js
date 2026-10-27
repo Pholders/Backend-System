@@ -30,6 +30,7 @@ const medicationRoutes = require('./routes/medicationRoutes');
 const medicalHistoryRoutes = require('./routes/medicalHistoryRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const legalRoutes = require('./routes/legalRoutes');
 const supportRoutes = require('./routes/supportRoutes');
@@ -168,6 +169,7 @@ app.use('/api/medications', medicationRoutes);
 app.use('/api/medical-history', medicalHistoryRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // These three were written but never mounted, so every route in them 404'd.
 // The prefixes are the ones their own controllers document. Most visibly this
@@ -279,6 +281,7 @@ async function startServer() {
       console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
       console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
       console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
+      console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
       console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
 
       // Start scheduled notification triggers (medication + appointment).

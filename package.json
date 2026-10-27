@@ -31,6 +31,7 @@
     "migrate:qr-one-time-use": "node config/addQRCodeOneTimeUse.js",
     "migrate:prescription-claims": "node config/addPrescriptionClaimTracking.js",
     "migrate:orders": "node config/createOrdersTables.js",
+    "migrate:inventory": "node config/createInventoryTable.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
