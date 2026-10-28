@@ -5,6 +5,7 @@
 
 const PHR = require('../models/PHR');
 const PHRAccess = require('../models/PHRAccess');
+const { validateVitals, computeBmi } = require('../services/vitalsService');
 
 /**
  * @route GET /api/phr/complete
@@ -290,9 +291,9 @@ exports.getHealthHistory = async (req, res) => {
 exports.getHealthVitals = async (req, res) => {
   try {
     const patientId = req.user.id;
-    const { limit = 30 } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 200);
 
-    const vitals = await PHR.getRecentHealthVitals(patientId, parseInt(limit));
+    const vitals = await PHR.getRecentHealthVitals(patientId, limit);
 
     res.json({
       success: true,
@@ -315,26 +316,22 @@ exports.getHealthVitals = async (req, res) => {
 exports.recordHealthVital = async (req, res) => {
   try {
     const patientId = req.user.id;
-    const vitals = req.body;
+    const { errors, values } = validateVitals(req.body);
 
-    // Validate required fields for at least one vital
-    const hasAtLeastOneVital = [
-      vitals.systolic_bp,
-      vitals.heart_rate,
-      vitals.weight_kg,
-      vitals.blood_glucose,
-      vitals.oxygen_saturation,
-      vitals.temperature_c,
-    ].some((v) => v !== undefined);
-
-    if (!hasAtLeastOneVital) {
+    if (errors.length) {
       return res.status(400).json({
         success: false,
-        message: 'At least one health vital measurement is required',
+        message: errors[0],
+        errors,
       });
     }
 
-    const recorded = await PHR.recordHealthVital(patientId, vitals);
+    if (values.weight_kg != null) {
+      const height = values.height_cm ?? await PHR.getLatestHeight(patientId);
+      values.bmi = computeBmi(values.weight_kg, height);
+    }
+
+    const recorded = await PHR.recordHealthVital(patientId, values);
 
     res.status(201).json({
       success: true,

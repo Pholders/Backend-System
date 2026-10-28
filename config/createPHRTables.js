@@ -55,6 +55,7 @@ async function createPHRTables() {
       `);
       console.log('✅ Created health_vitals table');
     }
+    await pool.query(`ALTER TABLE health_vitals ADD COLUMN IF NOT EXISTS height_cm DECIMAL(5, 1)`);
 
     // 2. PHR Documents Table
     const phrDocumentsExists = await pool.query(`

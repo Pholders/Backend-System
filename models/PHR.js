@@ -297,6 +297,7 @@ class PHR {
           blood_glucose,
           oxygen_saturation,
           temperature_c,
+          height_cm,
           bmi,
           notes
         FROM health_vitals
@@ -370,6 +371,19 @@ class PHR {
   }
 
   /**
+   * The height on the patient's most recent reading that has one, in cm.
+   */
+  static async getLatestHeight(patientId) {
+    const result = await query(
+      `SELECT height_cm FROM health_vitals
+       WHERE patient_id = $1 AND height_cm IS NOT NULL
+       ORDER BY measured_at DESC LIMIT 1`,
+      [patientId]
+    );
+    return result.rows[0] ? Number(result.rows[0].height_cm) : null;
+  }
+
+  /**
    * Record health vital measurement
    */
   static async recordHealthVital(patientId, vitals) {
@@ -382,15 +396,17 @@ class PHR {
         blood_glucose,
         oxygen_saturation,
         temperature_c,
+        height_cm,
         bmi,
         notes,
+        measured_at,
       } = vitals;
 
       const result = await query(
         `INSERT INTO health_vitals (
-          patient_id, systolic_bp, diastolic_bp, heart_rate, weight_kg, 
-          blood_glucose, oxygen_saturation, temperature_c, bmi, notes, measured_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+          patient_id, systolic_bp, diastolic_bp, heart_rate, weight_kg,
+          blood_glucose, oxygen_saturation, temperature_c, height_cm, bmi, notes, measured_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, CURRENT_TIMESTAMP))
         RETURNING *`,
         [
           patientId,
@@ -401,8 +417,10 @@ class PHR {
           blood_glucose,
           oxygen_saturation,
           temperature_c,
+          height_cm,
           bmi,
           notes,
+          measured_at,
         ]
       );
 
@@ -469,6 +487,7 @@ class PHR {
           blood_glucose,
           oxygen_saturation,
           temperature_c,
+          height_cm,
           bmi,
           notes
         FROM health_vitals
