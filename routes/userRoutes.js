@@ -1907,6 +1907,11 @@ router.get('/reminders/upcoming', authMiddleware, requireRole('patient'), Appoin
 // Get notification history for appointment
 router.get('/appointments/:appointmentId/notification-history', authMiddleware, requireRole('patient'), AppointmentController.getNotificationHistory);
 
+// Patient notes on an appointment. Adding and deleting lock once it starts.
+router.get('/appointments/:appointmentId/notes', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentNotes);
+router.post('/appointments/:appointmentId/notes', authMiddleware, requireRole('patient'), AppointmentController.addAppointmentNote);
+router.delete('/appointments/:appointmentId/notes/:noteId', authMiddleware, requireRole('patient'), AppointmentController.deleteAppointmentNote);
+
 /**
  * Doctor Reviews & Ratings Routes
  */

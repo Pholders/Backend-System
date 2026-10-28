@@ -23,6 +23,7 @@ const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
+const AppointmentNote = require('../models/AppointmentNote');
 const PharmacyGroup = require('../models/PharmacyGroup');
 const PharmacyAgreement = require('../models/PharmacyAgreement');
 const AgreementCompliance = require('../models/AgreementCompliance');
@@ -145,6 +146,9 @@ const initializeDatabase = async () => {
     // Create appointment reminders tables
     await AppointmentReminder.createTable();
     await AppointmentReminder.createNotificationHistoryTable();
+
+    // Notes a patient adds to an appointment after booking
+    await AppointmentNote.createTable();
 
     // Run appointment reminders migration
     await addAppointmentReminders();
