@@ -3,6 +3,8 @@ const { query } = require('../config/db');
 const DEFAULT_OPEN_TIME = '09:00';
 const DEFAULT_CLOSE_TIME = '17:00';
 const SLOT_INTERVAL_MINUTES = 30;
+// A patient can't move an appointment once it is this close to starting
+const RESCHEDULE_CUTOFF_HOURS = 24;
 const PERIOD_RANGES = {
   morning: { start: '05:00', end: '11:59' },
   afternoon: { start: '12:00', end: '15:59' },
@@ -304,18 +306,53 @@ class Appointment {
   }
 
   /**
-   * Reschedule an appointment
+   * Whether an appointment can still be moved, and if not, why.
+   * Returns 'ok', 'status' or 'cutoff'.
+   */
+  static async rescheduleEligibility(appointment_id) {
+    const result = await query(
+      `SELECT
+         status IN ('pending_payment', 'scheduled', 'rescheduled') AS status_ok,
+         (appointment_date + time_slot::time) > LOCALTIMESTAMP + ($2::int * INTERVAL '1 hour') AS before_cutoff
+       FROM appointments
+       WHERE id = $1`,
+      [appointment_id, RESCHEDULE_CUTOFF_HOURS]
+    );
+    const row = result.rows[0];
+    if (!row || !row.status_ok) return 'status';
+    return row.before_cutoff ? 'ok' : 'cutoff';
+  }
+
+  /**
+   * Whether a date and 'HH:MM' slot are still ahead of now.
+   */
+  static async isSlotInFuture(date, time_slot) {
+    const result = await query(
+      `SELECT ($1::date + $2::time) > LOCALTIMESTAMP AS future`,
+      [date, time_slot]
+    );
+    return result.rows[0].future === true;
+  }
+
+  /**
+   * Reschedule an appointment. Returns null when it can no longer be moved;
+   * the eligibility rules are repeated here so the check and the move happen
+   * in one statement. An unpaid booking stays pending_payment so the patient
+   * can still pay for it.
    */
   static async reschedule(appointment_id, new_date, new_time_period, new_time_slot) {
     const result = await query(
-      `UPDATE appointments 
-       SET appointment_date = $2, time_period = $3, time_slot = $4, 
-           status = 'rescheduled', updated_at = CURRENT_TIMESTAMP
+      `UPDATE appointments
+       SET appointment_date = $2, time_period = $3, time_slot = $4,
+           status = CASE WHEN status = 'pending_payment' THEN 'pending_payment' ELSE 'rescheduled' END,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
+         AND status IN ('pending_payment', 'scheduled', 'rescheduled')
+         AND (appointment_date + time_slot::time) > LOCALTIMESTAMP + ($5::int * INTERVAL '1 hour')
        RETURNING *`,
-      [appointment_id, new_date, new_time_period, new_time_slot]
+      [appointment_id, new_date, new_time_period, new_time_slot, RESCHEDULE_CUTOFF_HOURS]
     );
-    return result.rows[0];
+    return result.rows[0] || null;
   }
 
   /**
@@ -564,5 +601,7 @@ class Appointment {
     return result.rows[0] || null;
   }
 }
+
+Appointment.RESCHEDULE_CUTOFF_HOURS = RESCHEDULE_CUTOFF_HOURS;
 
 module.exports = Appointment;

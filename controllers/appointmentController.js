@@ -580,6 +580,16 @@ class AppointmentController {
         });
       }
 
+      const eligibility = await Appointment.rescheduleEligibility(appointment.id);
+      if (eligibility !== 'ok') {
+        return res.status(409).json({
+          success: false,
+          message: eligibility === 'status'
+            ? 'Only upcoming appointments can be rescheduled'
+            : `Appointments can't be rescheduled within ${Appointment.RESCHEDULE_CUTOFF_HOURS} hours of their start time`
+        });
+      }
+
       // Validate new date is in the future
       const selectedDate = new Date(newDate);
       const today = new Date();
@@ -618,6 +628,14 @@ class AppointmentController {
         });
       }
 
+      // The date check above allows today, so a slot earlier today gets through it
+      if (!(await Appointment.isSlotInFuture(newDate, newTimeSlot))) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot reschedule to a time that has already passed'
+        });
+      }
+
       // Check if new slot is available
       const isAvailable = await Appointment.isTimeSlotAvailable(
         appointment.doctor_id,
@@ -640,6 +658,14 @@ class AppointmentController {
         newTimePeriod,
         newTimeSlot
       );
+
+      // Cancelled or crossed the cut-off since the check above
+      if (!rescheduledAppointment) {
+        return res.status(409).json({
+          success: false,
+          message: 'This appointment can no longer be rescheduled. Please refresh and try again.'
+        });
+      }
 
       // Notify patient — fire-and-forget
       notificationService.sendToPatient({
