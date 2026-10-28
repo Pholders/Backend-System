@@ -6,6 +6,9 @@
 const PHR = require('../models/PHR');
 const PHRAccess = require('../models/PHRAccess');
 const { validateVitals, computeBmi } = require('../services/vitalsService');
+const { describeAccess } = require('../services/phrAccessService');
+const Doctor = require('../models/Doctor');
+const notificationService = require('../services/notificationService');
 
 /**
  * @route GET /api/phr/complete
@@ -567,12 +570,35 @@ exports.getPendingRequests = async (req, res) => {
  * @route POST /api/phr/access/requests/:requestId/approve
  * Approve access request
  */
+/**
+ * The patient's own pending request, or an error response already sent.
+ * Without this check any patient could answer any request by its id,
+ * including one asking for someone else's record.
+ */
+async function ownPendingRequest(req, res) {
+  const requestId = Number.parseInt(req.params.requestId, 10);
+  const request = Number.isInteger(requestId) ? await PHRAccess.getRequestById(requestId) : null;
+  if (!request || Number(request.patient_id) !== Number(req.user.id)) {
+    res.status(404).json({ success: false, message: 'Access request not found' });
+    return null;
+  }
+  if (request.status !== 'pending') {
+    res.status(409).json({
+      success: false,
+      message: `This request has already been ${request.status}.`,
+    });
+    return null;
+  }
+  return request;
+}
+
 exports.approveAccessRequest = async (req, res) => {
   try {
-    const requestId = req.params.requestId;
-    const { expires_at } = req.body;
+    const request = await ownPendingRequest(req, res);
+    if (!request) return;
+    const { expires_at } = req.body || {};
 
-    const approved = await PHRAccess.approveAccessRequest(requestId, expires_at);
+    const approved = await PHRAccess.approveAccessRequest(request.id, expires_at);
 
     res.json({
       success: true,
@@ -595,10 +621,11 @@ exports.approveAccessRequest = async (req, res) => {
  */
 exports.denyAccessRequest = async (req, res) => {
   try {
-    const requestId = req.params.requestId;
-    const { reason } = req.body;
+    const request = await ownPendingRequest(req, res);
+    if (!request) return;
+    const { reason } = req.body || {};
 
-    const denied = await PHRAccess.denyAccessRequest(requestId, reason);
+    const denied = await PHRAccess.denyAccessRequest(request.id, reason);
 
     res.json({
       success: true,
@@ -651,21 +678,84 @@ exports.getAccessLogs = async (req, res) => {
 exports.requestAccess = async (req, res) => {
   try {
     const doctorId = req.user.id;
-    const patientId = req.params.patientId;
-    const { reason } = req.body;
+    const patientId = Number.parseInt(req.params.patientId, 10);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : null;
 
-    const request = await PHRAccess.requestAccess(patientId, doctorId, reason);
+    if (!Number.isInteger(patientId)) {
+      return res.status(400).json({ success: false, message: 'Invalid patient id' });
+    }
+    if (!(await PHRAccess.hasAppointmentWith(patientId, doctorId))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only ask to see the record of a patient who has booked with you.',
+      });
+    }
+
+    const grant = await PHRAccess.getActiveGrant(patientId, doctorId);
+    const latest = await PHRAccess.getLatestRequest(patientId, doctorId);
+    const current = describeAccess(grant, latest);
+    if (current.status === 'granted' || current.status === 'pending') {
+      return res.json({
+        success: true,
+        message: current.status === 'granted'
+          ? 'You already have access to this record'
+          : 'Your request is already waiting for the patient',
+        data: current,
+      });
+    }
+
+    const request = await PHRAccess.requestAccess(patientId, doctorId, reason || null);
+
+    const doctor = await Doctor.findById(doctorId).catch(() => null);
+    const name = doctor ? `Dr. ${doctor.first_name} ${doctor.last_name}` : 'A doctor';
+    notificationService.sendToPatient({
+      patientId,
+      type: 'message',
+      title: 'A doctor asked to see your health record',
+      body: `${name} would like to see your health record, including your vitals. Open Medical Files to allow or decline.`,
+      data: { kind: 'phr_access_request', requestId: request.id },
+    }).catch((err) => console.error('Notification error (non-blocking):', err.message));
 
     res.status(201).json({
       success: true,
       message: 'Access request sent to patient',
-      data: request,
+      data: describeAccess(null, request),
     });
   } catch (error) {
     console.error('Error requesting access:', error);
     res.status(500).json({
       success: false,
       message: 'Error requesting access',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route GET /api/phr/:patientId/access-status
+ * Where the doctor stands with this patient's record: granted, pending,
+ * denied, revoked or none. See services/phrAccessService.js.
+ */
+exports.getAccessStatus = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+    const patientId = Number.parseInt(req.params.patientId, 10);
+    if (!Number.isInteger(patientId)) {
+      return res.status(400).json({ success: false, message: 'Invalid patient id' });
+    }
+
+    const grant = await PHRAccess.getActiveGrant(patientId, doctorId);
+    const latest = grant ? null : await PHRAccess.getLatestRequest(patientId, doctorId);
+    const status = describeAccess(grant, latest);
+    status.canRequest = status.status !== 'granted' && status.status !== 'pending'
+      && await PHRAccess.hasAppointmentWith(patientId, doctorId);
+
+    res.json({ success: true, data: status });
+  } catch (error) {
+    console.error('Error fetching access status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching access status',
       error: error.message,
     });
   }

@@ -2062,6 +2062,7 @@ router.get('/phr/access-logs', authMiddleware, requireRole('patient'), PHRContro
 
 // DOCTOR ENDPOINTS - Request and access patient PHR
 router.post('/phr/:patientId/access-request', authMiddleware, requireRole('doctor'), PHRController.requestAccess);
+router.get('/phr/:patientId/access-status', authMiddleware, requireRole('doctor'), PHRController.getAccessStatus);
 router.get('/phr/:patientId', authMiddleware, requireRole('doctor'), PHRController.viewPatientPHR);
 router.get('/phr/:patientId/personal-card', authMiddleware, requireRole('doctor'), PHRController.viewPatientPersonalCard);
 router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.viewPatientVitals);

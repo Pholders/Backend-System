@@ -109,6 +109,53 @@ class PHRAccess {
   }
 
   /**
+   * Whether the doctor has ever had a non-cancelled appointment with the
+   * patient. A doctor may only ask to see the record of their own patients.
+   */
+  static async hasAppointmentWith(patientId, doctorId) {
+    const result = await query(
+      `SELECT 1 FROM appointments
+       WHERE patient_id = $1 AND doctor_id = $2 AND status <> 'cancelled'
+       LIMIT 1`,
+      [patientId, doctorId]
+    );
+    return result.rows.length > 0;
+  }
+
+  static async getRequestById(requestId) {
+    const result = await query(`SELECT * FROM phr_access_requests WHERE id = $1`, [requestId]);
+    return result.rows[0] || null;
+  }
+
+  /**
+   * The doctor's most recent request to this patient, whatever its status.
+   */
+  static async getLatestRequest(patientId, doctorId) {
+    const result = await query(
+      `SELECT * FROM phr_access_requests
+       WHERE patient_id = $1 AND doctor_id = $2
+       ORDER BY requested_at DESC, id DESC
+       LIMIT 1`,
+      [patientId, doctorId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * The doctor's current grant to this patient's record, or null.
+   */
+  static async getActiveGrant(patientId, doctorId) {
+    const result = await query(
+      `SELECT * FROM phr_access
+       WHERE patient_id = $1 AND doctor_id = $2
+       AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`,
+      [patientId, doctorId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * Request access to patient PHR (doctor-initiated)
    */
   static async requestAccess(patientId, doctorId, reason = null) {
