@@ -244,8 +244,6 @@ class UserController {
 
       // Verify password
       const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-      console.log(`[LOGIN DEBUG] Password check - Provided: "${password}" (${password.length} chars), Hash from DB: ${user.password_hash.substring(0, 50)}...`);
-      console.log(`[LOGIN DEBUG] bcrypt.compare result: ${isPasswordValid}`);
       if (!isPasswordValid) {
         await AuditLog.logSecurityEvent(req, user.id, 'patient', email, 'login_failed', 'failed', 'Invalid password');
         return res.status(401).json({
