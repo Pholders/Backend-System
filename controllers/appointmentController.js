@@ -580,6 +580,16 @@ class AppointmentController {
         });
       }
 
+      const eligibility = await Appointment.rescheduleEligibility(appointment.id);
+      if (eligibility !== 'ok') {
+        return res.status(409).json({
+          success: false,
+          message: eligibility === 'status'
+            ? 'Only upcoming appointments can be rescheduled'
+            : `Appointments can't be rescheduled within ${Appointment.RESCHEDULE_CUTOFF_HOURS} hours of their start time`
+        });
+      }
+
       // Validate new date is in the future
       const selectedDate = new Date(newDate);
       const today = new Date();
@@ -618,6 +628,14 @@ class AppointmentController {
         });
       }
 
+      // The date check above allows today, so a slot earlier today gets through it
+      if (!(await Appointment.isSlotInFuture(newDate, newTimeSlot))) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot reschedule to a time that has already passed'
+        });
+      }
+
       // Check if new slot is available
       const isAvailable = await Appointment.isTimeSlotAvailable(
         appointment.doctor_id,
@@ -640,6 +658,14 @@ class AppointmentController {
         newTimePeriod,
         newTimeSlot
       );
+
+      // Cancelled or crossed the cut-off since the check above
+      if (!rescheduledAppointment) {
+        return res.status(409).json({
+          success: false,
+          message: 'This appointment can no longer be rescheduled. Please refresh and try again.'
+        });
+      }
 
       // Notify patient — fire-and-forget
       notificationService.sendToPatient({
@@ -1681,6 +1707,160 @@ class AppointmentController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch notification history',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Shared ownership check for the patient note handlers. Sends the error
+   * response and returns null when the appointment can't be used.
+   */
+  static async findOwnAppointment(req, res) {
+    const appointment = await Appointment.findById(req.params.appointmentId);
+    if (!appointment) {
+      res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+      return null;
+    }
+
+    if (appointment.patient_id !== req.user.id) {
+      res.status(403).json({
+        success: false,
+        message: 'Unauthorized to access notes for this appointment'
+      });
+      return null;
+    }
+
+    return appointment;
+  }
+
+  static formatNote(note) {
+    return {
+      noteId: note.id,
+      appointmentId: note.appointment_id,
+      body: note.body,
+      createdAt: note.created_at
+    };
+  }
+
+  /**
+   * Get the patient's notes on an appointment
+   */
+  static async getAppointmentNotes(req, res) {
+    try {
+      const AppointmentNote = require('../models/AppointmentNote');
+      const appointment = await AppointmentController.findOwnAppointment(req, res);
+      if (!appointment) return;
+
+      const [notes, editable] = await Promise.all([
+        AppointmentNote.listForAppointment(appointment.id),
+        AppointmentNote.notesEditable(appointment.id)
+      ]);
+
+      res.json({
+        success: true,
+        message: 'Notes retrieved successfully',
+        data: {
+          appointmentId: appointment.id,
+          notesLocked: !editable,
+          notes: notes.map(AppointmentController.formatNote)
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error fetching appointment notes:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch notes',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Add a note to an upcoming appointment
+   */
+  static async addAppointmentNote(req, res) {
+    try {
+      const AppointmentNote = require('../models/AppointmentNote');
+      const raw = req.body?.body;
+      if (typeof raw !== 'string' || raw.trim() === '' || raw.trim().length > 2000) {
+        return res.status(400).json({
+          success: false,
+          message: 'body must be a non-empty string of at most 2000 characters'
+        });
+      }
+
+      const appointment = await AppointmentController.findOwnAppointment(req, res);
+      if (!appointment) return;
+
+      const note = await AppointmentNote.create(appointment.id, req.user.id, raw.trim());
+      if (!note) {
+        return res.status(409).json({
+          success: false,
+          message: 'Notes are locked once an appointment has started, finished or been cancelled'
+        });
+      }
+
+      res.status(201).json({
+        success: true,
+        message: 'Note added successfully',
+        data: AppointmentController.formatNote(note)
+      });
+    } catch (error) {
+      console.error('❌ Error adding appointment note:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to add note',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Delete a note from an upcoming appointment. The note is hidden, not
+   * removed, so there is an audit trail if the doctor had already read it.
+   */
+  static async deleteAppointmentNote(req, res) {
+    try {
+      const AppointmentNote = require('../models/AppointmentNote');
+      const appointment = await AppointmentController.findOwnAppointment(req, res);
+      if (!appointment) return;
+
+      const { noteId } = req.params;
+      if (!/^\d+$/.test(noteId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid note ID'
+        });
+      }
+
+      const deleted = await AppointmentNote.softDelete(noteId, appointment.id, req.user.id);
+      if (!deleted) {
+        const exists = await AppointmentNote.exists(noteId, appointment.id, req.user.id);
+        return res.status(exists ? 409 : 404).json({
+          success: false,
+          message: exists
+            ? 'Notes are locked once an appointment has started, finished or been cancelled'
+            : 'Note not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Note deleted successfully',
+        data: {
+          noteId: deleted.id,
+          appointmentId: deleted.appointment_id
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error deleting appointment note:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to delete note',
         error: error.message
       });
     }

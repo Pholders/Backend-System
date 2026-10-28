@@ -17,6 +17,9 @@ router.get('/appointments/day-availability', AppointmentController.getDayAvailab
 router.get('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentDetails);
 router.delete('/appointments/:appointmentId', authMiddleware, requireRole('patient'), AppointmentController.cancelAppointment);
 router.put('/appointments/:appointmentId/reschedule', authMiddleware, requireRole('patient'), AppointmentController.rescheduleAppointment);
+router.get('/appointments/:appointmentId/notes', authMiddleware, requireRole('patient'), AppointmentController.getAppointmentNotes);
+router.post('/appointments/:appointmentId/notes', authMiddleware, requireRole('patient'), AppointmentController.addAppointmentNote);
+router.delete('/appointments/:appointmentId/notes/:noteId', authMiddleware, requireRole('patient'), AppointmentController.deleteAppointmentNote);
 router.post('/appointments/auto-cancel-expired', authMiddleware, requireRole('admin'), AppointmentController.autoCancelExpiredPayments);
 router.post('/appointments/:appointmentId/accept', authMiddleware, requireRole('doctor'), AppointmentController.acceptAppointment);
 router.post('/appointments/:appointmentId/complete', authMiddleware, requireRole('doctor'), AppointmentController.completeAppointment);
