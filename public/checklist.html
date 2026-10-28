@@ -849,6 +849,49 @@
       ]
     },
     {
+      id: "vitals",
+      track: "solo",
+      name: "Health vitals",
+      blurb: "Patients type in their own readings: blood pressure, heart rate, weight, glucose, oxygen and temperature. There is no syncing with watches or machines, and the app never says whether a reading is good or bad — both are out of scope in the requirements. Needs the new APK.",
+      stories: [
+        ["VT1", "Patient", "Log a reading: blood pressure 128 / 84 and weight 81.2", "It saves, and the cards show 128/84 mmHg and 81.2 kg", true, "Patient app → Medical Files → Monitor Health → Log a reading"],
+        ["VT2", "Patient", "Add your height (175) with a weight", "The weight card also shows your BMI. You only need to give your height once", false, "Log a reading → Weight → fill in Height"],
+        ["VT3", "Patient", "Log a reading taken earlier today", "It shows the time you chose, not the time you saved it", false, "Log a reading → Taken → pick a time earlier today"],
+        ["VT4", "Patient", "Try a heart rate of 9999", "Refused, with a message saying the allowed range", true, "Log a reading → Heart rate 9999 → Save"],
+        ["VT5", "Patient", "Fill in only the top blood pressure number", "Refused: it asks for both numbers", false, "Log a reading → top number only → Save"],
+        ["VT6", "Patient", "Open a card after two or more readings", "A history list and a trend line, newest reading first in the list", true, "Monitor Health → tap Blood pressure (or any card with readings)"]
+      ]
+    },
+    {
+      id: "recordaccess",
+      track: "solo",
+      ordered: true,
+      name: "Sharing the health record with a doctor",
+      blurb: "A patient's health record, vitals included, belongs to them. A doctor asks to see it, and the patient decides. Numbered — do them in order, with the doctor website and the patient app side by side. The doctor must have a booking with the patient. Needs the backend deploy and the new APK.",
+      stories: [
+        ["RA1", "Doctor", "Open a patient's profile and look at Vitals", "It says the record is the patient's, with an Ask for access button. No readings are shown", true, "Doctor website → Patients → a patient → Patient profile"],
+        ["RA2", "Doctor", "Ask for access, with a reason", "It says the request is waiting for the patient", true, "Ask for access → type a reason → Send request"],
+        ["RA3", "Patient", "Open Medical Files", "A card names the doctor who asked. Tapping it shows the request and the reason", true, "Patient app → Medical Files → the card under My Health Record"],
+        ["RA4", "Patient", "Allow it", "It asks you to confirm, then the doctor moves to Can see your record", true, "Who can see my record → Allow → Share"],
+        ["RA5", "Doctor", "Refresh Vitals", "The patient's readings appear, exactly as they logged them", true, "Patient profile → refresh icon on Vitals"],
+        ["RA6", "Patient", "Stop sharing", "The doctor is removed from the list", true, "Who can see my record → Stop sharing → confirm"],
+        ["RA7", "Doctor", "Refresh Vitals again", "It says the patient no longer shares, with Ask again. You stay signed in", true, "Patient profile → refresh icon on Vitals"],
+        ["RA8", "Patient", "Decline a new request", "It disappears from the waiting list, and the doctor sees it was declined", false, "Doctor: Ask again. Patient: Who can see my record → Decline"]
+      ]
+    },
+    {
+      id: "booking",
+      track: "solo",
+      name: "Picking a time when booking",
+      blurb: "Prince reported booking hanging after a date was picked. These check the fix. Needs the new APK.",
+      stories: [
+        ["BK1", "Patient", "Tap one date, then quickly tap another", "The times shown always belong to the date that is highlighted", true, "Patient app → a doctor → the date strip"],
+        ["BK2", "Patient", "Pick a time but leave the reason empty", "The button says Enter the reason for your visit, rather than staying grey with no explanation", false, "Choose a time, leave the reason box empty, read the button"],
+        ["BK3", "Patient", "Pick a date with no signal", "After up to 30 seconds it says Could not load the times. Tap to try again — not No available slots", false, "Turn on flight mode, then tap a date"],
+        ["BK4", "Patient", "Book and continue to payment", "It goes through to payment", true, "Pick a date, a time and a reason → Continue to payment"]
+      ]
+    },
+    {
       id: "medaid",
       track: "solo",
       name: "The medical aid card",
