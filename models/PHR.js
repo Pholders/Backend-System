@@ -74,7 +74,7 @@ class PHR {
           (SELECT COUNT(*) FROM patient_allergies WHERE patient_id = $1) as allergy_count,
           (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 AND status = 'signed') as total_prescriptions,
           (SELECT COUNT(*) FROM appointments WHERE patient_id = $1 AND status IN ('scheduled', 'pending_payment')) as upcoming_appointments,
-          (SELECT COUNT(*) FROM patient_medications WHERE patient_id = $1 AND status = 'active') as active_medications`,
+          (SELECT COUNT(*) FROM medications WHERE patient_id = $1 AND status IN ('active', 'critical')) as active_medications`,
         [patientId]
       );
 
@@ -120,27 +120,35 @@ class PHR {
   }
 
   /**
-   * Get current medications from patient profile
+   * Current medications: the active rows in `medications`, which a
+   * dispensed prescription fills (services/prescriptionMedicationService.js)
+   * and the patient app's medication screens read.
+   *
+   * This used to read patient_medications with column names that table does
+   * not have (route, reason, prescribed_by), so every call failed with
+   * "Error viewing patient medications". The response keeps those names so
+   * the apps need no change.
    */
   static async getCurrentMedications(patientId) {
     try {
       const result = await query(
-        `SELECT 
+        `SELECT
           id,
-          medication_name,
+          name AS medication_name,
           dosage,
-          frequency,
-          route,
+          NULL::text AS frequency,
+          type AS route,
           start_date,
           end_date,
-          reason,
+          indication AS reason,
           status,
           prescribed_by,
-          notes
-        FROM patient_medications
-        WHERE patient_id = $1 
-        AND status = 'active'
-        ORDER BY start_date DESC`,
+          notes,
+          prescription_id
+        FROM medications
+        WHERE patient_id = $1
+        AND status IN ('active', 'critical')
+        ORDER BY start_date DESC, created_at DESC`,
         [patientId]
       );
 
