@@ -981,10 +981,19 @@ class AppointmentController {
       }
 
       // Verify appointment is in scheduled status
-      if (appointment.status !== 'scheduled') {
+      // A paid appointment is 'scheduled', or 'rescheduled' once it has been
+      // moved: rescheduling keeps the payment (see Appointment.reschedule).
+      // Accepting only 'scheduled' meant a moved appointment could never be
+      // completed.
+      if (!['scheduled', 'rescheduled'].includes(appointment.status)) {
+        const reason = {
+          pending_payment: 'The patient has not paid for this appointment yet, so it cannot be completed.',
+          completed: 'This appointment is already completed.',
+          cancelled: 'This appointment was cancelled.',
+        }[appointment.status] || `Cannot complete an appointment that is ${appointment.status}.`;
         return res.status(400).json({
           success: false,
-          message: `Cannot complete appointment with status: ${appointment.status}. Appointment must be scheduled.`
+          message: reason
         });
       }
 
@@ -1040,13 +1049,16 @@ class AppointmentController {
       // has not accepted yet. That leaves no way to see the day's confirmed
       // appointments, so `upcoming` and `all` were added alongside it. The
       // default is unchanged so existing callers keep working.
+      // 'rescheduled' is a paid appointment that was moved; it belongs
+      // wherever 'scheduled' does, or a moved appointment drops off the
+      // doctor's diary entirely.
       const scopeFilters = {
-        inbox: `AND a.status IN ('pending_payment', 'scheduled')
+        inbox: `AND a.status IN ('pending_payment', 'scheduled', 'rescheduled')
                 AND a.doctor_accepted = FALSE`,
-        upcoming: `AND a.status = 'scheduled'
+        upcoming: `AND a.status IN ('scheduled', 'rescheduled')
                    AND a.doctor_accepted = TRUE
                    AND a.appointment_date >= CURRENT_DATE`,
-        all: `AND a.status IN ('pending_payment', 'scheduled', 'completed')`
+        all: `AND a.status IN ('pending_payment', 'scheduled', 'rescheduled', 'completed')`
       };
       const scopeFilter = scopeFilters[scope];
       if (!scopeFilter) {
