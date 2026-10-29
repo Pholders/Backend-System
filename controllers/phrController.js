@@ -313,13 +313,14 @@ exports.getHealthVitals = async (req, res) => {
 };
 
 /**
- * Whether a doctor may see and record a patient's vitals.
+ * Whether a doctor may see a patient's health record, vitals included, and
+ * record vitals for them.
  *
- * Vitals are taken by the doctor at a consultation, so booking a doctor is
- * what shares them: any doctor with a non-cancelled appointment qualifies, no
- * access request needed. An explicit PHR grant still counts too.
+ * Agreed at the 28 October meeting: booking a doctor is what shares the
+ * record. Any doctor with a non-cancelled appointment qualifies, with no
+ * access request. An explicit PHR grant still counts too.
  */
-async function doctorMayHandleVitals(patientId, doctorId) {
+async function doctorMaySeeRecord(patientId, doctorId) {
   return (await PHRAccess.hasAppointmentWith(patientId, doctorId))
     || PHRAccess.hasAccess(patientId, doctorId);
 }
@@ -337,7 +338,7 @@ exports.recordPatientVital = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid patient id' });
     }
 
-    if (!(await doctorMayHandleVitals(patientId, doctorId))) {
+    if (!(await doctorMaySeeRecord(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
         message: 'You can record vitals only for patients who have booked with you',
@@ -798,13 +799,10 @@ exports.viewPatientPHR = async (req, res) => {
     const patientId = req.params.patientId;
     const ipAddress = req.ip;
 
-    // Check if doctor has access
-    const hasAccess = await PHRAccess.hasAccess(patientId, doctorId);
-
-    if (!hasAccess) {
+    if (!(await doctorMaySeeRecord(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have access to this patient PHR',
+        message: 'You can see the record only of patients who have booked with you',
       });
     }
 
@@ -837,13 +835,10 @@ exports.viewPatientPersonalCard = async (req, res) => {
     const patientId = req.params.patientId;
     const ipAddress = req.ip;
 
-    // Check if doctor has access
-    const hasAccess = await PHRAccess.hasAccess(patientId, doctorId);
-
-    if (!hasAccess) {
+    if (!(await doctorMaySeeRecord(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have access to this patient PHR',
+        message: 'You can see the record only of patients who have booked with you',
       });
     }
 
@@ -877,7 +872,7 @@ exports.viewPatientVitals = async (req, res) => {
     const { limit = 30 } = req.query;
     const ipAddress = req.ip;
 
-    if (!(await doctorMayHandleVitals(patientId, doctorId))) {
+    if (!(await doctorMaySeeRecord(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
         message: 'You can see vitals only for patients who have booked with you',
@@ -913,13 +908,10 @@ exports.viewPatientMedications = async (req, res) => {
     const patientId = req.params.patientId;
     const ipAddress = req.ip;
 
-    // Check if doctor has access
-    const hasAccess = await PHRAccess.hasAccess(patientId, doctorId);
-
-    if (!hasAccess) {
+    if (!(await doctorMaySeeRecord(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have access to this patient PHR',
+        message: 'You can see the record only of patients who have booked with you',
       });
     }
 
