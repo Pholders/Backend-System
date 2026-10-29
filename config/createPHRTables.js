@@ -56,6 +56,9 @@ async function createPHRTables() {
       console.log('✅ Created health_vitals table');
     }
     await pool.query(`ALTER TABLE health_vitals ADD COLUMN IF NOT EXISTS height_cm DECIMAL(5, 1)`);
+    // Vitals are taken by the doctor at a consultation, not typed in by the
+    // patient. Readings from before that change have no doctor and stay NULL.
+    await pool.query(`ALTER TABLE health_vitals ADD COLUMN IF NOT EXISTS recorded_by_doctor_id INTEGER REFERENCES doctors(id) ON DELETE SET NULL`);
 
     // 2. PHR Documents Table
     const phrDocumentsExists = await pool.query(`

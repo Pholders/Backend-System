@@ -288,21 +288,25 @@ class PHR {
     try {
       const result = await query(
         `SELECT 
-          id,
-          measured_at,
-          systolic_bp,
-          diastolic_bp,
-          heart_rate,
-          weight_kg,
-          blood_glucose,
-          oxygen_saturation,
-          temperature_c,
-          height_cm,
-          bmi,
-          notes
-        FROM health_vitals
-        WHERE patient_id = $1
-        ORDER BY measured_at DESC
+          v.id,
+          v.measured_at,
+          v.systolic_bp,
+          v.diastolic_bp,
+          v.heart_rate,
+          v.weight_kg,
+          v.blood_glucose,
+          v.oxygen_saturation,
+          v.temperature_c,
+          v.height_cm,
+          v.bmi,
+          v.notes,
+          v.recorded_by_doctor_id,
+          CASE WHEN d.id IS NULL THEN NULL
+               ELSE 'Dr ' || d.first_name || ' ' || d.last_name END AS recorded_by_name
+        FROM health_vitals v
+        LEFT JOIN doctors d ON d.id = v.recorded_by_doctor_id
+        WHERE v.patient_id = $1
+        ORDER BY v.measured_at DESC
         LIMIT $2`,
         [patientId, limit]
       );
@@ -400,13 +404,15 @@ class PHR {
         bmi,
         notes,
         measured_at,
+        recorded_by_doctor_id,
       } = vitals;
 
       const result = await query(
         `INSERT INTO health_vitals (
           patient_id, systolic_bp, diastolic_bp, heart_rate, weight_kg,
-          blood_glucose, oxygen_saturation, temperature_c, height_cm, bmi, notes, measured_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, CURRENT_TIMESTAMP))
+          blood_glucose, oxygen_saturation, temperature_c, height_cm, bmi, notes, measured_at,
+          recorded_by_doctor_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, CURRENT_TIMESTAMP), $13)
         RETURNING *`,
         [
           patientId,
@@ -421,6 +427,7 @@ class PHR {
           bmi,
           notes,
           measured_at,
+          recorded_by_doctor_id ?? null,
         ]
       );
 

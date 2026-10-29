@@ -733,7 +733,7 @@
         ["D12", "Doctor", "Upload a second photo, then reload", "The new one shows. The old one is deleted, so its old address no longer opens", false, "Upload another photo, reload, then try the first photo's address"],
         ["D16", "Doctor", "Print a prescription you wrote", "The print dialog opens on the real document — the doctor, the patient, the medicines and the signature. Until now the button did nothing at all", true, "Doctor website → Prescriptions → open a signed one → the printer icon"],
         ["D17", "Doctor", "Download a prescription you wrote", "The same document saves as a PDF", true, "Doctor website → Prescriptions → open a signed one → the share icon"],
-        ["D18", "Doctor", "Open a patient from your list", "Their real name, email, phone, last visit and reason. No vitals, no blood group, no ward, and no visit history — those belong to the patient's own record, which is a later phase. Until now every patient read as a 32-year-old woman in Cardiology on bed #00125", true, "Doctor website → Patients → click any patient"],
+        ["D18", "Doctor", "Open a patient from your list", "Their real name, email, phone, last visit and reason. No blood group, no ward, and no visit history — those belong to the patient's own record, which is a later phase. Vitals have their own tab. Until now every patient read as a 32-year-old woman in Cardiology on bed #00125", true, "Doctor website → Patients → click any patient"],
         ["D19", "Doctor", "Paste a patient address for someone who has never booked with you", "Patient not found. It used to show an invented patient called Maria Wilson whoever you asked for", true, "Put /doctor/patients/99999 in the address bar"],
         ["D20", "Doctor", "Click every item in the left sidebar", "Each one opens something that explains itself. Sick Notes and Billing are not in this phase and now say so — a page that says it is not built yet is not a fault. Nothing should be blank, and nothing should look clickable and do nothing", true, "Doctor website → work down the sidebar: Dashboard, Patients, Prescriptions, Appointments, Sick Notes, Billing, Settings"]
       ]
@@ -852,31 +852,15 @@
       id: "vitals",
       track: "solo",
       name: "Health vitals",
-      blurb: "Patients type in their own readings: blood pressure, heart rate, weight, glucose, oxygen and temperature. There is no syncing with watches or machines, and the app never says whether a reading is good or bad — both are out of scope in the requirements. Needs the new APK.",
+      blurb: "Since the 28 October meeting, the doctor takes vitals at a consultation and the patient only views them. Booking a doctor is what shares them: every doctor the patient has booked sees every reading, with no access request. There is no syncing with watches or machines, and nothing says whether a reading is good or bad, as both are out of scope. Needs the backend deploy, the new doctor website and the new APK.",
       stories: [
-        ["VT1", "Patient", "Log a reading: blood pressure 128 / 84 and weight 81.2", "It saves, and the cards show 128/84 mmHg and 81.2 kg", true, "Patient app → Medical Files → Monitor Health → Log a reading"],
-        ["VT2", "Patient", "Add your height (175) with a weight", "The weight card also shows your BMI. You only need to give your height once", false, "Log a reading → Weight → fill in Height"],
-        ["VT3", "Patient", "Log a reading taken earlier today", "It shows the time you chose, not the time you saved it", false, "Log a reading → Taken → pick a time earlier today"],
-        ["VT4", "Patient", "Try a heart rate of 9999", "Refused, with a message saying the allowed range", true, "Log a reading → Heart rate 9999 → Save"],
-        ["VT5", "Patient", "Fill in only the top blood pressure number", "Refused: it asks for both numbers", false, "Log a reading → top number only → Save"],
-        ["VT6", "Patient", "Open a card after two or more readings", "A history list and a trend line, newest reading first in the list", true, "Monitor Health → tap Blood pressure (or any card with readings)"]
-      ]
-    },
-    {
-      id: "recordaccess",
-      track: "solo",
-      ordered: true,
-      name: "Sharing the health record with a doctor",
-      blurb: "A patient's health record, vitals included, belongs to them. A doctor asks to see it, and the patient decides. Numbered — do them in order, with the doctor website and the patient app side by side. The doctor must have a booking with the patient. Needs the backend deploy and the new APK.",
-      stories: [
-        ["RA1", "Doctor", "Open a patient's profile and look at Vitals", "It says the record is the patient's, with an Ask for access button. No readings are shown", true, "Doctor website → Patients → a patient → Patient profile"],
-        ["RA2", "Doctor", "Ask for access, with a reason", "It says the request is waiting for the patient", true, "Ask for access → type a reason → Send request"],
-        ["RA3", "Patient", "Open Medical Files", "A card names the doctor who asked. Tapping it shows the request and the reason", true, "Patient app → Medical Files → the card under My Health Record"],
-        ["RA4", "Patient", "Allow it", "It asks you to confirm, then the doctor moves to Can see your record", true, "Who can see my record → Allow → Share"],
-        ["RA5", "Doctor", "Refresh Vitals", "The patient's readings appear, exactly as they logged them", true, "Patient profile → refresh icon on Vitals"],
-        ["RA6", "Patient", "Stop sharing", "The doctor is removed from the list", true, "Who can see my record → Stop sharing → confirm"],
-        ["RA7", "Doctor", "Refresh Vitals again", "It says the patient no longer shares, with Ask again. You stay signed in", true, "Patient profile → refresh icon on Vitals"],
-        ["RA8", "Patient", "Decline a new request", "It disappears from the waiting list, and the doctor sees it was declined", false, "Doctor: Ask again. Patient: Who can see my record → Decline"]
+        ["VT1", "Doctor", "Open a patient who booked you and go to the Vitals tab", "A Vitals tab after History, showing their readings or No vitals recorded yet, and a Record vitals button. No Ask for access", true, "Doctor website → Patients → a patient → Vitals"],
+        ["VT2", "Doctor", "Record blood pressure 128 / 84 and weight 81.2", "It saves, the cards show 128/84 mmHg and 81.2 kg, and the reading is marked with your name", true, "Vitals → Record vitals → fill in → Save"],
+        ["VT3", "Doctor", "Record a weight with a height of 175", "A BMI card appears. Height only needs giving once", false, "Record vitals → Weight and Height → Save"],
+        ["VT4", "Doctor", "Try a heart rate of 9999", "Refused before saving, with the allowed range under the field", true, "Record vitals → Heart rate 9999 → Save"],
+        ["VT5", "Doctor", "Fill in only the top blood pressure number", "Refused: it asks for both numbers", false, "Record vitals → Systolic only → Save"],
+        ["VT6", "Patient", "Open Monitor Health", "The doctor's reading is there and names the doctor. There is no Log a reading button", true, "Patient app → Medical Files → Monitor Health → tap a card"],
+        ["VT7", "Doctor", "As a second doctor the same patient booked, open their Vitals", "The first doctor's readings are there, with that doctor's name on them", true, "Patient books a second doctor → that doctor: Patients → the patient → Vitals"]
       ]
     },
     {

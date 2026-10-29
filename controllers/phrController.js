@@ -313,12 +313,37 @@ exports.getHealthVitals = async (req, res) => {
 };
 
 /**
- * @route POST /api/phr/vitals
- * Record health vital measurement
+ * Whether a doctor may see and record a patient's vitals.
+ *
+ * Vitals are taken by the doctor at a consultation, so booking a doctor is
+ * what shares them: any doctor with a non-cancelled appointment qualifies, no
+ * access request needed. An explicit PHR grant still counts too.
  */
-exports.recordHealthVital = async (req, res) => {
+async function doctorMayHandleVitals(patientId, doctorId) {
+  return (await PHRAccess.hasAppointmentWith(patientId, doctorId))
+    || PHRAccess.hasAccess(patientId, doctorId);
+}
+
+/**
+ * @route POST /api/users/phr/:patientId/vitals
+ * A doctor records a reading for a patient who booked them. Patients view
+ * their vitals but no longer record them.
+ */
+exports.recordPatientVital = async (req, res) => {
   try {
-    const patientId = req.user.id;
+    const doctorId = req.user.id;
+    const patientId = Number.parseInt(req.params.patientId, 10);
+    if (!Number.isInteger(patientId)) {
+      return res.status(400).json({ success: false, message: 'Invalid patient id' });
+    }
+
+    if (!(await doctorMayHandleVitals(patientId, doctorId))) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can record vitals only for patients who have booked with you',
+      });
+    }
+
     const { errors, values } = validateVitals(req.body);
 
     if (errors.length) {
@@ -334,7 +359,9 @@ exports.recordHealthVital = async (req, res) => {
       values.bmi = computeBmi(values.weight_kg, height);
     }
 
+    values.recorded_by_doctor_id = doctorId;
     const recorded = await PHR.recordHealthVital(patientId, values);
+    await PHRAccess.logAccess(patientId, doctorId, 'record_vitals', req.ip);
 
     res.status(201).json({
       success: true,
@@ -850,13 +877,10 @@ exports.viewPatientVitals = async (req, res) => {
     const { limit = 30 } = req.query;
     const ipAddress = req.ip;
 
-    // Check if doctor has access
-    const hasAccess = await PHRAccess.hasAccess(patientId, doctorId);
-
-    if (!hasAccess) {
+    if (!(await doctorMayHandleVitals(patientId, doctorId))) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have access to this patient PHR',
+        message: 'You can see vitals only for patients who have booked with you',
       });
     }
 

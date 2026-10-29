@@ -2051,7 +2051,6 @@ router.get('/phr/conditions', authMiddleware, requireRole('patient'), PHRControl
 router.get('/phr/appointments', authMiddleware, requireRole('patient'), PHRController.getUpcomingAppointments);
 router.get('/phr/history', authMiddleware, requireRole('patient'), PHRController.getHealthHistory);
 router.get('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.getHealthVitals);
-router.post('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.recordHealthVital);
 router.get('/phr/vitals/range', authMiddleware, requireRole('patient'), PHRController.getHealthVitalsRange);
 router.get('/phr/documents', authMiddleware, requireRole('patient'), PHRController.getPHRDocuments);
 router.post('/phr/documents', authMiddleware, requireRole('patient'), PHRController.uploadDocument);
@@ -2071,6 +2070,8 @@ router.get('/phr/:patientId/access-status', authMiddleware, requireRole('doctor'
 router.get('/phr/:patientId', authMiddleware, requireRole('doctor'), PHRController.viewPatientPHR);
 router.get('/phr/:patientId/personal-card', authMiddleware, requireRole('doctor'), PHRController.viewPatientPersonalCard);
 router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.viewPatientVitals);
+// Vitals are taken by the doctor; any doctor the patient booked may record them.
+router.post('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.recordPatientVital);
 router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'), PHRController.viewPatientMedications);
 
 /**
