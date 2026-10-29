@@ -72,7 +72,7 @@ class PHR {
         `SELECT 
           (SELECT COUNT(*) FROM patient_medical_conditions WHERE patient_id = $1) as active_conditions,
           (SELECT COUNT(*) FROM patient_allergies WHERE patient_id = $1) as allergy_count,
-          (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 AND status = 'signed') as total_prescriptions,
+          (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1 AND signature_status = 'signed') as total_prescriptions,
           (SELECT COUNT(*) FROM appointments WHERE patient_id = $1 AND status IN ('scheduled', 'pending_payment')) as upcoming_appointments,
           (SELECT COUNT(*) FROM medications WHERE patient_id = $1 AND status IN ('active', 'critical')) as active_medications`,
         [patientId]
