@@ -1071,7 +1071,8 @@ class AppointmentController {
       const query_string = `
         SELECT a.*, 
                u.first_name as patient_first_name, u.last_name as patient_last_name,
-               u.email as patient_email, u.phone as patient_phone
+               u.email as patient_email, u.phone as patient_phone,
+               u.avatar_url as patient_avatar_url
         FROM appointments a
         LEFT JOIN patients u ON a.patient_id = u.id
         WHERE a.doctor_id = $1
@@ -1095,6 +1096,8 @@ class AppointmentController {
             patientName: `${apt.patient_first_name} ${apt.patient_last_name}`,
             patientEmail: apt.patient_email,
             patientPhone: apt.patient_phone,
+            // The patient's own photo, served by /api/profile/avatars/:file.
+            patientAvatarUrl: apt.patient_avatar_url || null,
             appointmentDate: apt.appointment_date,
             timePeriod: apt.time_period,
             timeSlot: apt.time_slot,
