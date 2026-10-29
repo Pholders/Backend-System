@@ -104,8 +104,8 @@ class PHR {
         LEFT JOIN doctors d ON p.doctor_id = d.id
         LEFT JOIN prescription_items pi ON p.id = pi.prescription_id
         WHERE p.patient_id = $1 
-        AND p.status = 'signed'
-        AND p.revoked_at IS NULL
+        AND p.signature_status = 'signed'
+        AND NOT COALESCE(p.is_revoked, FALSE)
         GROUP BY p.id, d.id
         ORDER BY p.created_at DESC
         LIMIT 10`,
@@ -269,7 +269,7 @@ class PHR {
         SELECT 
           p.id,
           p.created_at::date as appointment_date,
-          p.status,
+          p.signature_status AS status,
           'prescription' as record_type,
           d.first_name || ' ' || d.last_name as provider_name,
           d.specialization,
