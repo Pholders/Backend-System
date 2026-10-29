@@ -2073,6 +2073,10 @@ router.get('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRC
 // Vitals are taken by the doctor; any doctor the patient booked may record them.
 router.post('/phr/:patientId/vitals', authMiddleware, requireRole('doctor'), PHRController.recordPatientVital);
 router.get('/phr/:patientId/medications', authMiddleware, requireRole('doctor'), PHRController.viewPatientMedications);
+// Read-only record views for any doctor the patient has booked.
+router.get('/phr/:patientId/history', authMiddleware, requireRole('doctor'), PHRController.viewPatientHistory);
+router.get('/phr/:patientId/documents', authMiddleware, requireRole('doctor'), PHRController.viewPatientDocuments);
+router.get('/phr/:patientId/documents/:fileId', authMiddleware, requireRole('doctor'), PHRController.downloadPatientDocument);
 
 /**
  * Pharmacy Partnership Management Routes (Admin)

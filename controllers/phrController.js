@@ -9,6 +9,7 @@ const { validateVitals, computeBmi } = require('../services/vitalsService');
 const { describeAccess } = require('../services/phrAccessService');
 const Doctor = require('../models/Doctor');
 const notificationService = require('../services/notificationService');
+const FileUploadService = require('../services/fileUploadService');
 
 /**
  * @route GET /api/phr/complete
@@ -929,6 +930,96 @@ exports.viewPatientMedications = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error viewing patient medications',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Shared guard for the doctor's read-only record views below: a non-cancelled
+ * booking with the patient (or an explicit grant), as for vitals.
+ */
+async function guardRecordView(req, res, action) {
+  const doctorId = req.user.id;
+  const patientId = Number.parseInt(req.params.patientId, 10);
+  if (!Number.isInteger(patientId)) {
+    res.status(400).json({ success: false, message: 'Invalid patient id' });
+    return null;
+  }
+  if (!(await doctorMaySeeRecord(patientId, doctorId))) {
+    res.status(403).json({
+      success: false,
+      message: 'You can see the record only of patients who have booked with you',
+    });
+    return null;
+  }
+  await PHRAccess.logAccess(patientId, doctorId, action, req.ip);
+  return patientId;
+}
+
+/**
+ * @route GET /api/users/phr/:patientId/history
+ * The patient's completed visits and prescriptions, from every doctor,
+ * newest first. Read-only.
+ */
+exports.viewPatientHistory = async (req, res) => {
+  try {
+    const patientId = await guardRecordView(req, res, 'view_history');
+    if (patientId == null) return;
+    const history = await PHR.getHealthHistory(patientId);
+    res.json({ success: true, data: history });
+  } catch (error) {
+    console.error('Error viewing patient history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error viewing patient history',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route GET /api/users/phr/:patientId/documents
+ * The files the patient stored through /users/profile/files (the patient
+ * app's documents). Metadata only; download below.
+ */
+exports.viewPatientDocuments = async (req, res) => {
+  try {
+    const patientId = await guardRecordView(req, res, 'view_documents');
+    if (patientId == null) return;
+    const files = await FileUploadService.listPatientFiles(patientId);
+    res.json({ success: true, data: files });
+  } catch (error) {
+    console.error('Error viewing patient documents:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error viewing patient documents',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route GET /api/users/phr/:patientId/documents/:fileId
+ * Downloads one of the patient's files. getFile re-checks that the file
+ * belongs to this patient.
+ */
+exports.downloadPatientDocument = async (req, res) => {
+  try {
+    const patientId = await guardRecordView(req, res, 'download_document');
+    if (patientId == null) return;
+    const file = await FileUploadService.getFile(req.params.fileId, patientId);
+    res.contentType(file.mimetype || 'application/octet-stream');
+    res.attachment(file.filename);
+    res.send(file.buffer);
+  } catch (error) {
+    if (String(error.message).startsWith('File not found')) {
+      return res.status(404).json({ success: false, message: 'File not found' });
+    }
+    console.error('Error downloading patient document:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error downloading the document',
       error: error.message,
     });
   }
