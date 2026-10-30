@@ -112,6 +112,48 @@ it('a review gives the stars and a short quote, without the name', async () => {
   assert.match(created[0].body, /^A patient rated you 4 out of 5: "x{117}\.\.\."$/);
 });
 
+it('editing a review rewrites the notification the doctor has, not a new one', async () => {
+  created = [];
+  DoctorNotification.create = capture;
+  const replaced = [];
+  const realReplace = DoctorNotification.replaceForReview;
+  DoctorNotification.replaceForReview = async (doctorId, reviewId, row) => {
+    replaced.push({ doctorId, reviewId, ...row });
+    return { id: 9, ...row };
+  };
+  try {
+    await doctorNotifications.reviewReceived({ id: 6, doctor_id: 17, rating: 2, review_text: 'Changed my mind' });
+    assert.deepStrictEqual(created, [], 'no second row');
+    assert.strictEqual(replaced.length, 1);
+    assert.strictEqual(replaced[0].doctorId, 17);
+    assert.strictEqual(replaced[0].reviewId, 6);
+    assert.strictEqual(replaced[0].title, 'Review updated');
+    assert.match(replaced[0].body, /rated you 2 out of 5: "Changed my mind"/);
+  } finally {
+    DoctorNotification.replaceForReview = realReplace;
+  }
+});
+
+it('the first review has nothing to rewrite, so it arrives as new', async () => {
+  created = [];
+  DoctorNotification.create = capture;
+  answer = () => ({ rows: [], rowCount: 0 }); // no notification for this review yet
+  await doctorNotifications.reviewReceived({ id: 7, doctor_id: 17, rating: 5, review_text: '' });
+  assert.strictEqual(created.length, 1);
+  assert.strictEqual(created[0].title, 'New review');
+});
+
+it('the rewrite keeps the newest row and deletes older duplicates, for this doctor only', async () => {
+  sent.length = 0;
+  answer = () => ({ rows: [{ id: 4 }], rowCount: 1 });
+  await DoctorNotification.replaceForReview(17, 6, { title: 't', body: 'b', data: {} });
+  const { sql, params } = sent[0];
+  assert.match(sql, /DELETE FROM doctor_notifications/);
+  assert.match(sql, /ORDER BY created_at DESC, id DESC\s+LIMIT 1/);
+  assert.match(sql, /doctor_id = \$1 AND type = 'review'/);
+  assert.deepStrictEqual(params.slice(0, 2), [17, '6']);
+});
+
 // ── never breaks the action behind it ─────────────────────────────────────
 it('a failed write or lookup is logged, not thrown', async () => {
   const realError = console.error;
@@ -140,6 +182,7 @@ it('an appointment that is gone sends nothing', async () => {
 it('submitting a review notifies the doctor', async () => {
   created = [];
   DoctorNotification.create = capture;
+  answer = () => ({ rows: [], rowCount: 0 }); // their first review
   Doctor.findById = async () => ({ id: 17 });
   Appointment.hasPatientVisitedDoctor = async () => true;
   DoctorReview.create = async () => ({ id: 3, doctor_id: 17, rating: 5, review_text: 'Great' });

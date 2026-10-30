@@ -115,19 +115,31 @@ async function prescriptionDispensed(prescriptionId, pharmacyName) {
   );
 }
 
-/** Submitted or updated; a patient has one review per doctor. */
+/**
+ * Submitted or updated. A patient has one review per doctor, so editing it
+ * rewrites the notification the doctor already has instead of adding one:
+ * three edits used to leave three "New review" rows for the same review.
+ */
 async function reviewReceived(review) {
   if (!review) return null;
   const stars = Number(review.rating);
   const text = String(review.review_text || '').trim();
   const quote = text ? `: "${text.length > 120 ? `${text.slice(0, 117)}...` : text}"` : '.';
-  return send(
-    review.doctor_id,
-    'review',
-    'New review',
-    `A patient rated you ${stars} out of 5${quote}`,
-    { reviewId: review.id, rating: stars }
-  );
+  const body = `A patient rated you ${stars} out of 5${quote}`;
+  const data = { reviewId: review.id, rating: stars };
+
+  try {
+    const replaced = await DoctorNotification.replaceForReview(review.doctor_id, review.id, {
+      title: 'Review updated',
+      body,
+      data,
+    });
+    if (replaced) return replaced;
+  } catch (error) {
+    console.error('Doctor notification error (non-blocking):', error.message);
+    return null;
+  }
+  return send(review.doctor_id, 'review', 'New review', body, data);
 }
 
 module.exports = {

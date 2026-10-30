@@ -48,6 +48,39 @@ class DoctorNotification {
     return result.rows[0];
   }
 
+  /**
+   * Rewrites the doctor's notification about one review, when there is one:
+   * a patient has a single review per doctor, so an edit replaces what the
+   * doctor was told rather than adding to it. The newest row is updated,
+   * marked unread and moved to the top; any older duplicates are deleted.
+   * Returns null when the doctor has no notification for that review yet.
+   */
+  static async replaceForReview(doctor_id, reviewId, { title, body, data }) {
+    const result = await query(
+      `WITH matching AS (
+         SELECT id FROM doctor_notifications
+         WHERE doctor_id = $1 AND type = 'review' AND data->>'reviewId' = $2::text
+       ),
+       keep AS (
+         SELECT id FROM doctor_notifications
+         WHERE id IN (SELECT id FROM matching)
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       ),
+       gone AS (
+         DELETE FROM doctor_notifications
+         WHERE id IN (SELECT id FROM matching) AND id NOT IN (SELECT id FROM keep)
+       )
+       UPDATE doctor_notifications
+       SET title = $3, body = $4, data = $5, is_read = FALSE, read_at = NULL,
+           created_at = CURRENT_TIMESTAMP
+       WHERE id IN (SELECT id FROM keep)
+       RETURNING *`,
+      [doctor_id, String(reviewId), title, body, data]
+    );
+    return result.rows[0] || null;
+  }
+
   /** Newest first. */
   static async listForDoctor(doctor_id, { limit = 50, offset = 0, unreadOnly = false } = {}) {
     const result = await query(
