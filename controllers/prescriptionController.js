@@ -7,6 +7,7 @@ const Payment = require('../models/Payment');
 const DrugInteractionService = require('../services/drugInteractionService');
 const DigitalSignatureService = require('../services/digitalSignatureService');
 const QRCodeService = require('../services/qrCodeService');
+const PatientHandoffService = require('../services/patientHandoffService');
 const EmailService = require('../services/emailService');
 const PrescriptionPdfService = require('../services/prescriptionPdfService');
 const storage = require('../services/storage');
@@ -611,6 +612,10 @@ class PrescriptionController {
 
       const pdf = await PrescriptionController.renderOrLoadPdfSnapshot(prescription);
 
+      if (req.user.role === 'patient') {
+        PrescriptionController.logPatientHandoff(prescription.id, 'pdf_download');
+      }
+
       res.setHeader('Content-Type', pdf.contentType || 'application/pdf');
       res.setHeader('Content-Length', pdf.buffer.length);
       res.setHeader(
@@ -738,6 +743,17 @@ class PrescriptionController {
   }
 
   /**
+   * Record that the script left through the patient rather than by direct
+   * transmission (SRS BR-024, BR-103). Never blocks the patient's request.
+   */
+  static logPatientHandoff(prescriptionId, method) {
+    Prescription.addShareAudit(prescriptionId, {
+      shared_with: 'patient',
+      share_method: method,
+    }).catch((error) => console.error('❌ Error logging patient handoff:', error));
+  }
+
+  /**
    * Patient: Generate QR code for prescription
    */
   static async generateQRCode(req, res) {
@@ -764,6 +780,7 @@ class PrescriptionController {
       await Prescription.generateQRCodeAccess(prescriptionId, qrCodeData.qrToken, 90);
 
       const qrImage = await QRCodeService.toDataURL(qrCodeData.qrString);
+      PrescriptionController.logPatientHandoff(prescriptionId, 'qr_code');
 
       res.status(200).json({
         success: true,
@@ -776,7 +793,8 @@ class PrescriptionController {
           expiresIn: '90 days',
           validUntil: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
           oneTimeUse: true,
-          warning: 'This QR code can only be scanned once. After first access, it will be invalid.'
+          warning: 'This QR code can only be scanned once. After first access, it will be invalid.',
+          handoffNotice: PatientHandoffService.patientNotice(prescription.items)
         }
       });
     } catch (error) {
@@ -871,6 +889,7 @@ class PrescriptionController {
             },
             createdAt: prescription.created_at
           },
+          transmission: PatientHandoffService.pharmacistNotice(prescription.items),
           accessInfo: {
             accessedAt: verificationResult.accessedAt,
             accessedFrom: ipAddress,
