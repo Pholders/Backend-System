@@ -2,6 +2,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
 const notificationService = require('./notificationService');
+const doctorNotifications = require('./doctorNotifications');
 
 /**
  * Stripe Service
@@ -175,6 +176,7 @@ class StripeService {
       body: `Your payment of R${payment.amount} has been confirmed. Your appointment is now scheduled.`,
       data: { appointmentId: payment.appointment_id, paymentId: payment.id }
     }).catch(err => console.error('Notification error (non-blocking):', err.message));
+    doctorNotifications.bookingConfirmed(payment.appointment_id, 'stripe');
 
     return { payment: completed, newlyCompleted: true };
   }

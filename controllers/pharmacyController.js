@@ -9,6 +9,7 @@ const AuditLog = require('../models/AuditLog');
 const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+const doctorNotifications = require('../services/doctorNotifications');
 
 /**
  * Pharmacy Controller
@@ -712,6 +713,8 @@ class PharmacyController {
           message: result.message
         });
       }
+
+      doctorNotifications.prescriptionDispensed(result.data.id, pharmacyName);
 
       res.status(200).json({
         success: true,

@@ -3,6 +3,7 @@ const Appointment = require('../models/Appointment');
 const Doctor = require('../models/Doctor');
 const AuditLog = require('../models/AuditLog');
 const notificationService = require('../services/notificationService');
+const doctorNotifications = require('../services/doctorNotifications');
 const StripeService = require('../services/stripeService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || '');
 
@@ -504,6 +505,7 @@ class PaymentController {
         body: `Your appointment is confirmed. Please bring R${payment.amount} on the day of your visit.`,
         data: { appointmentId: payment.appointment_id, paymentId: payment.id }
       }).catch(err => console.error('Notification error (non-blocking):', err.message));
+      doctorNotifications.bookingConfirmed(payment.appointment_id, 'cash_on_arrival');
 
       return res.status(200).json({
         success: true,
@@ -611,6 +613,7 @@ class PaymentController {
         body: `Your medical aid claim has been submitted to ${medicalAidProvider}. Your appointment is confirmed.`,
         data: { appointmentId: payment.appointment_id, paymentId }
       }).catch(err => console.error('Notification error (non-blocking):', err.message));
+      doctorNotifications.bookingConfirmed(payment.appointment_id, 'medical_aid');
 
       return res.status(200).json({
         success: true,

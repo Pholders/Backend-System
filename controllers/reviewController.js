@@ -2,6 +2,7 @@ const DoctorReview = require('../models/DoctorReview');
 const Doctor = require('../models/Doctor');
 const Appointment = require('../models/Appointment');
 const AuditLog = require('../models/AuditLog');
+const doctorNotifications = require('../services/doctorNotifications');
 
 class ReviewController {
   /**
@@ -35,6 +36,7 @@ class ReviewController {
 
       // Submit or update review
       const review = await DoctorReview.create(doctorId, patientId, rating, reviewText);
+      doctorNotifications.reviewReceived(review);
 
       // Log security event
       await AuditLog.logSecurityEvent(

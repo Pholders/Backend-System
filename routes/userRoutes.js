@@ -13,6 +13,7 @@ const EnhancedProfileController = require('../controllers/enhancedProfileControl
 const AppointmentController = require('../controllers/appointmentController');
 const ReviewController = require('../controllers/reviewController');
 const PaymentController = require('../controllers/paymentController');
+const DoctorNotificationController = require('../controllers/doctorNotificationController');
 const PHRController = require('../controllers/phrController');
 const authMiddleware = require('../middleware/auth');
 const { requireRole, preventAuthenticated } = require('../middleware/auth');
@@ -1966,6 +1967,12 @@ router.get('/payments', authMiddleware, requireRole('patient'), PaymentControlle
 // Doctor read-only views of payments for their own appointments
 router.get('/doctor/payments/summary', authMiddleware, requireRole('doctor'), PaymentController.getDoctorPaymentSummary);
 router.get('/doctor/payments', authMiddleware, requireRole('doctor'), PaymentController.getDoctorPaymentHistory);
+
+// Doctor's notification inbox: bookings, cancellations, dispensed scripts, reviews
+router.get('/doctor/notifications', authMiddleware, requireRole('doctor'), DoctorNotificationController.list);
+router.patch('/doctor/notifications/read-all', authMiddleware, requireRole('doctor'), DoctorNotificationController.markAllRead);
+router.patch('/doctor/notifications/:id/read', authMiddleware, requireRole('doctor'), DoctorNotificationController.setRead);
+router.delete('/doctor/notifications/:id', authMiddleware, requireRole('doctor'), DoctorNotificationController.remove);
 
 /**
  * Stripe Payment Routes (Enhanced Stripe Integration)

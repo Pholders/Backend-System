@@ -4,6 +4,7 @@ const DoctorReview = require('../models/DoctorReview');
 const User = require('../models/User');
 const Payment = require('../models/Payment');
 const notificationService = require('../services/notificationService');
+const doctorNotifications = require('../services/doctorNotifications');
 const StripeService = require('../services/stripeService');
 const AppointmentCleanupService = require('../services/appointmentCleanupService');
 
@@ -517,6 +518,7 @@ class AppointmentController {
       }
 
       const cancelledAppointment = await Appointment.cancel(appointmentId);
+      doctorNotifications.appointmentCancelled(appointmentId);
 
       // Notify patient — fire-and-forget
       notificationService.sendToPatient({
@@ -675,6 +677,9 @@ class AppointmentController {
         body: `Your appointment has been rescheduled to ${newDate} at ${newTimeSlot}.`,
         data: { appointmentId: parseInt(appointmentId) }
       }).catch(err => console.error('Notification error (non-blocking):', err.message));
+      doctorNotifications.appointmentRescheduled(
+        appointmentId, appointment.appointment_date, appointment.time_slot
+      );
 
       res.json({
         success: true,

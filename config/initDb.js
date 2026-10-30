@@ -5,6 +5,7 @@ const Pharmacy = require('../models/Pharmacy');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
 const ActionToken = require('../models/ActionToken');
 const Notification = require('../models/Notification');
+const DoctorNotification = require('../models/DoctorNotification');
 const NotificationPreferences = require('../models/NotificationPreferences');
 const DeviceToken = require('../models/DeviceToken');
 const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
@@ -99,6 +100,7 @@ const initializeDatabase = async () => {
 
     // Notifications stack
     await Notification.createTable();
+    await DoctorNotification.createTable();
     await NotificationPreferences.createTable();
     await DeviceToken.createTable();
     await DeviceToken.addDeviceTokenColumns();
