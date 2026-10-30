@@ -876,6 +876,39 @@
       ]
     },
     {
+      id: "doctornotifications",
+      track: "solo",
+      ordered: true,
+      name: "Doctor notifications",
+      blurb: "Doctors used to be told nothing: they found new bookings by opening Appointments, and the Notifications page was made up. Now the doctor is told when a booking is paid, moved or cancelled, when a pharmacy dispenses their script, and when they get a review. Notifications show in the portal only; nothing is emailed or pushed yet. Needs the backend deploy and the new doctor website.",
+      stories: [
+        ["NT1", "Doctor", "Click the bell in the top bar", "The Notifications page opens. It used to open a blank page", true, "Doctor website → bell icon, top right"],
+        ["NT2", "Patient", "Book the doctor and pay cash on arrival", "The doctor's bell gets a red dot, and Notifications shows New booking to accept with your name, the date, the time and that you will pay cash", true, "Patient app → book → Cash on arrival. Then the doctor refreshes the website"],
+        ["NT3", "Doctor", "Click that notification, then refresh the page", "It opens, the red dot and the unread count go down, and after the refresh it is still read", true, "Notifications → click it → press F5"],
+        ["NT4", "Patient", "Move the appointment to another day", "The doctor gets Appointment moved, saying the old and the new date and time", false, "Patient app → the appointment → Reschedule"],
+        ["NT5", "Patient", "Cancel an appointment", "The doctor gets Appointment cancelled, naming you and the slot", false, "Patient app → the appointment → Cancel"],
+        ["NT6", "Patient", "Review the doctor, then change your review", "The doctor has one notification for it, now saying Review updated with the new stars — not one per edit", true, "Patient app → the doctor → Rate → submit, then rate again"],
+        ["NT7", "Pharmacy", "Dispense one of this doctor's scripts", "The doctor gets Prescription dispensed, with the script number, the patient and the pharmacy", false, "Pharmacy website → the claimed script → Dispense"],
+        ["NT8", "Doctor", "Delete one notification and press Mark all read, then refresh", "Both changes are still there after the refresh", false, "Notifications → ⋮ → Delete, then Mark all read → F5"]
+      ]
+    },
+    {
+      id: "doctorpages",
+      track: "solo",
+      name: "Doctor dashboard, billing and record",
+      blurb: "The dashboard and Billing showed invented people and money, and some pop-ups and back buttons crashed. These now show the doctor's own appointments and payments. Needs the backend deploy and the new doctor website.",
+      stories: [
+        ["DB1", "Doctor", "Open the Dashboard", "Today's real date and today's appointments. No Maria Wilson, no 72 appointments, no skipped-medication alert", true, "Doctor website → Dashboard"],
+        ["DB2", "Doctor", "With a paid booking not yet accepted, click the yellow alert", "It says how many bookings wait for you, and opens Appointments", false, "Dashboard → the yellow bar top right"],
+        ["DB3", "Doctor", "Click a patient under Recent patients", "Their record opens", false, "Dashboard → Recent patients → a row"],
+        ["BL1", "Doctor", "Open Billing", "Your real payments and totals: received, pending, completed, cancelled. No Withdraw Funds button", true, "Doctor website → Billing"],
+        ["BL2", "Doctor", "Open a payment's details and press Close", "Only the pop-up closes; the page stays. It used to crash", true, "Billing → ⋮ on a row → View Details → Close"],
+        ["BL3", "Doctor", "Download a receipt as a PDF", "A PDF downloads, showing how the patient paid", true, "Billing → ⋮ → Download Receipt → Download as PDF"],
+        ["PH1", "Doctor", "Open a patient's History tab", "Their past visits and scripts load. It used to fail with an error", true, "Patients → a patient → History"],
+        ["LS1", "Doctor", "Open Linked Services and press the back arrow", "You land back on Settings. It used to crash", false, "Settings → Linked Services → back arrow"]
+      ]
+    },
+    {
       id: "medaid",
       track: "solo",
       name: "The medical aid card",
