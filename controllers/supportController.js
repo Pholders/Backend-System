@@ -205,7 +205,7 @@ async function confirmAccountDeletion(req, res) {
     const email = record.email;
 
     // Revoke sessions first so any concurrent requests fail fast
-    try { await Session.invalidateUserSessions(userId, 'Account deleted'); } catch (_) {}
+    try { await Session.invalidateUserSessions(userId, 'patient', 'Account deleted'); } catch (_) {}
 
     // Hard delete — FK cascades drop sessions, action tokens, connections, claims, etc.
     await query('DELETE FROM patients WHERE id = $1', [userId]);

@@ -141,7 +141,7 @@ async function freezeAccount(req, res) {
     }
 
     // Sign out everything
-    await Session.invalidateUserSessions(userId, 'Account frozen by user');
+    await Session.invalidateUserSessions(userId, 'patient', 'Account frozen by user');
 
     await invalidateUserCache(userId, userEmail);
     await AuditLog.logSecurityEvent(req, userId, 'patient', userEmail, 'account_frozen', 'success');

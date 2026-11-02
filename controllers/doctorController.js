@@ -12,6 +12,7 @@ const emailService = require('../services/emailService');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
+const doctorNotifications = require('../services/doctorNotifications');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
 const { containerMemoryLimitBytes } = require('../utils/containerMemory');
 
@@ -83,7 +84,8 @@ const EDITABLE_PROFILE_COLUMNS = new Set([
   'first_name', 'last_name', 'phone', 'specialization', 'experience',
   'clinic_name', 'city', 'province', 'suburb', 'qualification', 'address',
   'clinic_address', 'zip_code', 'consultation_fee', 'currency', 'bio',
-  'details', 'availability', 'opens_at', 'closes_at', 'latitude', 'longitude'
+  'details', 'availability', 'opens_at', 'closes_at', 'latitude', 'longitude',
+  'notification_preferences'
 ]);
 
 // Fields a client may echo back from GET /doctor/profile but cannot change
@@ -558,7 +560,7 @@ class DoctorController {
     try {
       const doctorId = req.user.id;
 
-      const sessions = await Session.getUserActiveSessions(doctorId);
+      const sessions = await Session.getUserActiveSessions(doctorId, 'doctor');
 
       res.status(200).json({
         success: true,
@@ -579,14 +581,126 @@ class DoctorController {
   }
 
   /**
+   * Sign out one of the doctor's other devices. Only their own sessions can
+   * be ended, and the one making the request is not among them: that is
+   * what Log out is for.
+   */
+  static async revokeSession(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const sessionId = String(req.params.sessionId || '');
+      if (!sessionId) {
+        return res.status(400).json({ success: false, message: 'Session id required' });
+      }
+      if (req.authSession?.id && String(req.authSession.id) === sessionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'That is this device. Use Log out to sign out here.'
+        });
+      }
+
+      const revoked = await Session.revokeOwn(sessionId, doctorId, 'doctor');
+      if (!revoked) {
+        return res.status(404).json({ success: false, message: 'No such active session' });
+      }
+      await AuditLog.logSecurityEvent(req, doctorId, 'doctor', req.user.email, 'session_revoked', 'success');
+      res.json({ success: true, data: { sessionId } });
+    } catch (error) {
+      console.error('Revoke session error:', error);
+      res.status(500).json({ success: false, message: 'Error signing out that device' });
+    }
+  }
+
+  /**
+   * Sign out every device except the one making the request.
+   */
+  static async revokeOtherSessions(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const currentSessionId = req.authSession?.id;
+      if (!currentSessionId) {
+        return res.status(400).json({
+          success: false,
+          message: 'This sign-in has no session to keep, so nothing was changed'
+        });
+      }
+      const revoked = await Session.revokeAllExcept(doctorId, 'doctor', currentSessionId, 'Signed out by the doctor');
+      await AuditLog.logSecurityEvent(req, doctorId, 'doctor', req.user.email, 'sessions_revoked', 'success', `${revoked.length} other sessions`);
+      res.json({ success: true, data: { revoked: revoked.length } });
+    } catch (error) {
+      console.error('Revoke other sessions error:', error);
+      res.status(500).json({ success: false, message: 'Error signing out your other devices' });
+    }
+  }
+
+  /**
+   * Change the password while signed in. Needs the current one, follows the
+   * signup rules, and signs out every other device: someone who knew the
+   * old password should not stay signed in with it.
+   */
+  static async changePassword(req, res) {
+    try {
+      const doctorId = req.user.id;
+      const { currentPassword, newPassword } = req.body || {};
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Your current password and a new one are both needed'
+        });
+      }
+
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+
+      const matches = await bcrypt.compare(String(currentPassword), doctor.password_hash);
+      if (!matches) {
+        await AuditLog.logSecurityEvent(req, doctorId, 'doctor', doctor.email, 'password_change', 'failed', 'Wrong current password');
+        return res.status(400).json({ success: false, message: 'Your current password is not right' });
+      }
+
+      if (String(newPassword) === String(currentPassword)) {
+        return res.status(400).json({
+          success: false,
+          message: 'The new password must be different from the current one'
+        });
+      }
+
+      const validation = PasswordValidator.validate(String(newPassword));
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.errors.join('. '),
+          errors: validation.errors
+        });
+      }
+
+      const password_hash = await bcrypt.hash(String(newPassword), 10);
+      await Doctor.update(doctorId, { password_hash });
+
+      let signedOut = 0;
+      if (req.authSession?.id) {
+        signedOut = (await Session.revokeAllExcept(doctorId, 'doctor', req.authSession.id, 'Password changed')).length;
+      }
+      await AuditLog.logSecurityEvent(req, doctorId, 'doctor', doctor.email, 'password_change', 'success');
+
+      res.json({ success: true, message: 'Password changed', data: { otherDevicesSignedOut: signedOut } });
+    } catch (error) {
+      console.error('Change password error:', error);
+      res.status(500).json({ success: false, message: 'Error changing your password' });
+    }
+  }
+
+  /**
    * Get Activity Log
    */
   static async getActivityLog(req, res) {
     try {
       const doctorId = req.user.id;
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
 
-      const activityLog = await AuditLog.getUserActivity(doctorId, limit);
+      const activityLog = await AuditLog.getUserActivity(doctorId, 'doctor', limit);
 
       res.status(200).json({
         success: true,
@@ -841,6 +955,13 @@ class DoctorController {
           success: false,
           message: 'closes_at must be later than opens_at'
         });
+      }
+
+      if (updateData.notification_preferences !== undefined) {
+        const problem = doctorNotifications.preferencesProblem(updateData.notification_preferences);
+        if (problem) {
+          return res.status(400).json({ success: false, message: problem });
+        }
       }
 
       if (updateData.availability !== undefined) {

@@ -156,7 +156,7 @@ class Doctor {
 
     Object.keys(doctorData).forEach((key) => {
       if (doctorData[key] !== undefined) {
-        if (key === 'availability') {
+        if (key === 'availability' || key === 'notification_preferences') {
           fields.push(`${key} = $${paramCount}`);
           values.push(JSON.stringify(doctorData[key]));
         } else {

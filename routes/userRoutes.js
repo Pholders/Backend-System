@@ -950,6 +950,9 @@ router.post('/doctor/logout', authMiddleware, requireRole('doctor'), DoctorContr
  *         description: Unauthorized
  */
 router.get('/doctor/sessions', authMiddleware, requireRole('doctor'), DoctorController.getSessions);
+router.post('/doctor/sessions/revoke-others', authMiddleware, requireRole('doctor'), DoctorController.revokeOtherSessions);
+router.delete('/doctor/sessions/:sessionId', authMiddleware, requireRole('doctor'), DoctorController.revokeSession);
+router.post('/doctor/change-password', authMiddleware, requireRole('doctor'), DoctorController.changePassword);
 
 /**
  * @swagger
