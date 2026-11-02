@@ -908,7 +908,11 @@
         ["LS1", "Doctor", "Open Linked Services and press the back arrow", "You land back on Settings. It used to crash", false, "Settings → Linked Services → back arrow"],
         ["SR1", "Doctor", "Look at the top bar on the Dashboard, Patients, Billing and Settings", "No search box in the top bar. Patients and Billing each have one search of their own", false, "Doctor website → each page"],
         ["SR2", "Doctor", "On Appointments, search for a patient booked next month", "Their appointment shows even though the calendar is on this month, and the Future visits count matches", true, "Appointments → search box top right → type part of the name"],
-        ["SR3", "Doctor", "On Prescriptions, search for a diagnosis, then for part of a reference", "Only matching prescriptions stay, and a search with no match says so", true, "Prescriptions → search box beside the status filters"]
+        ["SR3", "Doctor", "On Prescriptions, search for a diagnosis, then for part of a reference", "Only matching prescriptions stay, and a search with no match says so", true, "Prescriptions → search box beside the status filters"],
+        ["PF1", "Doctor", "Write an About text, save, and reload the page", "It says Your profile is saved, and the text is still there after the reload", true, "Settings → Personal Information → Edit → About → Save Changes → F5"],
+        ["PF2", "Patient", "Open that doctor's page in the app", "The About section shows the doctor's text, not No biography provided yet", true, "Patient app → find the doctor → their page"],
+        ["PF3", "Doctor", "Edit, clear your last name, and save", "Refused before sending: it asks for both names", false, "Personal Information → Edit → empty Last Name → Save Changes"],
+        ["PF4", "Doctor", "Set a qualification on Professional Details and save", "It says Your professional details are saved, and the qualification stays after a reload. No licence number, signature drawing or upload", false, "Settings → Professional Details → Qualification → Save Changes"]
       ]
     },
     {
