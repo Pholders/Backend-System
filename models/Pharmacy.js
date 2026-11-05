@@ -1,5 +1,15 @@
 const { query } = require('../config/db');
 
+// What the admin app sees of a pharmacy: every column except password_hash.
+const ADMIN_COLUMNS = `
+  id, pharmacy_name, first_name, last_name, email, phone, license_number,
+  address, city, province, zip_code, latitude, longitude,
+  operating_hours, services, is_24_hours, delivery_available, delivery_radius,
+  website, description, profile_image, status, email_verified,
+  email_verified_at AT TIME ZONE 'UTC' AS email_verified_at,
+  created_at AT TIME ZONE 'UTC' AS created_at,
+  updated_at AT TIME ZONE 'UTC' AS updated_at`;
+
 /**
  * Pharmacy Model
  * Handles all database operations for pharmacies
@@ -152,6 +162,46 @@ class Pharmacy {
     `;
 
     const result = await query(updateQuery, values);
+    return result.rows[0];
+  }
+
+  /**
+   * One page of the admin pharmacy directory.
+   *
+   * Columns are named rather than SELECT * so the password hash — and any
+   * column added to the table later — only reaches the admin app if someone
+   * lists it here on purpose. Timestamps are converted from the UTC
+   * wall-clock values the table stores into real instants, so they
+   * serialise correctly whatever time zone Node runs in.
+   */
+  static async listForAdmin({ limit = 100, offset = 0, status } = {}) {
+    // Filter and count in SQL, so `total` is the whole filtered set and a
+    // status filter finds matches beyond the first page.
+    const params = [];
+    let where = '';
+    if (status) {
+      params.push(status);
+      where = `WHERE status = $${params.length}`;
+    }
+
+    const countResult = await query(`SELECT COUNT(*)::int AS total FROM pharmacies ${where}`, params);
+
+    params.push(limit, offset);
+    const result = await query(
+      `SELECT ${ADMIN_COLUMNS} FROM pharmacies
+        ${where}
+        ORDER BY pharmacies.created_at DESC, id DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    return { total: countResult.rows[0].total, pharmacies: result.rows };
+  }
+
+  /**
+   * One pharmacy for the admin "View" panel — the same columns as the list.
+   */
+  static async findByIdForAdmin(id) {
+    const result = await query(`SELECT ${ADMIN_COLUMNS} FROM pharmacies WHERE id = $1`, [id]);
     return result.rows[0];
   }
 

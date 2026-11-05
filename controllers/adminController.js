@@ -312,19 +312,14 @@ class AdminController {
    */
   static async listPharmacies(req, res) {
     try {
-      const { limit = 100, offset = 0, status } = req.query;
-      const pharmacies = await Pharmacy.findAll(parseInt(limit), parseInt(offset));
-
-      const visible = status
-        ? pharmacies.filter((p) => p.status === status)
-        : pharmacies;
-
-      visible.forEach((p) => { delete p.password_hash; });
+      // Default page stays 100, as before; capped like the other directories.
+      const opts = AdminController.parseListQuery(req.query, 100);
+      const { total, pharmacies } = await Pharmacy.listForAdmin(opts);
 
       res.status(200).json({
         success: true,
         message: 'Pharmacies retrieved',
-        data: { total: visible.length, pharmacies: visible }
+        data: { total, limit: opts.limit, offset: opts.offset, pharmacies }
       });
     } catch (error) {
       console.error('List pharmacies error:', error);
@@ -340,8 +335,8 @@ class AdminController {
    * limit/offset/status from the query string, clamped so a bad or huge
    * value can't turn into an unbounded table scan.
    */
-  static parseListQuery(q) {
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+  static parseListQuery(q, defaultLimit = 50) {
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || defaultLimit, 1), 200);
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const status = typeof q.status === 'string' && q.status.trim() ? q.status.trim() : undefined;
     return { limit, offset, status };
@@ -495,6 +490,23 @@ class AdminController {
     } catch (error) {
       console.error('Get patient error:', error);
       res.status(500).json({ success: false, message: 'Error fetching patient', error: error.message });
+    }
+  }
+
+  /**
+   * Admin "View" on a pharmacy.
+   */
+  static async getPharmacy(req, res) {
+    const id = AdminController.parseId(req.params.pharmacyId);
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid pharmacy id' });
+
+    try {
+      const pharmacy = await Pharmacy.findByIdForAdmin(id);
+      if (!pharmacy) return res.status(404).json({ success: false, message: 'Pharmacy not found' });
+      res.status(200).json({ success: true, message: 'Pharmacy retrieved', data: pharmacy });
+    } catch (error) {
+      console.error('Get pharmacy error:', error);
+      res.status(500).json({ success: false, message: 'Error fetching pharmacy', error: error.message });
     }
   }
 
