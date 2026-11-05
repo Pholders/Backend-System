@@ -397,9 +397,9 @@ async function updatePassword(req, res) {
     // Revoke all other sessions
     const currentSessionId = req.authSession?.id || null;
     if (currentSessionId) {
-      await Session.revokeAllExcept(userId, currentSessionId, 'Password changed');
+      await Session.revokeAllExcept(userId, 'patient', currentSessionId, 'Password changed');
     } else {
-      await Session.invalidateUserSessions(userId, 'Password changed');
+      await Session.invalidateUserSessions(userId, 'patient', 'Password changed');
     }
 
     await invalidateUserCache(userId, userEmail);
@@ -425,7 +425,7 @@ async function listDevices(req, res) {
   try {
     const userId = req.user.id;
     const currentSessionId = req.authSession?.id || null;
-    const sessions = await Session.getUserActiveSessions(userId);
+    const sessions = await Session.getUserActiveSessions(userId, 'patient');
 
     const devices = sessions.map((s) => ({
       id: s.id,
@@ -464,7 +464,7 @@ async function revokeDevice(req, res) {
 
     // Ensure the session belongs to this user
     const owned = await query(
-      `SELECT id FROM sessions WHERE id = $1 AND user_id = $2`,
+      `SELECT id FROM sessions WHERE id = $1 AND user_id = $2 AND user_type = 'patient'`,
       [sessionId, userId]
     );
     if (!owned.rows.length) {
@@ -495,7 +495,7 @@ async function revokeOtherDevices(req, res) {
       return res.status(400).json({ success: false, message: 'No active session detected' });
     }
 
-    const revoked = await Session.revokeAllExcept(userId, currentSessionId, 'Revoked by user');
+    const revoked = await Session.revokeAllExcept(userId, 'patient', currentSessionId, 'Revoked by user');
     await AuditLog.logSecurityEvent(req, userId, 'patient', userEmail, 'sessions_revoked_others', 'success', `count=${revoked.length}`);
 
     res.json({ success: true, message: 'Other sessions revoked', count: revoked.length });

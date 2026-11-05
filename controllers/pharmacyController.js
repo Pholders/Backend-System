@@ -424,7 +424,7 @@ class PharmacyController {
     try {
       const pharmacyId = req.user.id;
 
-      const sessions = await Session.getUserActiveSessions(pharmacyId);
+      const sessions = await Session.getUserActiveSessions(pharmacyId, 'pharmacy');
 
       res.status(200).json({
         success: true,

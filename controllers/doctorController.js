@@ -558,7 +558,7 @@ class DoctorController {
     try {
       const doctorId = req.user.id;
 
-      const sessions = await Session.getUserActiveSessions(doctorId);
+      const sessions = await Session.getUserActiveSessions(doctorId, 'doctor');
 
       res.status(200).json({
         success: true,

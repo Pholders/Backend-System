@@ -251,7 +251,7 @@ class AdminController {
     try {
       const adminId = req.user.id;
 
-      const sessions = await Session.getUserActiveSessions(adminId);
+      const sessions = await Session.getUserActiveSessions(adminId, 'admin');
 
       res.status(200).json({
         success: true,

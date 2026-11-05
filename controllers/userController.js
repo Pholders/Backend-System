@@ -591,7 +591,7 @@ class UserController {
     try {
       const userId = req.user.id;
 
-      const sessions = await Session.getUserActiveSessions(userId);
+      const sessions = await Session.getUserActiveSessions(userId, 'patient');
 
       res.status(200).json({
         success: true,
@@ -944,7 +944,7 @@ class UserController {
 
       // Invalidate all sessions for this user (force re-login)
       try {
-        await Session.invalidateUserSessions(user.id);
+        await Session.invalidateUserSessions(user.id, 'patient');
       } catch (sessionError) {
         console.error('Error invalidating sessions:', sessionError);
         // Don't fail the password reset if session invalidation fails
@@ -1140,7 +1140,7 @@ class UserController {
         console.log(`🗑️  Deleting account for user: ${userEmail}`);
 
         // 1. Invalidate all sessions
-        await Session.invalidateUserSessions(userId, 'Account deletion');
+        await Session.invalidateUserSessions(userId, 'patient', 'Account deletion');
 
         // 2. Delete related data (in order of foreign key dependencies)
         // Note: Adjust based on your actual database schema

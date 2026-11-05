@@ -1,6 +1,9 @@
 const { query } = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
 
+// Matches the sessions.user_type CHECK constraint.
+const USER_TYPES = ['patient', 'doctor', 'pharmacy', 'admin'];
+
 /**
  * Session Model
  * Manages user session tracking
@@ -143,6 +146,7 @@ class Session {
    * admins tables — patient 3 and doctor 3 are different people.
    */
   static async revokeAllForUser(userId, userType, reason) {
+    Session.assertUserType(userType);
     const result = await query(
       `UPDATE sessions
           SET is_active = false, revoked_at = NOW(), revocation_reason = $3
@@ -154,48 +158,65 @@ class Session {
   }
 
   /**
+   * Every per-account method below needs the user_type as well as the id:
+   * ids repeat across the patients, doctors, pharmacies and admins tables,
+   * so filtering on user_id alone listed or revoked other people's sessions
+   * (a patient changing password logged out the doctor with the same id).
+   * Throwing on a missing/unknown type makes a caller that forgot it fail
+   * loudly instead of silently hitting the wrong accounts.
+   */
+  static assertUserType(userType) {
+    if (!USER_TYPES.includes(userType)) {
+      throw new Error(`Session: userType must be one of ${USER_TYPES.join(', ')} (got ${userType})`);
+    }
+  }
+
+  /**
    * Get all active sessions for a user
    */
-  static async getUserActiveSessions(userId) {
+  static async getUserActiveSessions(userId, userType) {
+    Session.assertUserType(userType);
     const selectQuery = `
       SELECT id, user_type, ip_address, device_info, created_at, last_activity_at, expires_at
-      FROM sessions 
-      WHERE user_id = $1 AND is_active = true AND expires_at > NOW()
+      FROM sessions
+      WHERE user_id = $1 AND user_type = $2 AND is_active = true AND expires_at > NOW()
       ORDER BY last_activity_at DESC
     `;
 
-    const result = await query(selectQuery, [userId]);
+    const result = await query(selectQuery, [userId, userType]);
     return result.rows;
   }
 
   /**
    * Revoke all user sessions except current
    */
-  static async revokeAllExcept(userId, currentSessionId, reason = 'New device login') {
+  static async revokeAllExcept(userId, userType, currentSessionId, reason = 'New device login') {
+    Session.assertUserType(userType);
     const updateQuery = `
-      UPDATE sessions 
-      SET is_active = false, revoked_at = NOW(), revocation_reason = $3
-      WHERE user_id = $1 AND id != $2 AND is_active = true
+      UPDATE sessions
+      SET is_active = false, revoked_at = NOW(), revocation_reason = $4
+      WHERE user_id = $1 AND user_type = $2 AND id != $3 AND is_active = true
       RETURNING *
     `;
 
-    const result = await query(updateQuery, [userId, currentSessionId, reason]);
+    const result = await query(updateQuery, [userId, userType, currentSessionId, reason]);
     return result.rows;
   }
 
   /**
    * Invalidate all user sessions (revoke all sessions for a user)
    */
-  static async invalidateUserSessions(userId, reason = 'Password reset') {
+  static async invalidateUserSessions(userId, userType, reason = 'Password reset') {
+    Session.assertUserType(userType);
     const updateQuery = `
-      UPDATE sessions 
-      SET is_active = false, revoked_at = NOW(), revocation_reason = $2
-      WHERE user_id = $1 AND is_active = true
+      UPDATE sessions
+      SET is_active = false, revoked_at = NOW(), revocation_reason = $3
+      WHERE user_id = $1 AND user_type = $2 AND is_active = true
       RETURNING *
     `;
 
-    const result = await query(updateQuery, [userId, reason]);
-    console.log(`✅ Invalidated ${result.rows.length} sessions for user ${userId}`);
+    const result = await query(updateQuery, [userId, userType, reason]);
+    console.log(`✅ Invalidated ${result.rows.length} ${userType} sessions for user ${userId}`);
     return result.rows;
   }
 
