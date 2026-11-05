@@ -912,7 +912,13 @@
         ["PF1", "Doctor", "Write an About text, save, and reload the page", "It says Your profile is saved, and the text is still there after the reload", true, "Settings → Personal Information → Edit → About → Save Changes → F5"],
         ["PF2", "Patient", "Open that doctor's page in the app", "The About section shows the doctor's text, not No biography provided yet", true, "Patient app → find the doctor → their page"],
         ["PF3", "Doctor", "Edit, clear your last name, and save", "Refused before sending: it asks for both names", false, "Personal Information → Edit → empty Last Name → Save Changes"],
-        ["PF4", "Doctor", "Set a qualification on Professional Details and save", "It says Your professional details are saved, and the qualification stays after a reload. No licence number, signature drawing or upload", false, "Settings → Professional Details → Qualification → Save Changes"]
+        ["PF4", "Doctor", "Set a qualification on Professional Details and save", "It says Your professional details are saved, and the qualification stays after a reload. No licence number, signature drawing or upload", false, "Settings → Professional Details → Qualification → Save Changes"],
+        ["ST1", "Doctor", "Change the consultation fee and save", "Only one fee is offered; it says Your consultation fee is saved, and new bookings use the new fee", true, "Settings → Fees Setup → Save Fee"],
+        ["ST2", "Doctor", "Switch off Reviews on Notification Settings and save; then the patient rates you", "No review notification arrives. Switch it back on and the next rating does arrive", true, "Settings → Notification Settings → Reviews off → Save Changes"],
+        ["ST3", "Doctor", "Change your password, then sign in with the new one", "It says Password changed, your other devices are signed out, and the new password works", true, "Settings → Security Settings → Change Password"],
+        ["ST4", "Doctor", "Sign in on a second browser, then sign that one out from Device Management", "Device Management lists both; Log Out on the other one signs it out", true, "Settings → Device Management → Log Out on the other device"],
+        ["ST5", "Doctor", "Send a message from Contact Support", "It says Sent, and the Pholders team gets it", false, "Settings → Contact Support → subject and message → Send Message"],
+        ["ST6", "Doctor and patient sharing an id", "Compare Device Management and Login Activity with the patient's own", "The doctor sees only the doctor's own sign-ins. Pule can find a pair: the test doctor is id 17", false, "Doctor website → Device Management; Patient app → devices"]
       ]
     },
     {

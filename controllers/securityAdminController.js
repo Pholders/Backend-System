@@ -149,7 +149,7 @@ class SecurityAdminController {
       if (status === 'verified_threat') {
         try {
           // Invalidate all user sessions
-          await Session.invalidateUserSessions(alert.user_id, alert.user_type, 'Verified security threat');
+          await Session.invalidateUserSessions(alert.user_id, alert.user_type, 'Threat verified by admin');
 
           // Force password reset
           console.log(`🔒 Security Action: User ${alert.user_id} sessions invalidated - threat verified`);

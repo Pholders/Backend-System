@@ -619,7 +619,7 @@ class UserController {
       const userId = req.user.id;
       const limit = parseInt(req.query.limit) || 50;
 
-      const activityLog = await AuditLog.getUserActivity(userId, limit);
+      const activityLog = await AuditLog.getUserActivity(userId, 'patient', limit);
 
       res.status(200).json({
         success: true,

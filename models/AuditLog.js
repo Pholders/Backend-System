@@ -117,16 +117,23 @@ class AuditLog {
   /**
    * Get user's recent activity
    */
-  static async getUserActivity(userId, limit = 50) {
+  /**
+   * Ids repeat across patients, doctors, pharmacies and admins, so this is
+   * scoped by type: doctor 17 used to be shown patient 17's sign-ins too.
+   */
+  static async getUserActivity(userId, userType, limit = 50) {
+    if (!['patient', 'doctor', 'pharmacy', 'admin'].includes(userType)) {
+      throw new Error(`getUserActivity needs the user type; got ${userType}`);
+    }
     const selectQuery = `
       SELECT id, event_type, status, ip_address, created_at, error_message
       FROM audit_logs 
-      WHERE user_id = $1
+      WHERE user_id = $1 AND user_type = $2
       ORDER BY created_at DESC
-      LIMIT $2
+      LIMIT $3
     `;
 
-    const result = await query(selectQuery, [userId, limit]);
+    const result = await query(selectQuery, [userId, userType, limit]);
     return result.rows;
   }
 

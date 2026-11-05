@@ -452,7 +452,7 @@ class PharmacyController {
       const pharmacyId = req.user.id;
       const limit = parseInt(req.query.limit) || 50;
 
-      const activityLog = await AuditLog.getUserActivity(pharmacyId, limit);
+      const activityLog = await AuditLog.getUserActivity(pharmacyId, 'pharmacy', limit);
 
       res.status(200).json({
         success: true,

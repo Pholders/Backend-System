@@ -37,9 +37,33 @@ const PAYMENT_METHODS = {
   medical_aid: 'is claiming from medical aid',
 };
 
-async function send(doctorId, type, title, body, data) {
+/**
+ * The kinds a doctor can switch off in Notification Settings. Each event
+ * names the one it belongs to; anything not switched off is sent.
+ */
+const PREFERENCE_KEYS = ['newBookings', 'appointmentChanges', 'prescriptionsDispensed', 'reviews'];
+
+/** Null when [value] is a valid set of choices, else what is wrong with it. */
+function preferencesProblem(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return 'notificationPreferences must be an object of on/off choices';
+  }
+  for (const [key, on] of Object.entries(value)) {
+    if (!PREFERENCE_KEYS.includes(key)) {
+      return `Unknown notification choice: ${key}. Allowed: ${PREFERENCE_KEYS.join(', ')}`;
+    }
+    if (typeof on !== 'boolean') return `${key} must be true or false`;
+  }
+  return null;
+}
+
+async function send(doctorId, type, title, body, data, preference) {
   if (!doctorId) return null;
   try {
+    if (preference) {
+      const choices = await DoctorNotification.preferencesFor(doctorId);
+      if (choices[preference] === false) return null;
+    }
     return await DoctorNotification.create({ doctor_id: doctorId, type, title, body, data });
   } catch (error) {
     console.error('Doctor notification error (non-blocking):', error.message);
@@ -66,7 +90,8 @@ async function bookingConfirmed(appointmentId, paymentMethod) {
     'appointment',
     'New booking to accept',
     `${patientName(a)} booked ${when(a.appointment_date, a.time_slot)} and ${how}. Accept it in Appointments.`,
-    { appointmentId: a.id, paymentMethod: paymentMethod || null }
+    { appointmentId: a.id, paymentMethod: paymentMethod || null },
+    'newBookings'
   );
 }
 
@@ -78,7 +103,8 @@ async function appointmentCancelled(appointmentId) {
     'appointment',
     'Appointment cancelled',
     `${patientName(a)} cancelled their appointment on ${when(a.appointment_date, a.time_slot)}.`,
-    { appointmentId: a.id }
+    { appointmentId: a.id },
+    'appointmentChanges'
   );
 }
 
@@ -92,7 +118,8 @@ async function appointmentRescheduled(appointmentId, previousDate, previousSlot)
     'Appointment moved',
     `${patientName(a)} moved their appointment from ${when(previousDate, previousSlot)} ` +
       `to ${when(a.appointment_date, a.time_slot)}.`,
-    { appointmentId: a.id }
+    { appointmentId: a.id },
+    'appointmentChanges'
   );
 }
 
@@ -111,7 +138,8 @@ async function prescriptionDispensed(prescriptionId, pharmacyName) {
     'prescription',
     'Prescription dispensed',
     `${p.prescription_number} for ${p.patient_name || 'your patient'} was dispensed${where}.`,
-    { prescriptionId: p.id }
+    { prescriptionId: p.id },
+    'prescriptionsDispensed'
   );
 }
 
@@ -129,6 +157,8 @@ async function reviewReceived(review) {
   const data = { reviewId: review.id, rating: stars };
 
   try {
+    const choices = await DoctorNotification.preferencesFor(review.doctor_id);
+    if (choices.reviews === false) return null;
     const replaced = await DoctorNotification.replaceForReview(review.doctor_id, review.id, {
       title: 'Review updated',
       body,
@@ -139,10 +169,12 @@ async function reviewReceived(review) {
     console.error('Doctor notification error (non-blocking):', error.message);
     return null;
   }
-  return send(review.doctor_id, 'review', 'New review', body, data);
+  return send(review.doctor_id, 'review', 'New review', body, data, 'reviews');
 }
 
 module.exports = {
+  PREFERENCE_KEYS,
+  preferencesProblem,
   when,
   bookingConfirmed,
   appointmentCancelled,

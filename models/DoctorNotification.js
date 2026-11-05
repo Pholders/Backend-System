@@ -31,6 +31,9 @@ class DoctorNotification {
         ON doctor_notifications(doctor_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_doctor_notifications_doctor_unread
         ON doctor_notifications(doctor_id) WHERE is_read = FALSE;
+
+      -- Which kinds the doctor wants. Null, or a missing key, means yes.
+      ALTER TABLE doctors ADD COLUMN IF NOT EXISTS notification_preferences JSONB;
     `);
     console.log('✅ doctor_notifications table ready');
   }
@@ -79,6 +82,15 @@ class DoctorNotification {
       [doctor_id, String(reviewId), title, body, data]
     );
     return result.rows[0] || null;
+  }
+
+  /** The doctor's choices, or {} when they never made any. */
+  static async preferencesFor(doctor_id) {
+    const result = await query(
+      'SELECT notification_preferences FROM doctors WHERE id = $1',
+      [doctor_id]
+    );
+    return result.rows[0]?.notification_preferences || {};
   }
 
   /** Newest first. */

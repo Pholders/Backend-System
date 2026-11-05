@@ -1,6 +1,16 @@
 const nodemailer = require('nodemailer');
 const path = require('path');
 
+/** For text a user typed, before it goes into an email's HTML. */
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Email Service
  * Handles sending emails for OTP and other notifications
@@ -885,11 +895,19 @@ Review your security settings: ${process.env.FRONTEND_URL}/settings/security`
    */
   async sendSupportTicket(ticket, patient) {
     const supportInbox = this.getSupportFromAddress();
+    // The ticket carries category and message. This read type and body,
+    // which it never has, so every forwarded ticket said "New undefined
+    // Ticket" and arrived with an empty message. What the sender typed is
+    // escaped before it goes into the HTML.
+    const kind = ticket.category || ticket.type || 'general';
+    const body = ticket.message || ticket.body || '';
+    const account = patient?.id ? `Patient ${patient.id}` : 'Not signed in (a doctor, or a visitor)';
+    const name = `${patient?.first_name || ''} ${patient?.last_name || ''}`.trim();
     const mailOptions = {
       from: `"Pholders Support" <${this.getSupportFromAddress()}>`,
       to: supportInbox,
       replyTo: patient?.email,
-      subject: `[Support][${ticket.type}] ${ticket.subject || 'New ticket'}`,
+      subject: `[Support][${kind}] ${ticket.subject || 'New ticket'}`,
       html: `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -903,14 +921,14 @@ Review your security settings: ${process.env.FRONTEND_URL}/settings/security`
   </td></tr>
   <tr><td style="background:#6DD0D8;height:3px;font-size:0;">&nbsp;</td></tr>
   <tr><td style="padding:32px 40px;">
-    <h2 style="margin:0 0 20px;font-size:18px;font-weight:600;color:#1C2B4B;">New ${ticket.type} Ticket</h2>
+    <h2 style="margin:0 0 20px;font-size:18px;font-weight:600;color:#1C2B4B;">New ${escapeHtml(kind)} ticket</h2>
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;border:1px solid #dde3ea;border-radius:4px;margin:0 0 20px;">
-      <tr><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">From</span></td><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:13px;color:#3d4852;">${patient?.first_name || ''} ${patient?.last_name || ''} &lt;${patient?.email || ''}&gt;</span></td></tr>
-      <tr><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Patient ID</span></td><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:13px;color:#3d4852;">${patient?.id || 'n/a'}</span></td></tr>
-      <tr><td style="padding:10px 16px;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Subject</span></td><td style="padding:10px 16px;"><span style="font-size:13px;color:#3d4852;">${ticket.subject || '(none)'}</span></td></tr>
+      <tr><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">From</span></td><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:13px;color:#3d4852;">${escapeHtml(name)} &lt;${escapeHtml(patient?.email || '')}&gt;</span></td></tr>
+      <tr><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Account</span></td><td style="padding:10px 16px;border-bottom:1px solid #dde3ea;"><span style="font-size:13px;color:#3d4852;">${account}</span></td></tr>
+      <tr><td style="padding:10px 16px;"><span style="font-size:12px;color:#6c7a89;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Subject</span></td><td style="padding:10px 16px;"><span style="font-size:13px;color:#3d4852;">${escapeHtml(ticket.subject || '(none)')}</span></td></tr>
     </table>
     <div style="background:#f4f6f9;border:1px solid #dde3ea;border-radius:4px;padding:16px;margin:0 0 20px;">
-      <pre style="margin:0;white-space:pre-wrap;font-family:inherit;font-size:13px;color:#3d4852;line-height:1.7;">${ticket.body || ''}</pre>
+      <pre style="margin:0;white-space:pre-wrap;font-family:inherit;font-size:13px;color:#3d4852;line-height:1.7;">${escapeHtml(body)}</pre>
     </div>
     <p style="margin:0;font-size:12px;color:#9aa3ae;">Ticket ID: ${ticket.id || 'n/a'} &nbsp;&middot;&nbsp; Created: ${ticket.created_at || new Date().toISOString()}</p>
   </td></tr>
@@ -922,7 +940,7 @@ Review your security settings: ${process.env.FRONTEND_URL}/settings/security`
 </table>
 </body>
 </html>`,
-      text: `New ${ticket.type} ticket\nFrom: ${patient?.first_name || ''} ${patient?.last_name || ''} <${patient?.email}>\nPatient ID: ${patient?.id || 'n/a'}\nSubject: ${ticket.subject}\n\n${ticket.body}\n\nTicket ID: ${ticket.id || 'n/a'}`
+      text: `New ${kind} ticket\nFrom: ${name} <${patient?.email || ''}>\nAccount: ${account}\nSubject: ${ticket.subject || '(none)'}\n\n${body}\n\nTicket ID: ${ticket.id || 'n/a'}`
     };
 
     try {

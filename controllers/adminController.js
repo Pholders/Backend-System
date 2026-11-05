@@ -279,7 +279,7 @@ class AdminController {
       const adminId = req.user.id;
       const limit = parseInt(req.query.limit) || 50;
 
-      const activityLog = await AuditLog.getUserActivity(adminId, limit);
+      const activityLog = await AuditLog.getUserActivity(adminId, 'admin', limit);
 
       res.status(200).json({
         success: true,
@@ -783,7 +783,7 @@ class AdminController {
     try {
       const adminId = req.user.id;
 
-      const activities = await AuditLog.getUserActivity(adminId, 50);
+      const activities = await AuditLog.getUserActivity(adminId, 'admin', 50);
 
       res.status(200).json({
         success: true,

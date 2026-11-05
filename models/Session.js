@@ -1,5 +1,6 @@
 const { query } = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
+const USER_TYPES = ['patient', 'doctor', 'pharmacy', 'admin'];
 
 // Matches the sessions.user_type CHECK constraint.
 const USER_TYPES = ['patient', 'doctor', 'pharmacy', 'admin'];
@@ -141,33 +142,14 @@ class Session {
   }
 
   /**
-   * Revoke every live session of one account. Keyed on user_type as well as
-   * user_id because ids repeat across the patients, doctors, pharmacies and
-   * admins tables — patient 3 and doctor 3 are different people.
+   * Patients, doctors, pharmacies and admins each number their ids from 1,
+   * so a user id alone names up to four people. Every lookup and revocation
+   * by user is scoped by type: without it, doctor 17 was shown patient 17's
+   * devices, and a patient's password reset signed doctor 17 out.
    */
-  static async revokeAllForUser(userId, userType, reason) {
-    Session.assertUserType(userType);
-    const result = await query(
-      `UPDATE sessions
-          SET is_active = false, revoked_at = NOW(), revocation_reason = $3
-        WHERE user_id = $1 AND user_type = $2 AND is_active = true
-        RETURNING id`,
-      [userId, userType, reason]
-    );
-    return result.rowCount;
-  }
-
-  /**
-   * Every per-account method below needs the user_type as well as the id:
-   * ids repeat across the patients, doctors, pharmacies and admins tables,
-   * so filtering on user_id alone listed or revoked other people's sessions
-   * (a patient changing password logged out the doctor with the same id).
-   * Throwing on a missing/unknown type makes a caller that forgot it fail
-   * loudly instead of silently hitting the wrong accounts.
-   */
-  static assertUserType(userType) {
+  static requireUserType(userType) {
     if (!USER_TYPES.includes(userType)) {
-      throw new Error(`Session: userType must be one of ${USER_TYPES.join(', ')} (got ${userType})`);
+      throw new Error(`Session user type required, one of ${USER_TYPES.join(', ')}; got ${userType}`);
     }
   }
 
@@ -175,10 +157,10 @@ class Session {
    * Get all active sessions for a user
    */
   static async getUserActiveSessions(userId, userType) {
-    Session.assertUserType(userType);
+    this.requireUserType(userType);
     const selectQuery = `
       SELECT id, user_type, ip_address, device_info, created_at, last_activity_at, expires_at
-      FROM sessions
+      FROM sessions 
       WHERE user_id = $1 AND user_type = $2 AND is_active = true AND expires_at > NOW()
       ORDER BY last_activity_at DESC
     `;
@@ -188,12 +170,28 @@ class Session {
   }
 
   /**
+   * Revoke one of this user's own sessions. Null when it is not theirs or is
+   * already over, so nobody can sign out someone else by guessing an id.
+   */
+  static async revokeOwn(sessionId, userId, userType, reason = 'Signed out from another device') {
+    this.requireUserType(userType);
+    const result = await query(
+      `UPDATE sessions
+       SET is_active = false, revoked_at = NOW(), revocation_reason = $4
+       WHERE id = $1 AND user_id = $2 AND user_type = $3 AND is_active = true
+       RETURNING *`,
+      [sessionId, userId, userType, reason]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * Revoke all user sessions except current
    */
   static async revokeAllExcept(userId, userType, currentSessionId, reason = 'New device login') {
-    Session.assertUserType(userType);
+    this.requireUserType(userType);
     const updateQuery = `
-      UPDATE sessions
+      UPDATE sessions 
       SET is_active = false, revoked_at = NOW(), revocation_reason = $4
       WHERE user_id = $1 AND user_type = $2 AND id != $3 AND is_active = true
       RETURNING *
@@ -207,16 +205,16 @@ class Session {
    * Invalidate all user sessions (revoke all sessions for a user)
    */
   static async invalidateUserSessions(userId, userType, reason = 'Password reset') {
-    Session.assertUserType(userType);
+    this.requireUserType(userType);
     const updateQuery = `
-      UPDATE sessions
+      UPDATE sessions 
       SET is_active = false, revoked_at = NOW(), revocation_reason = $3
       WHERE user_id = $1 AND user_type = $2 AND is_active = true
       RETURNING *
     `;
 
     const result = await query(updateQuery, [userId, userType, reason]);
-    console.log(`✅ Invalidated ${result.rows.length} ${userType} sessions for user ${userId}`);
+    console.log(`✅ Invalidated ${result.rows.length} sessions for user ${userId}`);
     return result.rows;
   }
 
