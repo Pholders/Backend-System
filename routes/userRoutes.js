@@ -1356,6 +1356,26 @@ router.patch('/admin/pharmacies/:pharmacyId/status', authMiddleware, requireRole
 
 /**
  * @swagger
+ * /api/users/admin/pharmacies/{pharmacyId}:
+ *   get:
+ *     summary: One pharmacy for the admin View panel (everything but the password hash)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: pharmacyId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Pharmacy }
+ *       400: { description: Invalid id }
+ *       404: { description: Not found }
+ */
+router.get('/admin/pharmacies/:pharmacyId', authMiddleware, requireRole('admin'), AdminController.getPharmacy);
+
+/**
+ * @swagger
  * /api/users/admin/patients:
  *   get:
  *     summary: List patients (admin directory, no clinical or ID fields)

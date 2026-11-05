@@ -313,13 +313,11 @@ class AdminController {
   static async listPharmacies(req, res) {
     try {
       const { limit = 100, offset = 0, status } = req.query;
-      const pharmacies = await Pharmacy.findAll(parseInt(limit), parseInt(offset));
+      const pharmacies = await Pharmacy.listForAdmin(parseInt(limit), parseInt(offset));
 
       const visible = status
         ? pharmacies.filter((p) => p.status === status)
         : pharmacies;
-
-      visible.forEach((p) => { delete p.password_hash; });
 
       res.status(200).json({
         success: true,
@@ -495,6 +493,23 @@ class AdminController {
     } catch (error) {
       console.error('Get patient error:', error);
       res.status(500).json({ success: false, message: 'Error fetching patient', error: error.message });
+    }
+  }
+
+  /**
+   * Admin "View" on a pharmacy.
+   */
+  static async getPharmacy(req, res) {
+    const id = AdminController.parseId(req.params.pharmacyId);
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid pharmacy id' });
+
+    try {
+      const pharmacy = await Pharmacy.findByIdForAdmin(id);
+      if (!pharmacy) return res.status(404).json({ success: false, message: 'Pharmacy not found' });
+      res.status(200).json({ success: true, message: 'Pharmacy retrieved', data: pharmacy });
+    } catch (error) {
+      console.error('Get pharmacy error:', error);
+      res.status(500).json({ success: false, message: 'Error fetching pharmacy', error: error.message });
     }
   }
 
