@@ -1354,6 +1354,191 @@ router.get('/admin/activity-log', authMiddleware, requireRole('admin'), AdminCon
 router.get('/admin/pharmacies', authMiddleware, requireRole('admin'), AdminController.listPharmacies);
 router.patch('/admin/pharmacies/:pharmacyId/status', authMiddleware, requireRole('admin'), AdminController.setPharmacyStatus);
 
+/**
+ * @swagger
+ * /api/users/admin/patients:
+ *   get:
+ *     summary: List patients (admin directory, no clinical or ID fields)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50, maximum: 200 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "data: { total, limit, offset, patients[] }"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Not an admin
+ */
+router.get('/admin/patients', authMiddleware, requireRole('admin'), AdminController.listPatients);
+
+/**
+ * @swagger
+ * /api/users/admin/doctors:
+ *   get:
+ *     summary: List doctors (admin directory)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50, maximum: 200 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "data: { total, limit, offset, doctors[] }"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Not an admin
+ */
+router.get('/admin/doctors', authMiddleware, requireRole('admin'), AdminController.listDoctors);
+
+/**
+ * @swagger
+ * /api/users/admin/patients/{patientId}:
+ *   get:
+ *     summary: One patient for the admin View panel (no clinical or ID fields; the view is audit-logged)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: patientId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Patient }
+ *       404: { description: Not found }
+ * /api/users/admin/patients/{patientId}/status:
+ *   patch:
+ *     summary: Set a patient's status (leaving 'active' revokes their sessions)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: patientId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status: { type: string, enum: [active, suspended, blocked, pending] }
+ *     responses:
+ *       200: { description: Updated patient }
+ *       400: { description: Bad id or status }
+ *       404: { description: Not found }
+ * /api/users/admin/doctors/{doctorId}:
+ *   get:
+ *     summary: One doctor for the admin View panel
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: doctorId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Doctor }
+ *       404: { description: Not found }
+ * /api/users/admin/doctors/{doctorId}/status:
+ *   patch:
+ *     summary: Set a doctor's status (leaving 'active' revokes their sessions)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: doctorId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status: { type: string, enum: [active, suspended, blocked, pending] }
+ *     responses:
+ *       200: { description: Updated doctor }
+ *       400: { description: Bad id or status }
+ *       404: { description: Not found }
+ */
+router.get('/admin/patients/:patientId', authMiddleware, requireRole('admin'), AdminController.getPatient);
+router.patch('/admin/patients/:patientId/status', authMiddleware, requireRole('admin'), AdminController.setPatientStatus);
+router.get('/admin/doctors/:doctorId', authMiddleware, requireRole('admin'), AdminController.getDoctor);
+router.patch('/admin/doctors/:doctorId/status', authMiddleware, requireRole('admin'), AdminController.setDoctorStatus);
+
+/**
+ * @swagger
+ * /api/users/admin/dashboard/summary:
+ *   get:
+ *     summary: Dashboard stat cards, user distribution and alert tiles
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "data: { counts, revenue, alerts }"
+ * /api/users/admin/dashboard/activity:
+ *   get:
+ *     summary: Prescriptions and orders per bucket for the Activity Trend chart (SA time)
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: range
+ *         schema: { type: string, enum: [daily, monthly, yearly], default: monthly }
+ *     responses:
+ *       200:
+ *         description: "data: { range, buckets: [{ label, start, prescriptions, orders }] }"
+ *       400: { description: Unknown range }
+ * /api/users/admin/users/recent:
+ *   get:
+ *     summary: Newest sign-ups across patients, doctors and pharmacies
+ *     tags: [Admins]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: role
+ *         schema: { type: string, enum: [all, patient, doctor, pharmacy], default: all }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10, maximum: 50 }
+ *     responses:
+ *       200:
+ *         description: "data: { role, users: [{ id, role, name, email, status, profile_image, created_at }] }"
+ *       400: { description: Unknown role }
+ */
+router.get('/admin/dashboard/summary', authMiddleware, requireRole('admin'), AdminController.getDashboardSummary);
+router.get('/admin/dashboard/activity', authMiddleware, requireRole('admin'), AdminController.getDashboardActivity);
+router.get('/admin/users/recent', authMiddleware, requireRole('admin'), AdminController.getRecentUsers);
+
 router.get('/admin/security/dashboard', authMiddleware, requireRole('admin'), AdminController.getSecurityDashboard);
 
 /**

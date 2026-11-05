@@ -464,7 +464,7 @@ async function revokeDevice(req, res) {
 
     // Ensure the session belongs to this user
     const owned = await query(
-      `SELECT id FROM sessions WHERE id = $1 AND user_id = $2`,
+      `SELECT id FROM sessions WHERE id = $1 AND user_id = $2 AND user_type = 'patient'`,
       [sessionId, userId]
     );
     if (!owned.rows.length) {
