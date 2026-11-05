@@ -82,6 +82,9 @@ const AUDIT_EVENT_TYPES = [
   'review_update',
   'review_delete',
   'pharmacy_status_changed',
+  'patient_status_changed',
+  'doctor_status_changed',
+  'patient_record_viewed',
   'nearby_doctors_search',
   'delete_account_cancelled',
   'tier_upgrade'

@@ -138,6 +138,22 @@ class Session {
   }
 
   /**
+   * Revoke every live session of one account. Keyed on user_type as well as
+   * user_id because ids repeat across the patients, doctors, pharmacies and
+   * admins tables — patient 3 and doctor 3 are different people.
+   */
+  static async revokeAllForUser(userId, userType, reason) {
+    const result = await query(
+      `UPDATE sessions
+          SET is_active = false, revoked_at = NOW(), revocation_reason = $3
+        WHERE user_id = $1 AND user_type = $2 AND is_active = true
+        RETURNING id`,
+      [userId, userType, reason]
+    );
+    return result.rowCount;
+  }
+
+  /**
    * Get all active sessions for a user
    */
   static async getUserActiveSessions(userId) {

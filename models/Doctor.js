@@ -193,6 +193,63 @@ class Doctor {
   }
 
   /**
+   * One page of the doctor directory for an admin.
+   *
+   * Named columns rather than SELECT * so the password hash and
+   * notification preferences never leave the database. Filtering and
+   * counting happen in SQL so `total` covers the whole filtered set.
+   */
+  static async listForAdmin({ limit = 50, offset = 0, status } = {}) {
+    const params = [];
+    let where = '';
+    if (status) {
+      params.push(status);
+      where = `WHERE status = $${params.length}`;
+    }
+
+    const countResult = await query(`SELECT COUNT(*)::int AS total FROM doctors ${where}`, params);
+
+    params.push(limit, offset);
+    const result = await query(
+      `SELECT id, first_name, last_name, email, phone, hpcsa_number,
+              specialization, experience, qualification, clinic_name,
+              city, suburb, province, consultation_fee, currency,
+              rating, review_count, profile_image, status, email_verified,
+              created_at AT TIME ZONE 'UTC' AS created_at,
+              updated_at AT TIME ZONE 'UTC' AS updated_at
+         FROM doctors
+         ${where}
+         ORDER BY doctors.created_at DESC, id DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    return { total: countResult.rows[0].total, doctors: result.rows };
+  }
+
+  /**
+   * One doctor for the admin "View" panel: the whole profile except the
+   * password hash and notification preferences.
+   */
+  static async findByIdForAdmin(id) {
+    const result = await query(
+      `SELECT id, first_name, last_name, email, phone, hpcsa_number,
+              specialization, experience, qualification, bio, details,
+              clinic_name, clinic_address, address, suburb, city, province, zip_code,
+              latitude, longitude, consultation_fee, currency,
+              opens_at::text AS opens_at, closes_at::text AS closes_at, availability,
+              rating, review_count, profile_image, status, email_verified,
+              email_verified_at AT TIME ZONE 'UTC' AS email_verified_at,
+              created_at AT TIME ZONE 'UTC' AS created_at,
+              updated_at AT TIME ZONE 'UTC' AS updated_at
+         FROM doctors
+        WHERE id = $1`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  /**
    * Find doctors by specialization
    */
   static async findBySpecialization(specialization) {

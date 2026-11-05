@@ -3,6 +3,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const Admin = require('../models/Admin');
 const Pharmacy = require('../models/Pharmacy');
+const User = require('../models/User');
+const Doctor = require('../models/Doctor');
+const AdminDashboard = require('../models/AdminDashboard');
 const OTP = require('../models/OTP');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
@@ -331,6 +334,247 @@ class AdminController {
         error: error.message
       });
     }
+  }
+
+  /**
+   * limit/offset/status from the query string, clamped so a bad or huge
+   * value can't turn into an unbounded table scan.
+   */
+  static parseListQuery(q) {
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
+    const status = typeof q.status === 'string' && q.status.trim() ? q.status.trim() : undefined;
+    return { limit, offset, status };
+  }
+
+  /**
+   * Patient directory. Before this nothing let an admin list patients — the
+   * only patient list was GET /doctor/patients, scoped to one doctor — so
+   * the admin app could only show sample rows. The model returns list-safe
+   * columns only; see User.listForAdmin for what is deliberately left out.
+   */
+  static async listPatients(req, res) {
+    try {
+      const opts = AdminController.parseListQuery(req.query);
+      const { total, patients } = await User.listForAdmin(opts);
+
+      res.status(200).json({
+        success: true,
+        message: 'Patients retrieved',
+        data: { total, limit: opts.limit, offset: opts.offset, patients }
+      });
+    } catch (error) {
+      console.error('List patients error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching patients',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Doctor directory. GET /doctors only admits patients, so an admin token
+   * was refused there.
+   */
+  static async listDoctors(req, res) {
+    try {
+      const opts = AdminController.parseListQuery(req.query);
+      const { total, doctors } = await Doctor.listForAdmin(opts);
+
+      res.status(200).json({
+        success: true,
+        message: 'Doctors retrieved',
+        data: { total, limit: opts.limit, offset: opts.offset, doctors }
+      });
+    } catch (error) {
+      console.error('List doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching doctors',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Admin dashboard: stat cards, distribution donut and alert tiles.
+   * Definitions of each figure live on AdminDashboard.summary.
+   */
+  static async getDashboardSummary(req, res) {
+    try {
+      const data = await AdminDashboard.summary();
+      res.status(200).json({ success: true, message: 'Dashboard summary retrieved', data });
+    } catch (error) {
+      console.error('Dashboard summary error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching dashboard summary',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Admin dashboard: prescriptions and orders per day / month / year.
+   */
+  static async getDashboardActivity(req, res) {
+    const range = req.query.range || 'monthly';
+    if (!AdminDashboard.RANGES.includes(range)) {
+      return res.status(400).json({
+        success: false,
+        message: `range must be one of: ${AdminDashboard.RANGES.join(', ')}`
+      });
+    }
+
+    try {
+      const buckets = await AdminDashboard.activity(range);
+      res.status(200).json({ success: true, message: 'Dashboard activity retrieved', data: { range, buckets } });
+    } catch (error) {
+      console.error('Dashboard activity error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching dashboard activity',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Newest sign-ups across patients, doctors and pharmacies.
+   */
+  static async getRecentUsers(req, res) {
+    const role = req.query.role || 'all';
+    if (role !== 'all' && !AdminDashboard.ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `role must be one of: all, ${AdminDashboard.ROLES.join(', ')}`
+      });
+    }
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+
+    try {
+      const users = await AdminDashboard.recentUsers({ role: role === 'all' ? undefined : role, limit });
+      res.status(200).json({ success: true, message: 'Recent users retrieved', data: { role, users } });
+    } catch (error) {
+      console.error('Recent users error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching recent users',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Positive integer from a route param, or null.
+   */
+  static parseId(raw) {
+    return /^[1-9]\d{0,9}$/.test(String(raw)) ? Number(raw) : null;
+  }
+
+  /**
+   * Admin "View" on a patient. Every view is written to the audit log —
+   * this is health-platform data, so who looked at whom should be on record
+   * even though the clinical fields are not returned.
+   */
+  static async getPatient(req, res) {
+    const id = AdminController.parseId(req.params.patientId);
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid patient id' });
+
+    try {
+      const patient = await User.findByIdForAdmin(id);
+      if (!patient) return res.status(404).json({ success: false, message: 'Patient not found' });
+
+      await AuditLog.logSecurityEvent(
+        req, req.user.id, 'admin', req.user.email,
+        'patient_record_viewed', 'success', `Viewed patient ${id}`
+      );
+
+      res.status(200).json({ success: true, message: 'Patient retrieved', data: patient });
+    } catch (error) {
+      console.error('Get patient error:', error);
+      res.status(500).json({ success: false, message: 'Error fetching patient', error: error.message });
+    }
+  }
+
+  /**
+   * Admin "View" on a doctor.
+   */
+  static async getDoctor(req, res) {
+    const id = AdminController.parseId(req.params.doctorId);
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid doctor id' });
+
+    try {
+      const doctor = await Doctor.findByIdForAdmin(id);
+      if (!doctor) return res.status(404).json({ success: false, message: 'Doctor not found' });
+      res.status(200).json({ success: true, message: 'Doctor retrieved', data: doctor });
+    } catch (error) {
+      console.error('Get doctor error:', error);
+      res.status(500).json({ success: false, message: 'Error fetching doctor', error: error.message });
+    }
+  }
+
+  /**
+   * Shared body of the patient and doctor status setters (Verify / Reject /
+   * suspend). Login already refuses any status but 'active'; on top of that,
+   * moving an account off 'active' revokes its live sessions so the change
+   * takes effect now rather than when its token expires.
+   */
+  static async setAccountStatus(req, res, { kind, idParam, model, findForAdmin }) {
+    const ALLOWED = ['active', 'suspended', 'blocked', 'pending'];
+    const id = AdminController.parseId(req.params[idParam]);
+    const { status } = req.body || {};
+    const label = kind.charAt(0).toUpperCase() + kind.slice(1);
+
+    if (!id) return res.status(400).json({ success: false, message: `Invalid ${kind} id` });
+    if (!ALLOWED.includes(status)) {
+      return res.status(400).json({ success: false, message: `status must be one of: ${ALLOWED.join(', ')}` });
+    }
+
+    try {
+      const before = await findForAdmin(id);
+      if (!before) return res.status(404).json({ success: false, message: `${label} not found` });
+
+      await model.update(id, { status });
+      const sessionsRevoked = status === 'active'
+        ? 0
+        : await Session.revokeAllForUser(id, kind, `Account ${status} by admin`);
+
+      await AuditLog.logSecurityEvent(
+        req, req.user.id, 'admin', req.user.email,
+        `${kind}_status_changed`, 'success',
+        `${label} ${id} ${before.status} -> ${status}`
+      );
+
+      const updated = await findForAdmin(id);
+      res.status(200).json({
+        success: true,
+        message: `${label} ${status}`,
+        data: { ...updated, sessions_revoked: sessionsRevoked }
+      });
+    } catch (error) {
+      console.error(`Set ${kind} status error:`, error);
+      res.status(500).json({ success: false, message: `Error updating ${kind} status`, error: error.message });
+    }
+  }
+
+  static async setPatientStatus(req, res) {
+    return AdminController.setAccountStatus(req, res, {
+      kind: 'patient',
+      idParam: 'patientId',
+      model: User,
+      findForAdmin: (id) => User.findByIdForAdmin(id)
+    });
+  }
+
+  static async setDoctorStatus(req, res) {
+    return AdminController.setAccountStatus(req, res, {
+      kind: 'doctor',
+      idParam: 'doctorId',
+      model: Doctor,
+      findForAdmin: (id) => Doctor.findByIdForAdmin(id)
+    });
   }
 
   /**

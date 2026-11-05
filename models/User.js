@@ -279,6 +279,69 @@ class User {
   }
 
   /**
+   * One page of the patient directory for an admin.
+   *
+   * The columns are named rather than SELECT * so the directory can never
+   * carry clinical or identity data: no medical_history, allergies, blood
+   * type, ID/passport number (plain or encrypted), date of birth, address,
+   * emergency contacts, 2FA secret or device token. Viewing any of those is
+   * a separate, deliberate decision and does not belong in a list.
+   *
+   * Filtering and counting happen in SQL so `total` is the size of the
+   * whole filtered set, not just this page.
+   */
+  static async listForAdmin({ limit = 50, offset = 0, status } = {}) {
+    const params = [];
+    let where = '';
+    if (status) {
+      params.push(status);
+      where = `WHERE status = $${params.length}`;
+    }
+
+    const countResult = await query(`SELECT COUNT(*)::int AS total FROM patients ${where}`, params);
+
+    params.push(limit, offset);
+    const result = await query(
+      `SELECT id, first_name, last_name, email, phone, city, suburb,
+              status, email_verified, account_frozen, avatar_url,
+              created_at AT TIME ZONE 'UTC' AS created_at,
+              updated_at AT TIME ZONE 'UTC' AS updated_at
+         FROM patients
+         ${where}
+         ORDER BY patients.created_at DESC, id DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    return { total: countResult.rows[0].total, patients: result.rows };
+  }
+
+  /**
+   * One patient for the admin "View" panel: the directory columns plus
+   * demographic and account-security flags. Still no medical_history,
+   * allergies, blood type, ID/passport number, emergency contacts, 2FA
+   * secret or device token — the admin console is not a clinical record.
+   */
+  static async findByIdForAdmin(id) {
+    const result = await query(
+      `SELECT id, first_name, last_name, email, phone, gender, nationality,
+              date_of_birth::text AS date_of_birth,
+              address, suburb, city, state, zip_code, medical_aid_type,
+              status, role, email_verified,
+              email_verified_at AT TIME ZONE 'UTC' AS email_verified_at,
+              account_frozen, two_fa_enabled, face_id_enabled, fingerprint_enabled,
+              password_changed_at AT TIME ZONE 'UTC' AS password_changed_at,
+              avatar_url,
+              created_at AT TIME ZONE 'UTC' AS created_at,
+              updated_at AT TIME ZONE 'UTC' AS updated_at
+         FROM patients
+        WHERE id = $1`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  /**
    * Mark a patient's email as verified.
    * Sets email_verified = true and stamps email_verified_at = NOW().
    * Invalidates the user cache so subsequent reads see the updated flag.
