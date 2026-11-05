@@ -2,9 +2,6 @@ const { query } = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
 const USER_TYPES = ['patient', 'doctor', 'pharmacy', 'admin'];
 
-// Matches the sessions.user_type CHECK constraint.
-const USER_TYPES = ['patient', 'doctor', 'pharmacy', 'admin'];
-
 /**
  * Session Model
  * Manages user session tracking

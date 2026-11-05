@@ -539,13 +539,20 @@ class AdminController {
       await model.update(id, { status });
       const sessionsRevoked = status === 'active'
         ? 0
-        : await Session.revokeAllForUser(id, kind, `Account ${status} by admin`);
+        : (await Session.invalidateUserSessions(id, kind, `Account ${status} by admin`)).length;
 
-      await AuditLog.logSecurityEvent(
-        req, req.user.id, 'admin', req.user.email,
-        `${kind}_status_changed`, 'success',
-        `${label} ${id} ${before.status} -> ${status}`
-      );
+      // The status is already saved and sessions revoked, so a failed audit
+      // write must not turn this into a 500 — the admin would retry a change
+      // that already happened. Log it loudly instead.
+      try {
+        await AuditLog.logSecurityEvent(
+          req, req.user.id, 'admin', req.user.email,
+          `${kind}_status_changed`, 'success',
+          `${label} ${id} ${before.status} -> ${status}`
+        );
+      } catch (auditError) {
+        console.error(`Audit write failed for ${kind} ${id} status change:`, auditError.message);
+      }
 
       const updated = await findForAdmin(id);
       res.status(200).json({
