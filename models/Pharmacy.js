@@ -174,14 +174,27 @@ class Pharmacy {
    * wall-clock values the table stores into real instants, so they
    * serialise correctly whatever time zone Node runs in.
    */
-  static async listForAdmin(limit = 100, offset = 0) {
+  static async listForAdmin({ limit = 100, offset = 0, status } = {}) {
+    // Filter and count in SQL, so `total` is the whole filtered set and a
+    // status filter finds matches beyond the first page.
+    const params = [];
+    let where = '';
+    if (status) {
+      params.push(status);
+      where = `WHERE status = $${params.length}`;
+    }
+
+    const countResult = await query(`SELECT COUNT(*)::int AS total FROM pharmacies ${where}`, params);
+
+    params.push(limit, offset);
     const result = await query(
       `SELECT ${ADMIN_COLUMNS} FROM pharmacies
+        ${where}
         ORDER BY pharmacies.created_at DESC, id DESC
-        LIMIT $1 OFFSET $2`,
-      [limit, offset]
+        LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
     );
-    return result.rows;
+    return { total: countResult.rows[0].total, pharmacies: result.rows };
   }
 
   /**
