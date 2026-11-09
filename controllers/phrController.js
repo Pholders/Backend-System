@@ -5,7 +5,7 @@
 
 const PHR = require('../models/PHR');
 const PHRAccess = require('../models/PHRAccess');
-const { validateVitals, computeBmi } = require('../services/vitalsService');
+const { validateVitals, computeBmi, VITAL_KINDS } = require('../services/vitalsService');
 const { describeAccess } = require('../services/phrAccessService');
 const Doctor = require('../models/Doctor');
 const notificationService = require('../services/notificationService');
@@ -356,9 +356,12 @@ exports.recordPatientVital = async (req, res) => {
       });
     }
 
-    if (values.weight_kg != null) {
+    // BMI from this visit's weight and height, or the last one on record
+    // for whichever was not taken today.
+    if (values.weight_kg != null || values.height_cm != null) {
+      const weight = values.weight_kg ?? await PHR.getLatestWeight(patientId);
       const height = values.height_cm ?? await PHR.getLatestHeight(patientId);
-      values.bmi = computeBmi(values.weight_kg, height);
+      values.bmi = computeBmi(weight, height);
     }
 
     values.recorded_by_doctor_id = doctorId;
@@ -1023,4 +1026,17 @@ exports.downloadPatientDocument = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+/**
+ * @route GET /api/users/phr/vitals/kinds
+ * The vitals a doctor can record: which the form always shows, which can be
+ * added, and each one's limits. One list for the server's checks and the
+ * forms, so a vital added on the server reaches the doctor's form.
+ */
+exports.getVitalKinds = (req, res) => {
+  res.json({
+    success: true,
+    data: { kinds: VITAL_KINDS, derived: [{ key: 'bmi', label: 'BMI', from: ['weight_kg', 'height_cm'] }] },
+  });
 };

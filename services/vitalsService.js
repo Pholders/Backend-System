@@ -1,25 +1,65 @@
-// A patient types their own readings in, so this checks that each value is
+// The doctor records vitals at a consultation. This checks that each value is
 // physically possible, not that it is healthy. The limits are deliberately
 // wide: a reading outside a healthy range is still a real reading worth
 // keeping, and judging it is the doctor's job (the SRS keeps acute alerts out
 // of scope). What gets rejected is a typo, like a heart rate of 9999.
 
-const LIMITS = {
-  systolic_bp: { min: 50, max: 260, label: 'Systolic blood pressure', unit: 'mmHg', integer: true },
-  diastolic_bp: { min: 30, max: 160, label: 'Diastolic blood pressure', unit: 'mmHg', integer: true },
-  heart_rate: { min: 25, max: 250, label: 'Heart rate', unit: 'bpm', integer: true },
-  weight_kg: { min: 1, max: 350, label: 'Weight', unit: 'kg' },
-  height_cm: { min: 40, max: 250, label: 'Height', unit: 'cm' },
-  blood_glucose: { min: 1, max: 40, label: 'Blood glucose', unit: 'mmol/L' },
-  oxygen_saturation: { min: 50, max: 100, label: 'Oxygen saturation', unit: '%' },
-  temperature_c: { min: 30, max: 45, label: 'Temperature', unit: '°C' },
-};
-
-// Height alone is not a measurement worth a row: it only feeds BMI.
-const MEASUREMENTS = [
-  'systolic_bp', 'diastolic_bp', 'heart_rate', 'weight_kg',
-  'blood_glucose', 'oxygen_saturation', 'temperature_c',
+/**
+ * Every vital a doctor can record, in the order the form shows them. The
+ * first three are what a consultation records as a rule (blood pressure,
+ * pulse, weight), so the form always shows them; the rest are added when
+ * measured. This list is served at GET /phr/vitals/kinds, so a vital added
+ * here (with its column on health_vitals) reaches the doctor's form without
+ * changing the portal. BMI is not recorded: it is worked out from weight and
+ * height.
+ */
+const VITAL_KINDS = [
+  {
+    key: 'blood_pressure', label: 'Blood pressure', unit: 'mmHg', default: true,
+    fields: [
+      { key: 'systolic_bp', label: 'Systolic (top)', min: 50, max: 260, integer: true },
+      { key: 'diastolic_bp', label: 'Diastolic (bottom)', min: 30, max: 160, integer: true },
+    ],
+  },
+  {
+    key: 'heart_rate', label: 'Pulse', unit: 'bpm', default: true,
+    fields: [{ key: 'heart_rate', label: 'Pulse (heart rate)', min: 25, max: 250, integer: true }],
+  },
+  {
+    key: 'weight_kg', label: 'Weight', unit: 'kg', default: true,
+    fields: [{ key: 'weight_kg', label: 'Weight', min: 1, max: 350 }],
+  },
+  {
+    key: 'height_cm', label: 'Height', unit: 'cm', default: false,
+    fields: [{ key: 'height_cm', label: 'Height', min: 40, max: 250 }],
+  },
+  {
+    key: 'temperature_c', label: 'Temperature', unit: '°C', default: false,
+    fields: [{ key: 'temperature_c', label: 'Temperature', min: 30, max: 45 }],
+  },
+  {
+    key: 'oxygen_saturation', label: 'Oxygen saturation', unit: '%', default: false,
+    fields: [{ key: 'oxygen_saturation', label: 'Oxygen saturation', min: 50, max: 100 }],
+  },
+  {
+    key: 'blood_glucose', label: 'Blood glucose', unit: 'mmol/L', default: false,
+    fields: [{ key: 'blood_glucose', label: 'Blood glucose', min: 1, max: 40 }],
+  },
 ];
+
+// The column rules, one per field, as validateVitals checks them.
+const LIMITS = Object.fromEntries(
+  VITAL_KINDS.flatMap((kind) => kind.fields.map((f) => [f.key, {
+    min: f.min,
+    max: f.max,
+    label: kind.fields.length > 1 ? `${kind.label}, ${f.label.toLowerCase()}` : f.label,
+    unit: kind.unit,
+    integer: Boolean(f.integer),
+  }]))
+);
+
+// Height counts on its own now: with a weight on record it gives a BMI.
+const MEASUREMENTS = Object.keys(LIMITS);
 
 const NOTES_MAX = 500;
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
@@ -103,4 +143,4 @@ function validateVitals(body, now = new Date()) {
   return { errors, values };
 }
 
-module.exports = { validateVitals, computeBmi, LIMITS };
+module.exports = { validateVitals, computeBmi, LIMITS, VITAL_KINDS };

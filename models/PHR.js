@@ -395,6 +395,17 @@ class PHR {
     return result.rows[0] ? Number(result.rows[0].height_cm) : null;
   }
 
+  /** The most recent weight on record, for BMI when only height is taken. */
+  static async getLatestWeight(patientId) {
+    const result = await query(
+      `SELECT weight_kg FROM health_vitals
+       WHERE patient_id = $1 AND weight_kg IS NOT NULL
+       ORDER BY measured_at DESC LIMIT 1`,
+      [patientId]
+    );
+    return result.rows[0] ? Number(result.rows[0].weight_kg) : null;
+  }
+
   /**
    * Record health vital measurement
    */

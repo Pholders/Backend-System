@@ -2265,6 +2265,7 @@ router.get('/phr/allergies', authMiddleware, requireRole('patient'), PHRControll
 router.get('/phr/conditions', authMiddleware, requireRole('patient'), PHRController.getMedicalConditions);
 router.get('/phr/appointments', authMiddleware, requireRole('patient'), PHRController.getUpcomingAppointments);
 router.get('/phr/history', authMiddleware, requireRole('patient'), PHRController.getHealthHistory);
+router.get('/phr/vitals/kinds', authMiddleware, PHRController.getVitalKinds);
 router.get('/phr/vitals', authMiddleware, requireRole('patient'), PHRController.getHealthVitals);
 router.get('/phr/vitals/range', authMiddleware, requireRole('patient'), PHRController.getHealthVitalsRange);
 router.get('/phr/documents', authMiddleware, requireRole('patient'), PHRController.getPHRDocuments);

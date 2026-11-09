@@ -57,11 +57,15 @@ it('blank fields are skipped rather than stored as zero', () => {
 // ── what gets turned away ─────────────────────────────────────────────────
 it('an empty form is refused', () => {
   assert.strictEqual(check({}).errors.length, 1);
-  assert.strictEqual(check({ notes: 'felt fine', height_cm: 170 }).errors.length, 1);
+  assert.strictEqual(check({ notes: 'felt fine' }).errors.length, 1);
+});
+
+it('height on its own is a reading: with a weight on record it gives a BMI', () => {
+  assert.deepStrictEqual(check({ height_cm: 170 }).errors, []);
 });
 
 it('an impossible heart rate is refused', () => {
-  assert.match(check({ heart_rate: 9999 }).errors[0], /Heart rate must be between/);
+  assert.match(check({ heart_rate: 9999 }).errors[0], /Pulse \(heart rate\) must be between/);
 });
 
 it('text that is not a number is refused', () => {
