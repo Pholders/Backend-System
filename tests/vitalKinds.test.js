@@ -1,8 +1,8 @@
 // A consultation records blood pressure, pulse and weight as a rule, so the
 // doctor's form shows those three and lets the doctor add the rest. One list
 // on the server drives both the checks and the form. BMI is worked out from
-// weight and height, taking whichever was not measured today from the last
-// reading. The database is stubbed: nothing here touches it.
+// weight and height, only when height is recorded at the visit (Prince,
+// 9 Nov); a missing weight comes from the last reading. The database is stubbed: nothing here touches it.
 //
 // Run with: node tests/vitalKinds.test.js
 const assert = require('assert');
@@ -79,10 +79,10 @@ it('weight and height taken together give the BMI', async () => {
   assert.strictEqual(saved.bmi, 25);
 });
 
-it('weight today uses the height on record', async () => {
+it('weight alone gives no BMI, even with a height on record', async () => {
   latest = { weight: null, height: 175 };
   await record({ weight_kg: 81.2 });
-  assert.strictEqual(saved.bmi, 26.51);
+  assert.strictEqual(saved.bmi, undefined);
 });
 
 it('height today uses the weight on record', async () => {
@@ -92,9 +92,9 @@ it('height today uses the weight on record', async () => {
   assert.strictEqual(saved.bmi, 24.91);
 });
 
-it('no BMI without both, and none for a pulse alone', async () => {
+it('height with no weight anywhere gives no BMI, and a pulse alone none', async () => {
   latest = { weight: null, height: null };
-  await record({ weight_kg: 70 });
+  await record({ height_cm: 170 });
   assert.strictEqual(saved.bmi, null);
   await record({ heart_rate: 72 });
   assert.strictEqual(saved.bmi, undefined);

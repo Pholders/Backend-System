@@ -356,12 +356,11 @@ exports.recordPatientVital = async (req, res) => {
       });
     }
 
-    // BMI from this visit's weight and height, or the last one on record
-    // for whichever was not taken today.
-    if (values.weight_kg != null || values.height_cm != null) {
+    // BMI only when height is recorded at this visit (Prince, 9 Nov), with
+    // this visit's weight or, if none was taken, the last one on record.
+    if (values.height_cm != null) {
       const weight = values.weight_kg ?? await PHR.getLatestWeight(patientId);
-      const height = values.height_cm ?? await PHR.getLatestHeight(patientId);
-      values.bmi = computeBmi(weight, height);
+      values.bmi = computeBmi(weight, values.height_cm);
     }
 
     values.recorded_by_doctor_id = doctorId;
