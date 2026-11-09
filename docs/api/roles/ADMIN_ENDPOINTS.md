@@ -3,6 +3,8 @@
 **Role**: `admin` | **Base URL**: `https://backend-system-u8s2.onrender.com/api` | **Auth**: `Bearer {jwt_token}`
 
 > **Note**: Admin accounts do not use self-registration. Login requires credentials pre-created in the system.
+>
+> Building the admin screens for orders, payments, appointments, prescriptions, support, reviews or security alerts? See [ADMIN_RECORDS_FRONTEND.md](./ADMIN_RECORDS_FRONTEND.md) for response shapes, error handling and a ready-made client.
 
 ---
 
