@@ -954,6 +954,61 @@ Review your security settings: ${process.env.FRONTEND_URL}/settings/security`
   }
 
   /**
+   * An admin's reply to a support ticket, sent to whoever raised it. Replies
+   * to this email land in the support inbox. Returns { success } rather than
+   * throwing: the reply is already saved on the ticket either way.
+   */
+  async sendSupportReply(ticket, replyMessage) {
+    const supportInbox = this.getSupportFromAddress();
+    const name = (ticket.first_name || '').trim() || 'there';
+    const subject = `Re: ${ticket.subject || 'Your support request'} [Ticket #${ticket.id}]`;
+    const mailOptions = {
+      from: `"Pholders Support" <${supportInbox}>`,
+      to: ticket.email,
+      replyTo: supportInbox,
+      subject,
+      html: `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:32px 16px;">
+<tr><td align="center">
+<table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);">
+  <tr><td style="background:#1C2B4B;padding:24px 40px;">
+    <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:1px;">PHOLDERS</span><span style="color:#6DD0D8;font-size:18px;font-weight:300;"> HEALTHCARE</span>
+    <span style="display:block;color:#9aa3ae;font-size:12px;margin-top:4px;letter-spacing:1px;text-transform:uppercase;">Support</span>
+  </td></tr>
+  <tr><td style="background:#6DD0D8;height:3px;font-size:0;">&nbsp;</td></tr>
+  <tr><td style="padding:32px 40px;">
+    <p style="margin:0 0 16px;font-size:14px;color:#3d4852;">Hi ${escapeHtml(name)},</p>
+    <div style="margin:0 0 20px;">
+      <pre style="margin:0;white-space:pre-wrap;font-family:inherit;font-size:14px;color:#3d4852;line-height:1.7;">${escapeHtml(replyMessage)}</pre>
+    </div>
+    <p style="margin:0 0 20px;font-size:13px;color:#6c7a89;">You can reply to this email if you need anything else.</p>
+    <p style="margin:0;font-size:12px;color:#9aa3ae;">Ticket #${escapeHtml(String(ticket.id))} &nbsp;&middot;&nbsp; ${escapeHtml(ticket.subject || '')}</p>
+  </td></tr>
+  <tr><td style="background:#f8f9fb;border-top:1px solid #e8edf2;padding:20px 40px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#9aa3ae;">&copy; 2026 Pholders Healthcare. All rights reserved.</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`,
+      text: `Hi ${name},\n\n${replyMessage}\n\nYou can reply to this email if you need anything else.\n\nTicket #${ticket.id} - ${ticket.subject || ''}`
+    };
+
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('✅ Support reply sent:', info.messageId);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ Support reply failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Forward a suspicious-activity report to the security inbox.
    */
   async sendSuspiciousActivityReport(report, patient) {
