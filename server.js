@@ -24,6 +24,7 @@ const {
 
 // Import routes
 const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const medicationRoutes = require('./routes/medicationRoutes');
@@ -161,6 +162,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 // API ROUTES
 // ============================================================================
 
+// Admin records (orders, payments, support, reviews, alerts...). Paths it
+// doesn't match fall through to the admin routes in userRoutes.
+app.use('/api/users/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/auth', userRoutes);
 app.use('/api', bookingRoutes);

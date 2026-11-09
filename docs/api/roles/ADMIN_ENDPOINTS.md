@@ -34,6 +34,30 @@
 |--------|----------|------|-------------|
 | GET | `/users/admin/security/dashboard` | Admin | View security monitoring dashboard |
 | GET | `/users/admin/security/user-locations` | Admin | View user login locations |
+| GET | `/users/admin/security/alerts/stats` | Admin | Alert counts, last 24 hours and 7 days |
+| GET | `/users/admin/security/alerts` | Admin | List alerts, most severe first (`status`, `severity`, `alert_type`, `user_type` + `user_id`, `hours`) |
+| GET | `/users/admin/security/alerts/:alertId` | Admin | One alert |
+| POST | `/users/admin/security/alerts/:alertId/review` | Admin | `verified_legit` / `verified_threat` / `dismissed`. A threat signs the account out and emails its owner |
+| POST | `/users/admin/security/alerts/bulk-review` | Admin | Same for up to 200 `alertIds` |
+| GET | `/users/admin/security/suspicious-users` | Admin | Accounts with `threshold`+ unreviewed critical alerts in `hours` |
+| GET | `/users/admin/security/report` | Admin | Alerts per day, type and severity (`from`/`to`, default last 30 days) |
+
+---
+
+## Platform records
+
+Every list takes `limit` (1-200, default 50) and `offset` and returns `total` over the whole filtered set. `from`/`to` are inclusive South African dates (`YYYY-MM-DD`). Clinical text, ID numbers, medical-aid numbers, signatures and QR tokens are never returned.
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/users/admin/orders` | Admin | List orders (`status`, `payment_type`, `pharmacy_id`, `patient_id`, `from`, `to`) |
+| GET | `/users/admin/orders/:orderId` | Admin | One order with its status history |
+| GET | `/users/admin/payments` | Admin | List payments, with count and amount per status (`status`, `method`, `patient_id`, `doctor_id`, `from`, `to`) |
+| GET | `/users/admin/payments/:paymentId` | Admin | One payment |
+| GET | `/users/admin/appointments` | Admin | List appointments (`status`, `payment_status`, `doctor_id`, `patient_id`; `from`/`to` on the appointment date) |
+| GET | `/users/admin/appointments/:appointmentId` | Admin | One appointment with its payments and prescriptions |
+| GET | `/users/admin/prescriptions` | Admin | List prescriptions (`state` = pending/active/dispensed/revoked, `doctor_id`, `patient_id`, `from`, `to`) |
+| GET | `/users/admin/prescriptions/:prescriptionId` | Admin | One prescription with its orders. Audit-logged |
 
 ---
 
@@ -111,3 +135,17 @@
 |--------|----------|------|-------------|
 | POST | `/support/tickets` | Public | Submit a support ticket (also available to public) |
 | GET | `/support/faq` | Public | Get FAQ list |
+| GET | `/users/admin/support/tickets` | Admin | Support inbox, open and urgent first (`status`, `priority`, `category`, `search` on subject/email) |
+| GET | `/users/admin/support/tickets/:ticketId` | Admin | One ticket with its message and replies |
+| PATCH | `/users/admin/support/tickets/:ticketId` | Admin | Set `status` and/or `priority` |
+| POST | `/users/admin/support/tickets/:ticketId/replies` | Admin | Email a reply (`message`) to the sender. An open ticket moves to in_progress; a closed one is refused (409) |
+
+---
+
+## Doctor reviews
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/users/admin/reviews` | Admin | List reviews, hidden ones included (`doctor_id`, `patient_id`, `rating`, `hidden`) |
+| PATCH | `/users/admin/reviews/:reviewId/visibility` | Admin | `{ hidden, reason }`. Hidden reviews leave the doctor's public list and rating; the patient still sees their own |
+| DELETE | `/users/admin/reviews/:reviewId` | Admin | Delete a review permanently |

@@ -16,6 +16,7 @@ const { runMigration: createInAppNotifications } = require('./createInAppNotific
 // Exports the function directly, unlike the { runMigration } modules above.
 const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
+const { runMigration: addAdminModeration } = require('./addAdminModeration');
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
@@ -175,6 +176,10 @@ const initializeDatabase = async () => {
 
     // Initialize default pharmacy groups and tiers
     await initializePharmacyGroups();
+
+    // Review hiding, support replies and the admin audit event types. Last,
+    // so doctor_reviews and support_tickets exist.
+    await addAdminModeration();
     
     console.log('✅ Database initialization completed successfully');
     return true;

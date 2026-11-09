@@ -82,7 +82,7 @@ class DoctorReview {
         u.last_name
       FROM doctor_reviews dr
       LEFT JOIN patients u ON dr.patient_id = u.id
-      WHERE dr.doctor_id = $1
+      WHERE dr.doctor_id = $1 AND NOT dr.is_hidden
       ORDER BY dr.created_at DESC
       LIMIT $2 OFFSET $3;
     `;
@@ -101,7 +101,7 @@ class DoctorReview {
    */
   static async getReviewCount(doctorId) {
     const query = `
-      SELECT COUNT(*) as total_reviews FROM doctor_reviews WHERE doctor_id = $1;
+      SELECT COUNT(*) as total_reviews FROM doctor_reviews WHERE doctor_id = $1 AND NOT is_hidden;
     `;
 
     try {
@@ -129,7 +129,7 @@ class DoctorReview {
         ROUND((COUNT(CASE WHEN rating = 2 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as two_star_percentage,
         ROUND((COUNT(CASE WHEN rating = 1 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) as one_star_percentage
       FROM doctor_reviews 
-      WHERE doctor_id = $1;
+      WHERE doctor_id = $1 AND NOT is_hidden;
     `;
 
     try {
@@ -150,7 +150,7 @@ class DoctorReview {
         rating,
         COUNT(*) as count
       FROM doctor_reviews
-      WHERE doctor_id = $1
+      WHERE doctor_id = $1 AND NOT is_hidden
       GROUP BY rating
       ORDER BY rating DESC;
     `;
@@ -265,6 +265,7 @@ class DoctorReview {
         dr.rating,
         dr.review_text,
         dr.is_verified,
+        dr.is_hidden,
         dr.created_at,
         dr.updated_at,
         d.first_name as doctor_first_name,
