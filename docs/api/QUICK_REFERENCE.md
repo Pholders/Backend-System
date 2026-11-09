@@ -43,7 +43,7 @@ Content-Type: application/json
 | POST | `/api/pharmacies/verify-otp` | ❌ | Verify registration |
 | GET | `/api/pharmacies/:pharmacyId` | ❌ | Get pharmacy profile |
 | GET | `/api/users/pharmacy/current-tier` | ✅ | Get current tier |
-| POST | `/api/users/pharmacy/upgrade-tier` | ✅ | Upgrade tier |
+| POST | `/api/users/pharmacy/upgrade-tier` | ✅ | Disabled for now (403) |
 
 ---
 
@@ -189,7 +189,7 @@ Content-Type: application/json
 
 ⚠️ **Pharmacy Auto-Assignment**:
 - New pharmacies registered → automatically assigned to **Basic Tier**
-- Can self-upgrade anytime via `/pharmacy/upgrade-tier` endpoint
+- Self-upgrade is disabled for now (`/pharmacy/upgrade-tier` returns 403); admins change tiers
 - Cannot downgrade without admin approval
 
 ⚠️ **OTP Expiry**:

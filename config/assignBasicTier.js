@@ -1,4 +1,5 @@
 const { query } = require('./db');
+const { tierCheckList } = require('./tiers');
 
 /**
  * Migration: every doctor and pharmacy is on the Basic tier for now.
@@ -11,7 +12,7 @@ const { query } = require('./db');
  *
  * Doctors: had no tier anywhere. doctors.tier is added, NOT NULL with
  * default 'basic', so existing and future doctors start on Basic. Nothing
- * reads it yet; the values match pharmacy_groups.tier.
+ * reads it yet; the allowed values are config/tiers.js, as for pharmacies.
  *
  * Idempotent. Runs after the default pharmacy groups exist.
  */
@@ -22,15 +23,11 @@ const runMigration = async () => {
       ALTER TABLE doctors
         ADD COLUMN IF NOT EXISTS tier VARCHAR(20) NOT NULL DEFAULT 'basic';
     `);
+    // Rebuilt every boot so it follows config/tiers.js.
+    await query(`ALTER TABLE doctors DROP CONSTRAINT IF EXISTS doctors_tier_check;`);
     await query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'doctors_tier_check') THEN
-          ALTER TABLE doctors
-            ADD CONSTRAINT doctors_tier_check
-            CHECK (tier IN ('basic', 'standard', 'premium', 'enterprise'));
-        END IF;
-      END $$;
+      ALTER TABLE doctors
+        ADD CONSTRAINT doctors_tier_check CHECK (tier IN (${tierCheckList()}));
     `);
     console.log('✅ doctors.tier ready (default basic)');
 

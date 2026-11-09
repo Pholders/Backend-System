@@ -25,7 +25,7 @@ class PharmacyGroup {
     const {
       group_name,
       parent_company,
-      tier = 'standard',
+      tier = 'basic',
       description,
       commission_rate,
       created_by

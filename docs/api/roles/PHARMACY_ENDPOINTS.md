@@ -204,7 +204,7 @@
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/users/pharmacy/upgrade-tier` | Pharmacy | Upgrade to a higher tier (Basic → Premium → Enterprise) |
+| POST | `/users/pharmacy/upgrade-tier` | Pharmacy | **Disabled for now**: returns 403 `TIER_UPGRADES_DISABLED`. Admins change tiers |
 | GET | `/users/pharmacy/current-tier` | Pharmacy | Get current tier and tier features |
 
 ### Tier Summary
@@ -215,37 +215,20 @@
 | Premium | Priority routing, enhanced analytics |
 | Enterprise | Full routing control, compliance dashboard, custom agreements |
 
-> **Note**: Tier downgrade is prevented by the system.
+> **Note**: The tiers are `basic`, `premium` and `enterprise`. Every pharmacy is on Basic for now; only an admin can change a pharmacy's tier.
 
 ### Request & Response Examples
 
 #### POST `/users/pharmacy/upgrade-tier`
-**Request Body:**
-```json
-{
-  "targetTier": "Premium",
-  "paymentMethod": "credit_card"
-}
-```
 
-**Response (200 OK):**
+Switched off for now. Every pharmacy is on Basic, and an admin changes a pharmacy's tier by moving it between pharmacy groups. Whatever the body, the response is:
+
+**Response (403 Forbidden):**
 ```json
 {
-  "success": true,
-  "message": "Tier upgrade initiated",
-  "data": {
-    "pharmacyId": "phm_abc123def456",
-    "previousTier": "Basic",
-    "newTier": "Premium",
-    "upgradeDate": "2026-08-05T15:45:00Z",
-    "status": "active",
-    "features": [
-      "Standard dispensing",
-      "Basic claim routing",
-      "Priority routing",
-      "Enhanced analytics"
-    ]
-  }
+  "success": false,
+  "code": "TIER_UPGRADES_DISABLED",
+  "message": "Tier upgrades aren't available yet. Contact Pholders support to change your tier."
 }
 ```
 

@@ -148,7 +148,7 @@ Downgrade requires admin approval
 - POST `/pharmacies/register` - Register
 - POST `/pharmacies/verify-otp` - Verify (auto-assign Basic tier)
 - GET `/users/pharmacy/current-tier` - Get tier info
-- POST `/users/pharmacy/upgrade-tier` - Upgrade tier
+- POST `/users/pharmacy/upgrade-tier` - Disabled for now (403)
 
 ### Payments
 - POST `/payments/initialize` - Initialize payment
@@ -226,7 +226,7 @@ Downgrade requires admin approval
 4. Verify prescription (not expired, not already dispensed)
 5. Dispense prescription (POST /prescriptions/:id/dispense)
 6. Record items dispensed and payment
-7. Can upgrade tier anytime (POST /pharmacy/upgrade-tier)
+7. Tier changes go through an admin (POST /pharmacy/upgrade-tier is disabled for now)
 ```
 
 ---

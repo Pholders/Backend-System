@@ -21,8 +21,8 @@ async function addPharmacyPartnerships() {
         id SERIAL PRIMARY KEY,
         group_name VARCHAR(255) NOT NULL,
         parent_company VARCHAR(255),
-        tier VARCHAR(20) NOT NULL DEFAULT 'standard',
-        CHECK (tier IN ('premium', 'standard', 'basic')),
+        tier VARCHAR(20) NOT NULL DEFAULT 'basic',
+        CHECK (tier IN ('basic', 'premium', 'enterprise')),
         
         description TEXT,
         total_pharmacies INT DEFAULT 0,

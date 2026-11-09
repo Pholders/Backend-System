@@ -492,6 +492,8 @@ Authorization: Bearer {token}
 ### 5. Upgrade Pharmacy Tier
 **Endpoint**: `POST /users/pharmacy/upgrade-tier`
 
+> **Disabled for now.** Every pharmacy is on Basic and this returns `403` with `code: "TIER_UPGRADES_DISABLED"`. Hide the upgrade button; admins change tiers. The shape below is for when upgrades return.
+
 **Auth Required**: ✅ Yes (Pharmacy)
 
 **Request Body**:

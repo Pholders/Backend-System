@@ -151,7 +151,7 @@ Payment status automatically changes to `completed` when:
 1. **Registration**: Pharmacy signs up
 2. **Verification**: OTP verification
 3. **Auto-Assignment**: Automatically assigned to Basic Tier
-4. **Upgrade**: Self-service via `POST /pharmacy/upgrade-tier`
+4. **Upgrade**: Disabled for now (`POST /pharmacy/upgrade-tier` returns 403); an admin moves the pharmacy to another group
 5. **Downgrade**: Admin-only (contact support)
 
 ---

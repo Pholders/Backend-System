@@ -1,4 +1,5 @@
 const { query } = require('../config/db');
+const { TIERS, TIER_RANK, tierOrderSql } = require('../config/tiers');
 const PharmacyGroup = require('../models/PharmacyGroup');
 const PharmacyAgreement = require('../models/PharmacyAgreement');
 
@@ -97,17 +98,13 @@ class PharmacyRoutingService {
           p.delivery_available,
           p.delivery_radius,
           pg.tier,
-          pg.group_id,
+          ppm.group_id,
           ppm.is_primary,
           pa.commission_rate,
           pa.claim_response_time_hours,
           pa.dispensing_time_hours,
           pa.id as agreement_id,
-          CASE
-            WHEN pg.tier = 'premium' THEN 1
-            WHEN pg.tier = 'standard' THEN 2
-            ELSE 3
-          END as tier_rank,
+          ${tierOrderSql('pg.tier')} as tier_rank,
           -- Calculate distance
           SQRT(
             POW(CAST(p.latitude - $1 AS FLOAT), 2) +
@@ -188,8 +185,9 @@ class PharmacyRoutingService {
   static calculateRoutingScore(pharmacy, performance) {
     let score = 0;
 
-    // Tier weighting (40 points)
-    const tierScores = { premium: 40, standard: 25, basic: 10 };
+    // Tier weighting (40 points). Enterprise used to be missing here and
+    // scored like Basic.
+    const tierScores = { enterprise: 40, premium: 25, basic: 10 };
     score += tierScores[pharmacy.tier] || 10;
 
     // Performance score (40 points)
@@ -386,11 +384,10 @@ class PharmacyRoutingService {
    * Get next tier fallback candidates
    */
   static async getNextTierCandidates(currentTier, patientLocation) {
-    const tierOrder = {
-      premium: ['standard', 'basic'],
-      standard: ['basic'],
-      basic: []
-    };
+    // Every tier below the current one, best first.
+    const tierOrder = Object.fromEntries(
+      TIERS.map((t) => [t, TIERS.filter((u) => TIER_RANK[u] < TIER_RANK[t]).reverse()])
+    );
 
     const nextTiers = tierOrder[currentTier] || [];
     if (nextTiers.length === 0) {
@@ -404,7 +401,8 @@ class PharmacyRoutingService {
         p.latitude,
         p.longitude,
         pg.tier,
-        pa.commission_rate
+        pa.commission_rate,
+        ${tierOrderSql('pg.tier')} AS tier_rank
       FROM pharmacies p
       LEFT JOIN pharmacy_group_members ppm ON p.id = ppm.pharmacy_id AND ppm.left_at IS NULL
       LEFT JOIN pharmacy_groups pg ON ppm.group_id = pg.id
@@ -415,7 +413,7 @@ class PharmacyRoutingService {
       WHERE p.status = 'active'
       AND pg.tier = ANY($1)
       AND pa.status = 'active'
-      ORDER BY pg.tier ASC
+      ORDER BY tier_rank
     `;
 
     const result = await query(candidatesQuery, [nextTiers]);
