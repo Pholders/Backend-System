@@ -1,5 +1,6 @@
 const PharmacyRoutingService = require('../services/pharmacyRoutingService');
 const { query } = require('../config/db');
+const { tierOrderSql } = require('../config/tiers');
 
 /**
  * Pharmacy Claim Routing Controller
@@ -343,12 +344,7 @@ class PharmacyClaimRoutingController {
         JOIN pharmacy_group_members pgm ON p.id = pgm.pharmacy_id AND pgm.left_at IS NULL
         JOIN pharmacy_groups pg ON pgm.group_id = pg.id
         GROUP BY pg.tier
-        ORDER BY 
-          CASE 
-            WHEN pg.tier = 'premium' THEN 1
-            WHEN pg.tier = 'standard' THEN 2
-            ELSE 3
-          END
+        ORDER BY ${tierOrderSql('pg.tier')}
       `;
 
       const result = await query(tierQuery);

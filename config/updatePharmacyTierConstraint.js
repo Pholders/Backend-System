@@ -1,27 +1,37 @@
 const { query } = require('../config/db');
+const { tierCheckList } = require('./tiers');
 
 /**
- * Update pharmacy_groups tier constraint to support 'enterprise' tier
+ * pharmacy_groups.tier allows exactly the tiers in config/tiers.js
+ * (basic, premium, enterprise) and defaults to basic.
+ *
+ * 'standard' was dropped. Postgres checks a new CHECK against existing rows,
+ * so a leftover Standard group would stop the server booting; any such group
+ * is moved to basic first, with a warning, since everyone is on Basic for now.
  */
-
 async function updatePharmacyGroupsTierConstraint() {
   try {
     console.log('🔄 Updating pharmacy_groups tier constraint...');
 
-    // Drop the existing constraint and recreate it with 'enterprise' added
-    await query(`
-      ALTER TABLE pharmacy_groups 
-      DROP CONSTRAINT IF EXISTS pharmacy_groups_tier_check;
-    `);
+    const moved = await query(
+      `UPDATE pharmacy_groups SET tier = 'basic', updated_at = CURRENT_TIMESTAMP
+        WHERE tier NOT IN (${tierCheckList()})
+        RETURNING id, group_name`
+    );
+    if (moved.rowCount) {
+      console.warn(`⚠️  Moved ${moved.rowCount} pharmacy group(s) with a retired tier to basic:`,
+        moved.rows.map((g) => `${g.id} ${g.group_name}`).join(', '));
+    }
 
-    // Add the new constraint that includes 'enterprise'
+    await query(`ALTER TABLE pharmacy_groups ALTER COLUMN tier SET DEFAULT 'basic';`);
+    await query(`ALTER TABLE pharmacy_groups DROP CONSTRAINT IF EXISTS pharmacy_groups_tier_check;`);
     await query(`
       ALTER TABLE pharmacy_groups
-      ADD CONSTRAINT pharmacy_groups_tier_check 
-      CHECK (tier IN ('premium', 'standard', 'basic', 'enterprise'));
+      ADD CONSTRAINT pharmacy_groups_tier_check
+      CHECK (tier IN (${tierCheckList()}));
     `);
 
-    console.log('✅ Updated pharmacy_groups tier constraint to support enterprise tier');
+    console.log('✅ pharmacy_groups tier constraint: basic, premium, enterprise');
     return true;
   } catch (error) {
     console.error('❌ Error updating tier constraint:', error);

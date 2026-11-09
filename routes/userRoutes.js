@@ -2323,7 +2323,9 @@ router.get('/partnerships/compliance/pharmacy/:pharmacyId', authMiddleware, requ
 router.get('/partnerships/compliance/report', authMiddleware, requireRole('admin'), PharmacyPartnershipController.getComplianceReport);
 
 // Pharmacy Tier Management
-router.post('/pharmacy/upgrade-tier', authMiddleware, requireRole('pharmacy'), PharmacyPartnershipController.upgradePharmacyTier);
+// Switched off while every pharmacy is on Basic: it took no payment, so any
+// pharmacy could make itself Premium. Admins move pharmacies between groups.
+router.post('/pharmacy/upgrade-tier', authMiddleware, requireRole('pharmacy'), PharmacyPartnershipController.tierUpgradesDisabled);
 router.get('/pharmacy/current-tier', authMiddleware, requireRole('pharmacy'), PharmacyPartnershipController.getCurrentTier);
 
 /**

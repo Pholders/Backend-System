@@ -1,4 +1,5 @@
 const PharmacyGroup = require('../models/PharmacyGroup');
+const { TIERS, TIER_RANK } = require('../config/tiers');
 const PharmacyAgreement = require('../models/PharmacyAgreement');
 const AgreementCompliance = require('../models/AgreementCompliance');
 const ComplianceTrackingService = require('../services/complianceTrackingService');
@@ -24,10 +25,10 @@ class PharmacyPartnershipController {
         });
       }
 
-      if (!['premium', 'standard', 'basic'].includes(tier)) {
+      if (!TIERS.includes(tier)) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid tier. Must be premium, standard, or basic'
+          message: `Invalid tier. Must be one of: ${TIERS.join(', ')}`
         });
       }
 
@@ -130,10 +131,10 @@ class PharmacyPartnershipController {
       const { groupId } = req.params;
       const { group_name, parent_company, tier, description, commission_rate, is_active } = req.body;
 
-      if (tier && !['premium', 'standard', 'basic'].includes(tier)) {
+      if (tier && !TIERS.includes(tier)) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid tier'
+          message: `Invalid tier. Must be one of: ${TIERS.join(', ')}`
         });
       }
 
@@ -606,7 +607,25 @@ class PharmacyPartnershipController {
   }
 
   /**
-   * Upgrade pharmacy tier
+   * POST /pharmacy/upgrade-tier while tiers aren't sold.
+   *
+   * Every pharmacy is on Basic for now, and upgradePharmacyTier below takes
+   * no payment and needs no approval, so any pharmacy could move itself to
+   * Premium or Enterprise. Admins still change a pharmacy's tier by moving it
+   * between groups. Point the route back at upgradePharmacyTier once an
+   * upgrade is paid for.
+   */
+  static async tierUpgradesDisabled(req, res) {
+    return res.status(403).json({
+      success: false,
+      code: 'TIER_UPGRADES_DISABLED',
+      message: "Tier upgrades aren't available yet. Contact Pholders support to change your tier."
+    });
+  }
+
+  /**
+   * Upgrade pharmacy tier. Not routed while upgrades are disabled; see
+   * tierUpgradesDisabled. Needs a payment check before it is switched back on.
    */
   static async upgradePharmacyTier(req, res) {
     try {
@@ -622,7 +641,7 @@ class PharmacyPartnershipController {
       }
 
       // Validate tier
-      const validTiers = ['basic', 'premium', 'enterprise'];
+      const validTiers = TIERS;
       if (!validTiers.includes(toTier)) {
         return res.status(400).json({
           success: false,
@@ -650,8 +669,7 @@ class PharmacyPartnershipController {
       const currentTier = currentGroup.tier;
 
       // Check if trying to downgrade
-      const tierOrder = { basic: 0, premium: 1, enterprise: 2 };
-      if (tierOrder[toTier] < tierOrder[currentTier]) {
+      if (TIER_RANK[toTier] < TIER_RANK[currentTier]) {
         return res.status(400).json({
           success: false,
           message: `Cannot downgrade from ${currentTier} to ${toTier}. Downgrades require admin approval.`
