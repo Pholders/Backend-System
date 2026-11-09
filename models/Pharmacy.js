@@ -6,6 +6,11 @@ const ADMIN_COLUMNS = `
   address, city, province, zip_code, latitude, longitude,
   operating_hours, services, is_24_hours, delivery_available, delivery_radius,
   website, description, profile_image, status, email_verified,
+  (SELECT g.tier FROM pharmacy_group_members m
+     JOIN pharmacy_groups g ON g.id = m.group_id
+    WHERE m.pharmacy_id = pharmacies.id AND m.left_at IS NULL
+    ORDER BY m.is_primary DESC, m.joined_at DESC
+    LIMIT 1) AS tier,
   email_verified_at AT TIME ZONE 'UTC' AS email_verified_at,
   created_at AT TIME ZONE 'UTC' AS created_at,
   updated_at AT TIME ZONE 'UTC' AS updated_at`;

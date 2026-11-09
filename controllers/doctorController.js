@@ -93,7 +93,7 @@ const EDITABLE_PROFILE_COLUMNS = new Set([
 const READ_ONLY_PROFILE_COLUMNS = new Set([
   'id', 'email', 'password_hash', 'hpcsa_number', 'profile_image', 'status',
   'email_verified', 'email_verified_at', 'rating', 'review_count', 'full_name',
-  'created_at', 'updated_at'
+  'tier', 'created_at', 'updated_at'
 ]);
 
 // Names from the published API docs that don't follow from camelCase alone.

@@ -17,6 +17,7 @@ const { runMigration: createInAppNotifications } = require('./createInAppNotific
 const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: addAdminModeration } = require('./addAdminModeration');
+const { runMigration: assignBasicTier } = require('./assignBasicTier');
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
@@ -180,6 +181,10 @@ const initializeDatabase = async () => {
     // Review hiding, support replies and the admin audit event types. Last,
     // so doctor_reviews and support_tickets exist.
     await addAdminModeration();
+
+    // Every doctor and pharmacy on the Basic tier for now. After the default
+    // pharmacy groups exist.
+    await assignBasicTier();
     
     console.log('✅ Database initialization completed successfully');
     return true;
