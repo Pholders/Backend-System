@@ -214,7 +214,7 @@ class Doctor {
       `SELECT id, first_name, last_name, email, phone, hpcsa_number,
               specialization, experience, qualification, clinic_name,
               city, suburb, province, consultation_fee, currency,
-              rating, review_count, profile_image, status, email_verified,
+              rating, review_count, profile_image, status, email_verified, tier,
               created_at AT TIME ZONE 'UTC' AS created_at,
               updated_at AT TIME ZONE 'UTC' AS updated_at
          FROM doctors
@@ -238,7 +238,7 @@ class Doctor {
               clinic_name, clinic_address, address, suburb, city, province, zip_code,
               latitude, longitude, consultation_fee, currency,
               opens_at::text AS opens_at, closes_at::text AS closes_at, availability,
-              rating, review_count, profile_image, status, email_verified,
+              rating, review_count, profile_image, status, email_verified, tier,
               email_verified_at AT TIME ZONE 'UTC' AS email_verified_at,
               created_at AT TIME ZONE 'UTC' AS created_at,
               updated_at AT TIME ZONE 'UTC' AS updated_at
