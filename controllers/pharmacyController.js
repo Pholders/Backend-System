@@ -16,6 +16,17 @@ const doctorNotifications = require('../services/doctorNotifications');
  * Handles pharmacy authentication and profile management
  */
 
+// The profile fields a pharmacy edits from its own settings. Email, licence
+// number, status and coordinates are set elsewhere and never from here.
+const SELF_EDITABLE_FIELDS = [
+  'pharmacy_name', 'first_name', 'last_name', 'phone', 'address', 'city',
+  'province', 'zip_code', 'website', 'description', 'operating_hours',
+  'services', 'is_24_hours', 'delivery_available', 'delivery_radius'
+];
+
+// NOT NULL columns: an empty value would fail in the database.
+const REQUIRED_TEXT_FIELDS = ['pharmacy_name', 'first_name', 'last_name', 'city', 'province'];
+
 class PharmacyController {
   /**
    * Pharmacy Signup/Registration
@@ -568,13 +579,25 @@ class PharmacyController {
   static async updateProfile(req, res) {
     try {
       const pharmacyId = req.user.id;
-      const updateData = req.body;
 
-      delete updateData.id;
-      delete updateData.password_hash;
-      delete updateData.email;
-      delete updateData.license_number;
-      delete updateData.created_at;
+      // Only what a pharmacy may say about itself. Status is not among them:
+      // the model also serves admin suspensions, and a suspended pharmacy
+      // could otherwise set itself back to active from its own profile.
+      const updateData = {};
+      for (const key of SELF_EDITABLE_FIELDS) {
+        if (req.body && req.body[key] !== undefined) updateData[key] = req.body[key];
+      }
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ success: false, message: 'Nothing to update' });
+      }
+      for (const key of REQUIRED_TEXT_FIELDS) {
+        if (key in updateData && !String(updateData[key] ?? '').trim()) {
+          return res.status(400).json({
+            success: false,
+            message: `${key.replace(/_/g, ' ')} cannot be empty`
+          });
+        }
+      }
 
       const updatedPharmacy = await Pharmacy.update(pharmacyId, updateData);
       if (!updatedPharmacy) {

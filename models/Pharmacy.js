@@ -136,41 +136,6 @@ class Pharmacy {
   }
 
   /**
-   * Update pharmacy
-   */
-  static async update(id, pharmacyData) {
-    const fields = [];
-    const values = [];
-    let paramCount = 1;
-
-    Object.keys(pharmacyData).forEach((key) => {
-      if (pharmacyData[key] !== undefined) {
-        if (key === 'operating_hours') {
-          fields.push(`${key} = $${paramCount}`);
-          values.push(JSON.stringify(pharmacyData[key]));
-        } else {
-          fields.push(`${key} = $${paramCount}`);
-          values.push(pharmacyData[key]);
-        }
-        paramCount++;
-      }
-    });
-
-    fields.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(id);
-
-    const updateQuery = `
-      UPDATE pharmacies 
-      SET ${fields.join(', ')}
-      WHERE id = $${paramCount}
-      RETURNING *
-    `;
-
-    const result = await query(updateQuery, values);
-    return result.rows[0];
-  }
-
-  /**
    * One page of the admin pharmacy directory.
    *
    * Columns are named rather than SELECT * so the password hash — and any
@@ -319,10 +284,13 @@ class Pharmacy {
    * Update pharmacy fields
    */
   static async update(id, updates) {
+    // Every column any caller may set. Which of these a pharmacy may set
+    // about itself is narrower, and decided in the controller.
     const allowedFields = [
-      'pharmacy_name', 'phone', 'city', 'province', 'address', 'zip_code',
-      'latitude', 'longitude', 'website', 'description', 'status',
-      'is_24_hours', 'delivery_available', 'delivery_radius', 'profile_image'
+      'pharmacy_name', 'first_name', 'last_name', 'phone', 'city', 'province',
+      'address', 'zip_code', 'latitude', 'longitude', 'website', 'description',
+      'status', 'is_24_hours', 'delivery_available', 'delivery_radius',
+      'profile_image', 'operating_hours', 'services'
     ];
 
     // Build SET clause dynamically
@@ -335,9 +303,13 @@ class Pharmacy {
       throw new Error('No valid fields provided for update');
     }
 
-    const values = Object.values(updates).filter((_, idx) => 
-      allowedFields.includes(Object.keys(updates)[idx])
-    );
+    // operating_hours is JSONB: sent as JSON text, or pg would try to read
+    // the object as something else.
+    const values = Object.keys(updates)
+      .filter(key => allowedFields.includes(key))
+      .map(key => (key === 'operating_hours' && updates[key] !== null
+        ? JSON.stringify(updates[key])
+        : updates[key]));
     values.push(id);
 
     const updateQuery = `
