@@ -24,6 +24,7 @@ const { runMigration: createPatientMedicationTables } = require('./createPatient
 const { runMigration: createMedicalHistoryTables } = require('./createMedicalHistoryTables');
 const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
+const { runMigration: createInventoryTable } = require('./createInventoryTable');
 const Appointment = require('../models/Appointment');
 const AppointmentReminder = require('../models/AppointmentReminder');
 const AppointmentNote = require('../models/AppointmentNote');
@@ -146,6 +147,12 @@ const initializeDatabase = async () => {
 
     // Orders v1 (orders table, status history, link claims to orders, add 'order' notification type)
     await createOrdersTables();
+
+    // Inventory v1 (stock items and their adjustment log). The migration
+    // existed but was never registered here, so the live database never got
+    // the table and every /api/inventory call failed. After orders, which
+    // the adjustment log references.
+    await createInventoryTable();
 
     // Create appointment reminders tables
     await AppointmentReminder.createTable();
