@@ -82,29 +82,39 @@ app.get('/checklist', (req, res) => {
 app.use('/api/checklist', checklistRoutes);
 
 // CORS configuration
-const allowedOrigins = [
-  process.env.FRONTEND_URL
-].filter(Boolean);
+// FRONTEND_URL and CORS_ORIGINS may each hold a comma-separated list, so the
+// main app and the admin panel (often on separate domains) can both be let in.
+// Trailing slashes are dropped because a browser's Origin header never has one.
+const normalizeOrigin = (o) => o.trim().replace(/\/+$/, '');
+const allowedOrigins = [process.env.FRONTEND_URL, process.env.CORS_ORIGINS]
+  .filter(Boolean)
+  .flatMap((v) => v.split(','))
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+// Shared by the REST API and Socket.IO so both let in the same sites.
+const checkOrigin = (origin, callback) => {
+  if (!origin) {
+    return callback(null, true);
+  }
+
+  const isLocalhost =
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:');
+
+  const isProductionOrigin =
+    allowedOrigins.includes(origin);
+
+  if (isLocalhost || isProductionOrigin) {
+    return callback(null, true);
+  }
+
+  console.warn(`CORS blocked: ${origin} (allowed: ${allowedOrigins.join(', ') || 'none'})`);
+  return callback(new Error(`CORS blocked: ${origin}`));
+};
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    const isLocalhost =
-      origin.startsWith('http://localhost:') ||
-      origin.startsWith('http://127.0.0.1:');
-
-    const isProductionOrigin =
-      allowedOrigins.includes(origin);
-
-    if (isLocalhost || isProductionOrigin) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`CORS blocked: ${origin}`));
-  },
+  origin: checkOrigin,
 
   credentials: true,
 
@@ -272,11 +282,12 @@ async function startServer() {
 
     // Initialize Socket.IO BEFORE listen so it's ready when clients connect.
     realtimeService.init(httpServer, {
-      corsOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      corsOrigin: checkOrigin,
     });
 
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
+      console.log(`🌐 CORS allows localhost plus: ${allowedOrigins.join(', ') || 'none'}`);
       console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
       console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
       console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
