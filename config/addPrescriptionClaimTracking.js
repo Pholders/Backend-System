@@ -9,31 +9,18 @@ async function addPrescriptionClaimTracking() {
   console.log('🔄 Adding prescription claim tracking...\n');
 
   try {
-    // Check if claim columns already exist
-    const checkColumns = await query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'prescriptions' 
-      AND column_name IN ('claimed', 'claimed_at', 'claimed_by_pharmacy_id')
-    `);
-
-    if (checkColumns.rows.length > 0) {
-      console.log('✅ Prescription claim columns already exist');
-      return;
-    }
-
     // Add claim tracking columns to prescriptions table
     await query(`
       ALTER TABLE prescriptions
-      ADD COLUMN claimed BOOLEAN DEFAULT FALSE,
-      ADD COLUMN claimed_at TIMESTAMP,
-      ADD COLUMN claimed_by_pharmacy_id VARCHAR(100),
-      ADD COLUMN claimed_by_pharmacy_name VARCHAR(255),
-      ADD COLUMN claim_location JSONB,
-      ADD COLUMN claim_verified_at TIMESTAMP,
-      ADD COLUMN claim_expires_at TIMESTAMP,
-      ADD COLUMN claim_verification_method VARCHAR(50),
-      ADD COLUMN claim_notes TEXT;
+      ADD COLUMN IF NOT EXISTS claimed BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS claimed_by_pharmacy_id VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS claimed_by_pharmacy_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS claim_location JSONB,
+      ADD COLUMN IF NOT EXISTS claim_verified_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS claim_verification_method VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS claim_notes TEXT;
     `);
     console.log('✅ Added claim tracking columns to prescriptions table');
 
