@@ -65,3 +65,10 @@ temp/
 secrets/
 config/secrets/
 
+
+# ========================
+# Files the server stores (local storage driver)
+# ========================
+# Signed prescription PDFs, avatars and attachments land here at run time
+# and carry personal details; they must never be committed.
+uploads/
