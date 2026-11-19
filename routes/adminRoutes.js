@@ -36,14 +36,41 @@ const admin = [authMiddleware, requireRole('admin')];
  *       - { in: query, name: patient_id, schema: { type: integer } }
  *       - { in: query, name: from, schema: { type: string, format: date } }
  *       - { in: query, name: to, schema: { type: string, format: date } }
+ *       - { in: query, name: active, description: true = still in progress, false = finished, schema: { type: boolean } }
+ *       - { in: query, name: overdue, description: Sat in its current status longer than allowed (config/orderTracking.js), schema: { type: boolean } }
+ *       - { in: query, name: waiting_on, schema: { type: string, enum: [pharmacy, medical_aid, patient] } }
+ *       - { in: query, name: sort, schema: { type: string, enum: [newest, longest_waiting], default: newest } }
  *       - { in: query, name: limit, schema: { type: integer } }
  *       - { in: query, name: offset, schema: { type: integer } }
  *     responses:
- *       200: { description: Orders }
+ *       200: { description: Orders, each with status_since, hours_in_status, waiting_on, overdue_after_hours and is_overdue }
  *       400: { description: Bad filter value }
+ * /api/users/admin/orders/tracking/stats:
+ *   get:
+ *     summary: Orders in progress now per status and per who they wait on (with overdue counts), and how orders created in from/to (default last 30 days) ended and how long each step took
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: pharmacy_id, schema: { type: integer } }
+ *       - { in: query, name: from, schema: { type: string, format: date } }
+ *       - { in: query, name: to, schema: { type: string, format: date } }
+ *     responses:
+ *       200: { description: "{ active: { total, overdue, by_status, by_waiting_on }, period: { created, picked_up, cancelled, rejected, still_active, collection_rate, avg_hours } }" }
+ * /api/users/admin/orders/tracking/pharmacies:
+ *   get:
+ *     summary: Per pharmacy, orders in progress and overdue now, plus outcomes and speed for orders created in from/to (default last 30 days). Most overdue first.
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: from, schema: { type: string, format: date } }
+ *       - { in: query, name: to, schema: { type: string, format: date } }
+ *       - { in: query, name: limit, schema: { type: integer } }
+ *       - { in: query, name: offset, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Pharmacies }
  * /api/users/admin/orders/{orderId}:
  *   get:
- *     summary: One order with its status history
+ *     summary: One order with where it is in the flow and its status history (hours spent in each step)
  *     tags: [Admin records]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -53,6 +80,9 @@ const admin = [authMiddleware, requireRole('admin')];
  *       404: { description: Not found }
  */
 router.get('/orders', admin, C.listOrders);
+// Before /orders/:orderId, which would otherwise take "tracking" as an id.
+router.get('/orders/tracking/stats', admin, C.getOrderTrackingStats);
+router.get('/orders/tracking/pharmacies', admin, C.getOrderTrackingByPharmacy);
 router.get('/orders/:orderId', admin, C.getOrder);
 
 /**

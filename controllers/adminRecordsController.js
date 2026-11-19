@@ -156,10 +156,30 @@ class AdminRecordsController {
       status: parse.oneOf(q.status, AdminRecords.ORDER_STATUSES, 'status'),
       payment_type: parse.oneOf(q.payment_type, ['cash', 'medical_aid'], 'payment_type'),
       pharmacy_id: parse.id(q.pharmacy_id, 'pharmacy_id'),
-      patient_id: parse.id(q.patient_id, 'patient_id')
+      patient_id: parse.id(q.patient_id, 'patient_id'),
+      active: parse.bool(q.active, 'active'),
+      overdue: parse.bool(q.overdue, 'overdue'),
+      waiting_on: parse.oneOf(q.waiting_on, AdminRecords.ORDER_WAITING_ON, 'waiting_on'),
+      sort: parse.oneOf(q.sort, AdminRecords.ORDER_SORTS, 'sort')
     };
     const { total, orders } = await AdminRecords.listOrders(opts);
     ok(res, 'Orders retrieved', { total, limit: opts.limit, offset: opts.offset, orders });
+  });
+
+  static getOrderTrackingStats = handle('order tracking stats', async (req, res) => {
+    const q = req.query;
+    const stats = await AdminRecords.orderTrackingStats({
+      ...parse.range(q),
+      pharmacy_id: parse.id(q.pharmacy_id, 'pharmacy_id')
+    });
+    ok(res, 'Order tracking stats retrieved', stats);
+  });
+
+  static getOrderTrackingByPharmacy = handle('order tracking by pharmacy', async (req, res) => {
+    const q = req.query;
+    const opts = { ...parse.paging(q), ...parse.range(q) };
+    const { total, pharmacies } = await AdminRecords.orderTrackingByPharmacy(opts);
+    ok(res, 'Order tracking by pharmacy retrieved', { total, limit: opts.limit, offset: opts.offset, pharmacies });
   });
 
   static getOrder = handle('order', async (req, res) => {

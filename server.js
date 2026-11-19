@@ -259,12 +259,31 @@ app.use(errorHandler);
 // Start server
 async function startServer() {
   try {
-    // Initialize database tables
+    // Create raw HTTP server so Socket.IO can attach.
+    const httpServer = http.createServer(app);
+
+    // Initialize Socket.IO BEFORE listen so it's ready when clients connect.
+    realtimeService.init(httpServer, {
+      corsOrigin: checkOrigin,
+    });
+
+    // Bind the port FIRST. Render's port scan gives up if nothing is
+    // listening in time, and the migrations below can take a while (or wait
+    // on a table lock still held by the previous instance during a deploy).
+    // Listening first keeps the deploy alive while they run; the tables
+    // already exist in production, so early requests are served as normal.
+    await new Promise((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(PORT, resolve);
+    });
+    console.log(`🔌 Listening on port ${PORT}, running startup tasks...`);
+
+    console.log('🔄 Startup: database initialization...');
     await initializeDatabase();
 
-    // Initialize Redis cache
+    console.log('🔄 Startup: Redis cache...');
     await cache.initialize();
-    
+
     // Start appointment cleanup service (auto-cancel expired pending payments)
     // Runs every 15 minutes, cancels payments pending for more than 30 minutes
     AppointmentCleanupService.start(15, 30);
@@ -276,36 +295,26 @@ async function startServer() {
     // Initialize compliance tracking service
     // Monitors pharmacy performance and auto-suspends non-compliant agreements
     await ComplianceTrackingService.initialize();
-    
-    // Create raw HTTP server so Socket.IO can attach.
-    const httpServer = http.createServer(app);
 
-    // Initialize Socket.IO BEFORE listen so it's ready when clients connect.
-    realtimeService.init(httpServer, {
-      corsOrigin: checkOrigin,
-    });
+    console.log(`🚀 Server is running on port ${PORT}`);
+    console.log(`🌐 CORS allows localhost plus: ${allowedOrigins.join(', ') || 'none'}`);
+    console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
+    console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
+    console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
+    console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
+    console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
+    console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
+    console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
+    console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
+    console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
 
-    httpServer.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
-      console.log(`🌐 CORS allows localhost plus: ${allowedOrigins.join(', ') || 'none'}`);
-      console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`📍 Cache stats: http://localhost:${PORT}/api/cache-stats`);
-      console.log(`📍 Database test: http://localhost:${PORT}/api/test-db`);
-      console.log(`📍 User signup: http://localhost:${PORT}/api/users/signup`);
-      console.log(`📍 User login: http://localhost:${PORT}/api/users/login`);
-      console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
-      console.log(`📍 Notifications: http://localhost:${PORT}/api/notifications`);
-      console.log(`📍 Orders: http://localhost:${PORT}/api/orders`);
-      console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
-      console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
-
-      // Start scheduled notification triggers (medication + appointment).
-      try {
-        notificationTriggers.start();
-      } catch (err) {
-        console.error('Failed to start notification triggers:', err.message);
-      }
-    });
+    // Start scheduled notification triggers (medication + appointment).
+    try {
+      notificationTriggers.start();
+    } catch (err) {
+      console.error('Failed to start notification triggers:', err.message);
+    }
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
