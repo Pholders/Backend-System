@@ -10,6 +10,9 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   // Render requires SSL; rejectUnauthorized:false accepts their self-signed cert
   ssl: process.env.DB_HOST?.includes('render.com') ? { rejectUnauthorized: false } : false,
+  // pg waits forever for a connection by default, so an unreachable database
+  // used to hang startup silently. Fail with an error instead.
+  connectionTimeoutMillis: 15000,
 });
 
 // Test the database connection
