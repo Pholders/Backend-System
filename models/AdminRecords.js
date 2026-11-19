@@ -1,4 +1,5 @@
 const { query, pool } = require('../config/db');
+const { ORDER_STAGES, WAITING_ON } = require('../config/orderTracking');
 
 /**
  * Admin read/write access to platform records: orders, payments,
@@ -99,6 +100,63 @@ const ORDER_FROM = `
   LEFT JOIN patients pt ON pt.id = o.patient_id
   LEFT JOIN pharmacies ph ON ph.id = o.pharmacy_id
   LEFT JOIN prescriptions p ON p.id = o.prescription_id`;
+
+/* ---------------------------------------------------------- order tracking */
+
+// Where an order is in the pickup flow: how long it has been in its current
+// status, who has to act next, and whether it has waited too long. The rules
+// live in config/orderTracking.js; the CASEs below are built from that file's
+// fixed keys and integer hours, never from request input.
+
+const NOW_UTC = `(now() AT TIME ZONE 'UTC')`;
+const FINAL_ORDER_STATUSES = ['picked_up', 'cancelled', 'rejected'];
+const ACTIVE_ORDER_STATUSES = ORDER_STATUSES.filter((s) => !FINAL_ORDER_STATUSES.includes(s));
+const SQL_LIST = (values) => values.map((v) => `'${v}'`).join(', ');
+
+const stageCase = (pick) => `CASE o.status ${Object.entries(ORDER_STAGES)
+  .map(([status, stage]) => `WHEN '${status}' THEN ${pick(stage)}`)
+  .join(' ')} ELSE NULL END`;
+
+const OVERDUE_AFTER_HOURS = stageCase((s) => s.overdue_after_hours);
+const WAITING_ON_SQL = stageCase((s) => `'${s.waiting_on}'`);
+
+// Every status change, creation included, writes a history row, so the
+// latest one is when the order entered its current status.
+const LAST_MOVE_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT h.created_at FROM order_status_history h
+     WHERE h.order_id = o.id
+     ORDER BY h.created_at DESC, h.id DESC
+     LIMIT 1
+  ) lm ON true`;
+const STATUS_SINCE = `COALESCE(lm.created_at, o.created_at)`;
+const HOURS = (a, b) => `ROUND((EXTRACT(EPOCH FROM (${b} - ${a})) / 3600)::numeric, 1)::float8`;
+const IS_OVERDUE = `COALESCE(${NOW_UTC} - ${STATUS_SINCE} > ${OVERDUE_AFTER_HOURS} * interval '1 hour', false)`;
+
+const ORDER_TRACKING_COLUMNS = `
+  ${STATUS_SINCE} AT TIME ZONE 'UTC' AS status_since,
+  CASE WHEN o.status IN (${SQL_LIST(FINAL_ORDER_STATUSES)}) THEN NULL
+       ELSE ${HOURS(STATUS_SINCE, NOW_UTC)} END AS hours_in_status,
+  ${WAITING_ON_SQL} AS waiting_on,
+  ${OVERDUE_AFTER_HOURS} AS overdue_after_hours,
+  ${IS_OVERDUE} AS is_overdue`;
+
+const ORDER_TRACKING_FROM = `${ORDER_FROM}${LAST_MOVE_JOIN}`;
+
+const ORDER_SORTS = {
+  newest: 'o.created_at DESC, o.id DESC',
+  // Longest in its current status first: the order to chase.
+  longest_waiting: `${STATUS_SINCE} ASC, o.id ASC`
+};
+
+// Average hours between two lifecycle timestamps, over orders that have both.
+const AVG_HOURS = (a, b) =>
+  `ROUND((AVG(EXTRACT(EPOCH FROM (${b} - ${a}))) FILTER (WHERE ${a} IS NOT NULL AND ${b} IS NOT NULL) / 3600)::numeric, 1)::float8`;
+
+// from/to default to the last 30 SA calendar days, today included.
+const PERIOD = (col) => `
+  ${SA_DATE(col)} >= COALESCE($1::date, (now() AT TIME ZONE '${TZ}')::date - 29)
+  AND ${SA_DATE(col)} <= COALESCE($2::date, (now() AT TIME ZONE '${TZ}')::date)`;
 
 /* ---------------------------------------------------------------- payments */
 
@@ -244,6 +302,8 @@ const SEVERITY_RANK = `CASE severity WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 W
 
 class AdminRecords {
   static get ORDER_STATUSES() { return ORDER_STATUSES; }
+  static get ORDER_SORTS() { return Object.keys(ORDER_SORTS); }
+  static get ORDER_WAITING_ON() { return WAITING_ON; }
   static get PAYMENT_STATUSES() { return PAYMENT_STATUSES; }
   static get PAYMENT_METHODS() { return PAYMENT_METHODS; }
   static get APPOINTMENT_STATUSES() { return APPOINTMENT_STATUSES; }
@@ -258,16 +318,33 @@ class AdminRecords {
 
   /* ---------------------------------------------------------------- orders */
 
-  static async listOrders({ limit, offset, status, payment_type, pharmacy_id, patient_id, from, to }) {
+  /**
+   * A page of orders, each with where it is in the flow (status_since,
+   * hours_in_status, waiting_on, is_overdue).
+   *
+   * active: true = still in progress, false = finished.
+   * overdue / waiting_on: filter on the tracking fields.
+   * sort: 'newest' (default) or 'longest_waiting'.
+   */
+  static async listOrders({
+    limit, offset, status, payment_type, pharmacy_id, patient_id, from, to,
+    active, overdue, waiting_on, sort = 'newest'
+  }) {
     const where = new Where()
       .add('o.status = ?', status)
       .add('o.payment_type = ?', payment_type)
       .add('o.pharmacy_id = ?', pharmacy_id)
       .add('o.patient_id = ?', patient_id)
+      .add(`${IS_OVERDUE} = ?`, overdue)
+      .add(`${WAITING_ON_SQL} = ?`, waiting_on)
       .dateRange('o.created_at', from, to);
+    if (active === true) where.raw(`o.status IN (${SQL_LIST(ACTIVE_ORDER_STATUSES)})`);
+    if (active === false) where.raw(`o.status IN (${SQL_LIST(FINAL_ORDER_STATUSES)})`);
+
     const { total, rows } = await page({
-      select: ORDER_COLUMNS, from: ORDER_FROM, where,
-      orderBy: 'o.created_at DESC, o.id DESC', limit, offset
+      select: `${ORDER_COLUMNS}, ${ORDER_TRACKING_COLUMNS}`,
+      from: ORDER_TRACKING_FROM, where,
+      orderBy: ORDER_SORTS[sort], limit, offset
     });
     return { total, orders: rows };
   }
@@ -278,30 +355,187 @@ class AdminRecords {
    */
   static async getOrder(id) {
     const result = await query(
-      `SELECT ${ORDER_COLUMNS},
+      `SELECT ${ORDER_COLUMNS}, ${ORDER_TRACKING_COLUMNS},
               o.pharmacy_notes, o.cancellation_reason, o.rejection_reason,
               o.restocking_fee_amount::float8 AS restocking_fee_amount,
               o.payment_id, o.stripe_payment_intent_id,
               ${TS('o.accepted_at', 'accepted_at')},
               ${TS('o.prepared_at', 'prepared_at')},
               ${TS('o.ready_at', 'ready_at')}
-         FROM ${ORDER_FROM}
+         FROM ${ORDER_TRACKING_FROM}
         WHERE o.id = $1`,
       [id]
     );
     const order = result.rows[0];
     if (!order) return null;
 
+    // Each step with how long the order stayed in it: until the next step,
+    // or until now for the current one. A final status has no duration.
     const history = await query(
       `SELECT id, from_status, to_status, actor_type, actor_id, notes,
-              ${TS('created_at', 'created_at')}
-         FROM order_status_history
-        WHERE order_id = $1
+              ${TS('created_at', 'created_at')},
+              CASE
+                WHEN next_at IS NULL AND to_status IN (${SQL_LIST(FINAL_ORDER_STATUSES)}) THEN NULL
+                ELSE ${HOURS('h_at', `COALESCE(next_at, ${NOW_UTC})`)}
+              END AS hours_in_status
+         FROM (
+           SELECT *, created_at AS h_at,
+                  LEAD(created_at) OVER (ORDER BY created_at, id) AS next_at
+             FROM order_status_history
+            WHERE order_id = $1
+         ) h
         ORDER BY created_at, id`,
       [id]
     );
     order.status_history = history.rows;
     return order;
+  }
+
+  /**
+   * The order tracking header.
+   *
+   * active: every order still in progress right now (not date-filtered),
+   *   counted per status and per who it's waiting on, with how many are
+   *   overdue.
+   * period: orders created between from and to (default the last 30 days):
+   *   how they ended and the average hours each step took.
+   */
+  static async orderTrackingStats({ pharmacy_id, from, to }) {
+    const activeWhere = new Where()
+      .raw(`o.status IN (${SQL_LIST(ACTIVE_ORDER_STATUSES)})`)
+      .add('o.pharmacy_id = ?', pharmacy_id);
+
+    const [active, period] = await Promise.all([
+      query(
+        `SELECT o.status, ${WAITING_ON_SQL} AS waiting_on,
+                COUNT(*)::int AS count,
+                COUNT(*) FILTER (WHERE ${IS_OVERDUE})::int AS overdue,
+                MAX(${HOURS(STATUS_SINCE, NOW_UTC)}) AS longest_wait_hours
+           FROM orders o ${LAST_MOVE_JOIN}
+           ${activeWhere.sql}
+          GROUP BY o.status`,
+        activeWhere.params
+      ),
+      query(
+        `SELECT COUNT(*)::int AS created,
+                COUNT(*) FILTER (WHERE o.status = 'picked_up')::int AS picked_up,
+                COUNT(*) FILTER (WHERE o.status = 'cancelled')::int AS cancelled,
+                COUNT(*) FILTER (WHERE o.status = 'rejected')::int AS rejected,
+                COUNT(*) FILTER (WHERE o.status IN (${SQL_LIST(ACTIVE_ORDER_STATUSES)}))::int AS still_active,
+                ${AVG_HOURS('o.created_at', 'o.accepted_at')} AS to_accept,
+                ${AVG_HOURS('o.accepted_at', 'o.ready_at')} AS accept_to_ready,
+                ${AVG_HOURS('o.ready_at', 'o.completed_at')} AS ready_to_collect,
+                ${AVG_HOURS('o.created_at', 'o.completed_at')} AS order_to_collect,
+                COALESCE($1::date, (now() AT TIME ZONE '${TZ}')::date - 29)::text AS from_date,
+                COALESCE($2::date, (now() AT TIME ZONE '${TZ}')::date)::text AS to_date
+           FROM orders o
+          WHERE ${PERIOD('o.created_at')}
+            AND ($3::int IS NULL OR o.pharmacy_id = $3)`,
+        [from ?? null, to ?? null, pharmacy_id ?? null]
+      )
+    ]);
+
+    // Every active status and every party appear, at zero if nothing is there.
+    const by_status = Object.fromEntries(ACTIVE_ORDER_STATUSES.map((s) => [s, {
+      count: 0, overdue: 0, longest_wait_hours: null,
+      waiting_on: ORDER_STAGES[s].waiting_on,
+      overdue_after_hours: ORDER_STAGES[s].overdue_after_hours
+    }]));
+    const by_waiting_on = Object.fromEntries(WAITING_ON.map((w) => [w, { count: 0, overdue: 0 }]));
+    let total = 0;
+    let overdue = 0;
+    for (const row of active.rows) {
+      Object.assign(by_status[row.status], {
+        count: row.count, overdue: row.overdue, longest_wait_hours: row.longest_wait_hours
+      });
+      by_waiting_on[row.waiting_on].count += row.count;
+      by_waiting_on[row.waiting_on].overdue += row.overdue;
+      total += row.count;
+      overdue += row.overdue;
+    }
+
+    const p = period.rows[0];
+    const finished = p.picked_up + p.cancelled + p.rejected;
+    return {
+      active: { total, overdue, by_status, by_waiting_on },
+      period: {
+        from: p.from_date,
+        to: p.to_date,
+        created: p.created,
+        picked_up: p.picked_up,
+        cancelled: p.cancelled,
+        rejected: p.rejected,
+        still_active: p.still_active,
+        // Share of finished orders that were collected.
+        collection_rate: finished ? Math.round((p.picked_up / finished) * 1000) / 10 : null,
+        avg_hours: {
+          to_accept: p.to_accept,
+          accept_to_ready: p.accept_to_ready,
+          ready_to_collect: p.ready_to_collect,
+          order_to_collect: p.order_to_collect
+        }
+      }
+    };
+  }
+
+  /**
+   * Per pharmacy: its orders in progress now (and how many are overdue),
+   * plus how its orders created in the period ended and how fast it worked.
+   * Pharmacies with no orders in progress and none in the period are left
+   * out. Most overdue first.
+   */
+  static async orderTrackingByPharmacy({ limit, offset, from, to }) {
+    const result = await query(
+      `WITH now_active AS (
+         SELECT o.pharmacy_id,
+                COUNT(*)::int AS active,
+                COUNT(*) FILTER (WHERE ${IS_OVERDUE})::int AS overdue,
+                COUNT(*) FILTER (WHERE o.status = 'pending')::int AS awaiting_response,
+                COUNT(*) FILTER (WHERE o.status = 'ready')::int AS awaiting_collection
+           FROM orders o ${LAST_MOVE_JOIN}
+          WHERE o.status IN (${SQL_LIST(ACTIVE_ORDER_STATUSES)})
+          GROUP BY o.pharmacy_id
+       ), in_period AS (
+         SELECT o.pharmacy_id,
+                COUNT(*)::int AS created,
+                COUNT(*) FILTER (WHERE o.status = 'picked_up')::int AS picked_up,
+                COUNT(*) FILTER (WHERE o.status = 'cancelled')::int AS cancelled,
+                COUNT(*) FILTER (WHERE o.status = 'rejected')::int AS rejected,
+                ${AVG_HOURS('o.created_at', 'o.accepted_at')} AS avg_hours_to_accept,
+                ${AVG_HOURS('o.accepted_at', 'o.ready_at')} AS avg_hours_accept_to_ready
+           FROM orders o
+          WHERE ${PERIOD('o.created_at')}
+          GROUP BY o.pharmacy_id
+       ), merged AS (
+         SELECT COALESCE(a.pharmacy_id, p.pharmacy_id) AS pharmacy_id,
+                COALESCE(a.active, 0) AS active,
+                COALESCE(a.overdue, 0) AS overdue,
+                COALESCE(a.awaiting_response, 0) AS awaiting_response,
+                COALESCE(a.awaiting_collection, 0) AS awaiting_collection,
+                COALESCE(p.created, 0) AS created,
+                COALESCE(p.picked_up, 0) AS picked_up,
+                COALESCE(p.cancelled, 0) AS cancelled,
+                COALESCE(p.rejected, 0) AS rejected,
+                p.avg_hours_to_accept, p.avg_hours_accept_to_ready
+           FROM now_active a
+           FULL JOIN in_period p ON p.pharmacy_id = a.pharmacy_id
+       )
+       SELECT COUNT(*) OVER ()::int AS total_rows,
+              m.*, ${PHARMACY_NAME('ph')} AS pharmacy_name, ph.email AS pharmacy_email
+         FROM merged m
+         LEFT JOIN pharmacies ph ON ph.id = m.pharmacy_id
+        ORDER BY m.overdue DESC, m.active DESC, m.created DESC, m.pharmacy_id
+        LIMIT $3 OFFSET $4`,
+      [from ?? null, to ?? null, limit, offset]
+    );
+
+    // COUNT(*) OVER () rides on each row; an offset past the end has none.
+    let total = result.rows[0]?.total_rows;
+    if (total === undefined) {
+      total = offset === 0 ? 0 : (await this.orderTrackingByPharmacy({ limit: 1, offset: 0, from, to })).total;
+    }
+    const pharmacies = result.rows.map(({ total_rows, ...row }) => row);
+    return { total, pharmacies };
   }
 
   /* -------------------------------------------------------------- payments */

@@ -78,8 +78,14 @@ Clinical text (diagnosis, clinical notes, reason for visit, doctor notes, medici
 | `payment_type` | `cash`, `medical_aid` |
 | `pharmacy_id`, `patient_id` | integer |
 | `from`, `to` | date the order was created |
+| `active` | `true` = still in progress, `false` = finished (`picked_up`, `cancelled`, `rejected`) |
+| `overdue` | `true` / `false` (see [Order tracking](#order-tracking)) |
+| `waiting_on` | `pharmacy`, `medical_aid`, `patient` |
+| `sort` | `newest` (default), `longest_waiting` (longest in its current status first) |
 
-Newest first. Example response:
+The "stuck orders" screen is `?overdue=true&sort=longest_waiting`.
+
+Example response:
 
 ```json
 {
@@ -99,15 +105,104 @@ Newest first. Example response:
       "created_at": "2026-11-08T09:14:02.000Z",
       "updated_at": "2026-11-08T11:40:10.000Z",
       "completed_at": null,
-      "cancelled_at": null
+      "cancelled_at": null,
+      "status_since": "2026-11-08T11:40:10.000Z",
+      "hours_in_status": 30.5,
+      "waiting_on": "patient",
+      "overdue_after_hours": 72,
+      "is_overdue": false
     }
   ]
 }
 ```
 
+### Order tracking
+
+Orders are pickup-only: the patient collects at the pharmacy. There are no
+deliveries and no returns. Every order in progress is waiting on someone, and
+is **overdue** once it has sat in its current status longer than allowed:
+
+| Status | Waiting on | Overdue after |
+|---|---|---|
+| `pending` | pharmacy (accept or reject) | 24 h |
+| `accepted` | pharmacy | 24 h |
+| `awaiting_claim` | medical_aid (claim decision) | 72 h |
+| `claim_approved` | pharmacy | 24 h |
+| `claim_rejected` | patient (pay in full or cancel) | 48 h |
+| `preparing` | pharmacy | 24 h |
+| `ready` | patient (collect) | 72 h |
+
+The hours are set in `config/orderTracking.js`. Every list row and order detail carries:
+
+- `status_since`: when the order entered its current status
+- `hours_in_status`: how long it has been there (`null` once finished)
+- `waiting_on`, `overdue_after_hours`: from the table (`null` once finished)
+- `is_overdue`: always `false` once finished
+
+### `GET /orders/tracking/stats`
+
+Filters: `pharmacy_id`, `from`, `to`.
+
+`active` is every order in progress **right now**, whatever the dates.
+`period` covers orders **created** between `from` and `to`, and defaults to the
+last 30 days. `collection_rate` is the percentage of finished orders that were
+collected. `avg_hours` is the average time each step took.
+
+```json
+{
+  "active": {
+    "total": 5, "overdue": 5,
+    "by_status": {
+      "pending":        { "count": 0, "overdue": 0, "longest_wait_hours": null, "waiting_on": "pharmacy", "overdue_after_hours": 24 },
+      "awaiting_claim": { "count": 4, "overdue": 4, "longest_wait_hours": 590.4, "waiting_on": "medical_aid", "overdue_after_hours": 72 },
+      "...": {}
+    },
+    "by_waiting_on": {
+      "pharmacy":    { "count": 1, "overdue": 1 },
+      "medical_aid": { "count": 4, "overdue": 4 },
+      "patient":     { "count": 0, "overdue": 0 }
+    }
+  },
+  "period": {
+    "from": "2026-10-21", "to": "2026-11-19",
+    "created": 15, "picked_up": 3, "cancelled": 4, "rejected": 3, "still_active": 5,
+    "collection_rate": 30,
+    "avg_hours": { "to_accept": 36.1, "accept_to_ready": 122.2, "ready_to_collect": 23.4, "order_to_collect": 145.6 }
+  }
+}
+```
+
+Every active status and every `waiting_on` key is always present, at zero if
+nothing is there, so you can render fixed cards.
+
+### `GET /orders/tracking/pharmacies`
+
+Filters: `from`, `to` (period as above), `limit`, `offset`. Most overdue first.
+Pharmacies with nothing in progress and nothing created in the period are left out.
+
+```json
+{
+  "total": 1, "limit": 50, "offset": 0,
+  "pharmacies": [
+    {
+      "pharmacy_id": 17, "pharmacy_name": "Bryanston Central Pharmacy", "pharmacy_email": "...",
+      "active": 5, "overdue": 5, "awaiting_response": 0, "awaiting_collection": 0,
+      "created": 15, "picked_up": 3, "cancelled": 4, "rejected": 3,
+      "avg_hours_to_accept": 36.1, "avg_hours_accept_to_ready": 122.2
+    }
+  ]
+}
+```
+
+`active`, `overdue`, `awaiting_response` (`pending`) and `awaiting_collection`
+(`ready`) are counts right now. The other fields cover the period.
+
 ### `GET /orders/:orderId`
 
-Returns everything in the list row, plus:
+Returns everything in the list row (tracking fields included), plus the fields
+below. Each `status_history` step also has `hours_in_status`: how long the
+order stayed in that step, up to now for the current step, and `null` for a
+final status.
 
 ```json
 {
