@@ -1,4 +1,5 @@
 const AdminRecords = require('../models/AdminRecords');
+const AdminNotification = require('../models/AdminNotification');
 const AuditLog = require('../models/AuditLog');
 const Session = require('../models/Session');
 const User = require('../models/User');
@@ -489,6 +490,54 @@ class AdminRecordsController {
     if (from > to) throw new BadRequest('from must not be after to');
     const report = await AdminRecords.alertReport({ from, to });
     ok(res, 'Security report generated', { period: { from, to }, report });
+  });
+
+  /* ---------------------------------------------------------- notifications */
+
+  // One feed for every admin; read and dismissed are per admin.
+
+  static listNotifications = handle('notifications', async (req, res) => {
+    const q = req.query;
+    const opts = {
+      ...parse.paging(q),
+      unreadOnly: parse.bool(q.unread, 'unread') === true,
+      type: parse.oneOf(q.type, AdminNotification.VALID_TYPES, 'type'),
+      priority: parse.oneOf(q.priority, AdminNotification.VALID_PRIORITIES, 'priority')
+    };
+    const [{ total, notifications }, counts] = await Promise.all([
+      AdminNotification.listForAdmin(req.user.id, opts),
+      AdminNotification.unreadCounts(req.user.id)
+    ]);
+    ok(res, 'Notifications retrieved', {
+      total, limit: opts.limit, offset: opts.offset,
+      unread_count: counts.unread, unread_high_count: counts.unread_high,
+      notifications
+    });
+  });
+
+  static getNotificationCounts = handle('notification counts', async (req, res) => {
+    const counts = await AdminNotification.unreadCounts(req.user.id);
+    ok(res, 'Notification counts retrieved', { unread_count: counts.unread, unread_high_count: counts.unread_high });
+  });
+
+  /** Body { read: false } marks it unread again; anything else marks it read. */
+  static setNotificationRead = handle('notification', async (req, res) => {
+    const id = parse.param(req.params.notificationId, 'notification');
+    const notification = await AdminNotification.setRead(id, req.user.id, req.body?.read !== false);
+    if (!notification) return notFound(res, 'Notification');
+    ok(res, 'Notification updated', notification);
+  });
+
+  static markAllNotificationsRead = handle('notifications', async (req, res) => {
+    const updated = await AdminNotification.markAllRead(req.user.id);
+    ok(res, 'Notifications marked read', { updated });
+  });
+
+  /** Hides it from this admin's feed; other admins still see it. */
+  static dismissNotification = handle('notification', async (req, res) => {
+    const id = parse.param(req.params.notificationId, 'notification');
+    if (!(await AdminNotification.dismiss(id, req.user.id))) return notFound(res, 'Notification');
+    ok(res, 'Notification dismissed', { id });
   });
 }
 

@@ -392,6 +392,29 @@ class AdminRecords {
   }
 
   /**
+   * Every order overdue right now, for the admin notification job. No
+   * patient details: the notification names the pharmacy and the order.
+   * status_since_ms tells one overdue spell from a later one in the same
+   * status.
+   */
+  static async overdueOrders() {
+    const result = await query(
+      `SELECT o.id, o.status, o.pharmacy_id, ${PHARMACY_NAME('ph')} AS pharmacy_name,
+              (EXTRACT(EPOCH FROM ${STATUS_SINCE}) * 1000)::bigint::text AS status_since_ms,
+              ${HOURS(STATUS_SINCE, NOW_UTC)} AS hours_in_status,
+              ${WAITING_ON_SQL} AS waiting_on,
+              ${OVERDUE_AFTER_HOURS} AS overdue_after_hours
+         FROM orders o
+         LEFT JOIN pharmacies ph ON ph.id = o.pharmacy_id
+         ${LAST_MOVE_JOIN}
+        WHERE o.status IN (${SQL_LIST(ACTIVE_ORDER_STATUSES)})
+          AND ${IS_OVERDUE}
+        ORDER BY ${STATUS_SINCE}`
+    );
+    return result.rows;
+  }
+
+  /**
    * The order tracking header.
    *
    * active: every order still in progress right now (not date-filtered),

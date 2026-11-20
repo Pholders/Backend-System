@@ -8,6 +8,7 @@
  * Rooms:
  *   - patient:<id>   private to one patient
  *   - pharmacy:<id>  private to one pharmacy
+ *   - admins         every signed-in admin
  *
  * Auth handshake:
  *   Clients connect with `auth: { token }` (the same 7-day session token used
@@ -17,6 +18,7 @@
  * Events emitted:
  *   - patient room:   'order:placed', 'order:updated', 'order:cancelled'
  *   - pharmacy room:  'order:incoming', 'order:cancelled'
+ *   - admins room:    'admin:notification'
  *
  * If Socket.IO is not initialized (e.g. tests, init failure) all emit helpers
  * become silent no-ops — they never throw.
@@ -80,8 +82,11 @@ function init(httpServer, { corsOrigin } = {}) {
       socket.join(`patient:${id}`);
     } else if (role === 'pharmacy') {
       socket.join(`pharmacy:${id}`);
+    } else if (role === 'admin') {
+      // One room for every admin: their notification feed is shared.
+      socket.join('admins');
     } else {
-      // Other roles (admin, doctor) — connect but no room. They can be added later.
+      // Doctors connect but have no room yet.
     }
 
     socket.emit('connected', { role, id });
@@ -111,6 +116,11 @@ function emitToPharmacy(pharmacyId, event, payload) {
   io.to(`pharmacy:${pharmacyId}`).emit(event, payload);
 }
 
+function emitToAdmins(event, payload) {
+  if (!io) return;
+  io.to('admins').emit(event, payload);
+}
+
 /**
  * Convenience: order events. Always pushes to both patient and pharmacy rooms.
  */
@@ -126,5 +136,6 @@ module.exports = {
   getIO,
   emitToPatient,
   emitToPharmacy,
+  emitToAdmins,
   emitOrderEvent,
 };

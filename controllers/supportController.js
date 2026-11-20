@@ -6,6 +6,7 @@ const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const AccountDeletionToken = require('../models/AccountDeletionToken');
 const emailService = require('../services/emailService');
+const adminNotifications = require('../services/adminNotifications');
 
 const FAQ_PATH = path.join(__dirname, '..', 'content', 'support', 'faq.json');
 
@@ -79,6 +80,8 @@ async function submitTicket(req, res) {
       message: String(message).trim(),
       priority
     });
+
+    adminNotifications.supportTicket(ticket, email);
 
     // Email the ticket to support
     try {

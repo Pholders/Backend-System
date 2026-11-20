@@ -3,6 +3,7 @@ const Doctor = require('../models/Doctor');
 const Appointment = require('../models/Appointment');
 const AuditLog = require('../models/AuditLog');
 const doctorNotifications = require('../services/doctorNotifications');
+const adminNotifications = require('../services/adminNotifications');
 
 class ReviewController {
   /**
@@ -37,6 +38,7 @@ class ReviewController {
       // Submit or update review
       const review = await DoctorReview.create(doctorId, patientId, rating, reviewText);
       doctorNotifications.reviewReceived(review);
+      adminNotifications.reviewLowRating(review);
 
       // Log security event
       await AuditLog.logSecurityEvent(
@@ -278,6 +280,7 @@ class ReviewController {
 
       // Update review
       const updatedReview = await DoctorReview.update(reviewId, rating, reviewText);
+      adminNotifications.reviewLowRating(updatedReview);
 
       await AuditLog.logSecurityEvent(
         req,

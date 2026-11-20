@@ -387,4 +387,64 @@ router.post('/security/alerts/:alertId/review', admin, C.reviewAlert);
 router.get('/security/suspicious-users', admin, C.getSuspiciousUsers);
 router.get('/security/report', admin, C.getAlertReport);
 
+/**
+ * @swagger
+ * /api/users/admin/notifications:
+ *   get:
+ *     summary: The admins' shared notification feed, newest first, without what this admin dismissed. Read state is per admin. New ones are also pushed live on Socket.IO as 'admin:notification'.
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: unread, schema: { type: boolean } }
+ *       - { in: query, name: type, schema: { type: string, enum: [support_ticket, security_alert, order_overdue, order_rejected, provider_joined, review_low_rating] } }
+ *       - { in: query, name: priority, schema: { type: string, enum: [normal, high] } }
+ *       - { in: query, name: limit, schema: { type: integer } }
+ *       - { in: query, name: offset, schema: { type: integer } }
+ *     responses:
+ *       200: { description: "{ total, unread_count, unread_high_count, notifications }" }
+ * /api/users/admin/notifications/counts:
+ *   get:
+ *     summary: Unread counts for the bell badge
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: "{ unread_count, unread_high_count }" }
+ * /api/users/admin/notifications/read-all:
+ *   patch:
+ *     summary: Mark everything this admin hasn't read as read
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: "{ updated }" }
+ * /api/users/admin/notifications/{notificationId}/read:
+ *   patch:
+ *     summary: Mark read, or unread with { read false }, for this admin
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: notificationId, required: true, schema: { type: integer } }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema: { type: object, properties: { read: { type: boolean, default: true } } }
+ *     responses:
+ *       200: { description: Notification }
+ *       404: { description: Not found }
+ * /api/users/admin/notifications/{notificationId}:
+ *   delete:
+ *     summary: Dismiss it from this admin's feed (other admins still see it)
+ *     tags: [Admin records]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: notificationId, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Dismissed }
+ *       404: { description: Not found }
+ */
+router.get('/notifications', admin, C.listNotifications);
+router.get('/notifications/counts', admin, C.getNotificationCounts);
+router.patch('/notifications/read-all', admin, C.markAllNotificationsRead);
+router.patch('/notifications/:notificationId/read', admin, C.setNotificationRead);
+router.delete('/notifications/:notificationId', admin, C.dismissNotification);
+
 module.exports = router;

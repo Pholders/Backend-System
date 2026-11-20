@@ -6,6 +6,8 @@ const AccountDeletionToken = require('../models/AccountDeletionToken');
 const ActionToken = require('../models/ActionToken');
 const Notification = require('../models/Notification');
 const DoctorNotification = require('../models/DoctorNotification');
+const Admin = require('../models/Admin');
+const AdminNotification = require('../models/AdminNotification');
 const NotificationPreferences = require('../models/NotificationPreferences');
 const DeviceToken = require('../models/DeviceToken');
 const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurityColumns');
@@ -185,6 +187,11 @@ const initializeDatabase = async () => {
     // Every doctor and pharmacy on the Basic tier for now. After the default
     // pharmacy groups exist.
     await assignBasicTier();
+
+    // The admins' shared notification feed. Its read/dismissed rows point at
+    // admins, which no earlier step creates, so make sure that exists first.
+    await Admin.createTable();
+    await AdminNotification.createTable();
     
     console.log('✅ Database initialization completed successfully');
     return true;

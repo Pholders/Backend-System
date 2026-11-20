@@ -115,7 +115,12 @@ class SecurityAlert {
 
     try {
       const result = await query(insertQuery, values);
-      return result.rows[0];
+      const alert = result.rows[0];
+      // CRITICAL and HIGH alerts reach the admins' notifications. Required
+      // here, not at the top, to keep the model free of a service cycle.
+      // Fire-and-forget: it never throws.
+      require('../services/adminNotifications').securityAlert(alert);
+      return alert;
     } catch (error) {
       console.error('❌ Error creating security alert:', error);
       throw error;
