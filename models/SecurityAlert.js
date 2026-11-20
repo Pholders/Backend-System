@@ -94,7 +94,7 @@ class SecurityAlert {
         requires_user_verification, verification_token, verification_token_expires_at
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 
-        CASE WHEN $12 IS NOT NULL THEN NOW() + INTERVAL '24 hours' ELSE NULL END)
+        CASE WHEN $12::varchar IS NOT NULL THEN NOW() + INTERVAL '24 hours' ELSE NULL END)
       RETURNING *
     `;
 

@@ -11,6 +11,7 @@ const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const SecurityAlertService = require('../services/securityAlertService');
+const SecurityAlert = require('../models/SecurityAlert');
 const GeolocationService = require('../services/geolocationService');
 const PasswordResetToken = require('../models/PasswordResetToken');
 const NotificationPreferences = require('../models/NotificationPreferences');
@@ -464,6 +465,35 @@ class UserController {
           userAgent
         });
         
+        // Keep the serious findings as security alerts, so they reach the
+        // admin security screen and the admins' notifications. Nothing stored
+        // them before: the patient got an email and the admins saw nothing.
+        // MEDIUM/LOW (new device, new location) are too routine to keep.
+        for (const finding of activityAnalysis.alerts || []) {
+          if (!['CRITICAL', 'HIGH'].includes(finding.severity)) continue;
+          try {
+            await SecurityAlert.create({
+              userId: user.id,
+              userType: 'patient',
+              email: user.email,
+              alertType: finding.type,
+              severity: finding.severity,
+              riskScore: finding.riskScore ?? activityAnalysis.riskScore,
+              alertMessage: finding.message,
+              locationData: geolocation,
+              deviceData: {
+                fingerprint: deviceFingerprint,
+                browser: deviceInfo.browser,
+                os: deviceInfo.os,
+                device: deviceInfo.device
+              },
+              ipAddress
+            });
+          } catch (storeError) {
+            console.error('❌ Storing security alert failed (non-blocking):', storeError.message);
+          }
+        }
+
         // Send alerts if high risk
         if (activityAnalysis.riskScore > 40) {
           const riskLevel = SecurityAlertService.getRiskLevel(activityAnalysis.riskScore);
