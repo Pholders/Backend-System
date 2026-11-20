@@ -20,6 +20,7 @@ const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
 const { runMigration: createSupportTicketsTable } = require('./createSupportTicketsTable');
 const { runMigration: addAdminModeration } = require('./addAdminModeration');
 const { runMigration: assignBasicTier } = require('./assignBasicTier');
+const { runMigration: syncAppointmentPaymentStatus } = require('./syncAppointmentPaymentStatus');
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
@@ -192,6 +193,9 @@ const initializeDatabase = async () => {
     // admins, which no earlier step creates, so make sure that exists first.
     await Admin.createTable();
     await AdminNotification.createTable();
+
+    // Appointments' copy of payment status/method follows the payments table.
+    await syncAppointmentPaymentStatus();
     
     console.log('✅ Database initialization completed successfully');
     return true;
