@@ -47,6 +47,7 @@ const swaggerSpecs = require('./config/swagger');
 
 // Import scheduled notification triggers
 const notificationTriggers = require('./jobs/notificationTriggers');
+const adminOverdueOrders = require('./jobs/adminOverdueOrders');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -315,6 +316,9 @@ async function startServer() {
     } catch (err) {
       console.error('Failed to start notification triggers:', err.message);
     }
+
+    // Tell the admins about orders that have gone overdue (every 15 minutes).
+    adminOverdueOrders.start();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
@@ -329,6 +333,7 @@ process.on('SIGTERM', () => {
   
   // Stop reminder scheduler
   ReminderSchedulerService.stop();
+  adminOverdueOrders.stop();
   
   pool.end(() => {
     console.log('Database pool closed');

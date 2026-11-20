@@ -10,6 +10,7 @@ const RefreshToken = require('../models/RefreshToken');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
 const doctorNotifications = require('../services/doctorNotifications');
+const adminNotifications = require('../services/adminNotifications');
 
 /**
  * Pharmacy Controller
@@ -315,6 +316,7 @@ class PharmacyController {
         }
 
         await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'signup_verified', 'success');
+        adminNotifications.providerJoined('pharmacy', pharmacy);
 
         delete pharmacy.password_hash;
 
@@ -979,6 +981,7 @@ class PharmacyController {
       }
 
       await AuditLog.logSecurityEvent(req, pharmacy.id, 'pharmacy', email, 'email_verification', 'success');
+      adminNotifications.providerJoined('pharmacy', pharmacy);
 
       return res.status(200).json({
         success: true,

@@ -621,6 +621,83 @@ The report has one row per day, alert type and severity. Days with no alerts hav
 
 ---
 
+## 8a. Notifications
+
+One feed shared by every admin. Read and dismissed are **per admin**: when
+one admin reads or dismisses a notification, the others still see it unread.
+
+| Type | When | Priority | `data` |
+|---|---|---|---|
+| `support_ticket` | A ticket or contact form comes in | `high` if the ticket is high/urgent | `ticketId`, `category`, `priority` |
+| `security_alert` | A CRITICAL or HIGH security alert is stored (impossible travel, pattern anomaly at patient login) | `high` | `alertId`, `alertType`, `severity`, `userType`, `userId` |
+| `order_overdue` | An order passes its overdue limit (see [Order tracking](#order-tracking)); checked every 15 min | `normal` | `orderId`, `status`, `pharmacyId`, `waitingOn`, `hoursInStatus` |
+| `order_rejected` | A pharmacy rejects an order | `normal` | `orderId`, `pharmacyId` |
+| `provider_joined` | A doctor signs up, or a pharmacy verifies its email | `normal` | `userType` (`doctor`/`pharmacy`), `userId` |
+| `review_low_rating` | A review is written or edited at 1 or 2 stars | `normal` | `reviewId`, `doctorId`, `rating` |
+
+Use `data` to link to the matching screen: `/support/tickets/:ticketId`,
+`/security/alerts/:alertId`, `/orders/:orderId`, the doctor or pharmacy
+profile, or `/reviews?doctor_id=`.
+
+Each event is announced once. An order that stays overdue doesn't repeat. If
+it later goes overdue in another status, that is a new notification.
+
+### `GET /notifications`
+
+Filters: `unread` (`true`), `type`, `priority` (`normal`, `high`), `limit`, `offset`.
+Newest first. Dismissed ones are left out.
+
+```json
+{
+  "total": 11, "limit": 50, "offset": 0,
+  "unread_count": 11, "unread_high_count": 2,
+  "notifications": [
+    {
+      "id": 12,
+      "type": "order_overdue",
+      "priority": "normal",
+      "title": "Order #15 is overdue",
+      "body": "It has been \"preparing\" at Bryanston Central Pharmacy for 171h (allowed 24h), waiting on the pharmacy.",
+      "data": { "orderId": 15, "status": "preparing", "pharmacyId": 17, "waitingOn": "pharmacy", "hoursInStatus": 171.2 },
+      "created_at": "2026-11-20T08:15:00.000Z",
+      "is_read": false,
+      "read_at": null
+    }
+  ]
+}
+```
+
+### `GET /notifications/counts`
+
+`{ "unread_count": 3, "unread_high_count": 1 }`. Use it for the bell badge.
+
+### `PATCH /notifications/:notificationId/read`
+
+Body `{ "read": false }` marks it unread again. No body marks it read. Returns the notification.
+
+### `PATCH /notifications/read-all`
+
+Marks everything this admin hasn't read as read. Returns `{ "updated": 7 }`.
+
+### `DELETE /notifications/:notificationId`
+
+Dismisses it from this admin's feed only. Returns `{ "id": 12 }`.
+
+### Live updates
+
+Connect to Socket.IO with the admin's token (`auth: { token }`). Admins join
+an `admins` room and receive each new notification as it is created:
+
+```js
+socket.on('admin:notification', (n) => {
+  // n has the same shape as a list item, with is_read false.
+  prependToFeed(n);
+  bumpBadge(n.priority);
+});
+```
+
+---
+
 ## 9. Drop-in client
 
 A small `fetch` wrapper that covers all of the above. Adapt `getToken` and `onUnauthorized` to the app's auth store.

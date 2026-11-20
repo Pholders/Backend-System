@@ -9,6 +9,7 @@ const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const PasswordValidator = require('../utils/passwordValidator');
 const emailService = require('../services/emailService');
+const adminNotifications = require('../services/adminNotifications');
 const GeolocationService = require('../services/geolocationService');
 const GeocodingService = require('../services/geocodingService');
 const storage = require('../services/storage');
@@ -290,6 +291,7 @@ class DoctorController {
 
       // Log successful signup
       await AuditLog.logSecurityEvent(req, newDoctor.id, 'doctor', email, 'signup', 'success');
+      adminNotifications.providerJoined('doctor', newDoctor);
 
       delete newDoctor.password_hash;
 

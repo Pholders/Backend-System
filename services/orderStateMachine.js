@@ -24,6 +24,7 @@
 const Order = require('../models/Order');
 const OrderStatusHistory = require('../models/OrderStatusHistory');
 const orderNotifications = require('./orderNotifications');
+const adminNotifications = require('./adminNotifications');
 const realtimeService = require('./realtimeService');
 
 // status -> array of statuses it may transition to.
@@ -185,6 +186,11 @@ async function transition({ orderId, toStatus, actorType, actorId = null, notes 
     actor_id: actorId,
     notes,
   });
+
+  // Tell the admins when a pharmacy declines an order (never throws).
+  if (toStatus === 'rejected') {
+    adminNotifications.orderRejected(updated, notes);
+  }
 
   // 8. Fire patient notification (best-effort — never block the transition).
   try {
