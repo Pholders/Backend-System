@@ -2,6 +2,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { query } = require('../config/db');
 const storage = require('../services/storage');
+const doses = require('../services/medicationDoseService');
 
 const ALLOWED_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -266,7 +267,9 @@ class MedicationController {
               ORDER BY ma.created_at
             ) FILTER (WHERE ma.id IS NOT NULL),
             '[]'::json
-          ) AS attachments
+          ) AS attachments,
+          (SELECT COUNT(*)::int FROM medication_doses d
+            WHERE d.medication_id = m.id AND d.status <> 'pending') AS adherence_doses_counted
         FROM medications m
         LEFT JOIN medication_attachments ma ON ma.medication_id = m.id
         WHERE m.patient_id = $1
@@ -281,6 +284,59 @@ class MedicationController {
         error: { code: 'INTERNAL_ERROR', message: 'Unable to retrieve medications.' }
       });
     }
+  }
+
+  // GET /api/medications/doses?date=YYYY-MM-DD (default: today, South African time)
+  static async listDoses(req, res) {
+    const day = req.query.date === undefined ? doses.localDate() : req.query.date;
+    if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+        Number.isNaN(new Date(`${day}T00:00:00.000Z`).getTime()) ||
+        new Date(`${day}T00:00:00.000Z`).toISOString().slice(0, 10) !== day) {
+      return validationError(res, { date: 'Must be an ISO 8601 date in YYYY-MM-DD format.' });
+    }
+
+    try {
+      await doses.refreshDoses(undefined, { patientId: req.user.id });
+      const rows = await doses.listDosesForDay(undefined, req.user.id, day);
+      return res.json({ data: { date: day, time_zone: doses.ZONE, doses: rows } });
+    } catch (error) {
+      console.error('Error listing medication doses:', error);
+      return res.status(500).json({
+        error: { code: 'INTERNAL_ERROR', message: 'Unable to retrieve medication doses.' }
+      });
+    }
+  }
+
+  // POST /api/medications/doses/:doseId/taken   body: { taken_at? }
+  // POST /api/medications/doses/:doseId/skipped
+  static logDose(status) {
+    return async (req, res) => {
+      if (!/^\d{1,18}$/.test(req.params.doseId)) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Dose not found.' } });
+      }
+      const takenAt = req.body && req.body.taken_at;
+      if (takenAt !== undefined && takenAt !== null && typeof takenAt !== 'string') {
+        return validationError(res, { taken_at: 'Must be an ISO 8601 date-time.' });
+      }
+
+      try {
+        const dose = await doses.recordDose(undefined, {
+          patientId: req.user.id,
+          doseId: req.params.doseId,
+          status,
+          takenAt: takenAt || null,
+        });
+        return res.json({ data: dose });
+      } catch (error) {
+        if (error instanceof doses.DoseError) {
+          return res.status(error.status).json({ error: { code: error.code, message: error.message } });
+        }
+        console.error('Error logging medication dose:', error);
+        return res.status(500).json({
+          error: { code: 'INTERNAL_ERROR', message: 'Unable to log the dose.' }
+        });
+      }
+    };
   }
 }
 

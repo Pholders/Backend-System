@@ -24,6 +24,9 @@ const { runMigration: syncAppointmentPaymentStatus } = require('./syncAppointmen
 const { runMigration: createChecklistTables } = require('./createChecklistTables');
 const { runMigration: createStoredFilesTable } = require('./createStoredFilesTable');
 const { runMigration: createPatientMedicationTables } = require('./createPatientMedicationTables');
+const { runMigration: createMedicationDosesTable } = require('./createMedicationDosesTable');
+const { runMigration: addAppointmentDayBeforeReminder } = require('./addAppointmentDayBeforeReminder');
+const { runMigration: fixAppointmentReminderHistory } = require('./fixAppointmentReminderHistory');
 const { runMigration: createMedicalHistoryTables } = require('./createMedicalHistoryTables');
 const { runMigration: fixStoredImageUrls } = require('./fixStoredImageUrls');
 const { runMigration: createOrdersTables } = require('./createOrdersTables');
@@ -111,6 +114,7 @@ const initializeDatabase = async () => {
     await DeviceToken.addDeviceTokenColumns();
     // Create Appointments table
     await Appointment.createTable();
+    await addAppointmentDayBeforeReminder();
 
     // Create Doctor Reviews table
     await DoctorReview.createTable();
@@ -147,6 +151,9 @@ const initializeDatabase = async () => {
     // Dispensing a prescription creates active medications linked to its items
     await linkMedicationsToPrescriptions();
 
+    // Scheduled doses behind medication reminders and adherence
+    await createMedicationDosesTable();
+
     // Orders v1 (orders table, status history, link claims to orders, add 'order' notification type)
     await createOrdersTables();
 
@@ -159,6 +166,7 @@ const initializeDatabase = async () => {
 
     // Run appointment reminders migration
     await addAppointmentReminders();
+    await fixAppointmentReminderHistory();
 
     // In-app reminders. Runs after patients and appointments exist, since it
     // references both.

@@ -48,6 +48,7 @@ const swaggerSpecs = require('./config/swagger');
 // Import scheduled notification triggers
 const notificationTriggers = require('./jobs/notificationTriggers');
 const adminOverdueOrders = require('./jobs/adminOverdueOrders');
+const medicationReminders = require('./jobs/medicationReminders');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -310,7 +311,7 @@ async function startServer() {
     console.log(`📍 Inventory: http://localhost:${PORT}/api/inventory`);
     console.log(`📍 Socket.IO: ws://localhost:${PORT}/socket.io/`);
 
-    // Start scheduled notification triggers (medication + appointment).
+    // Day-before appointment reminders (every 15 minutes, sent from 08:00).
     try {
       notificationTriggers.start();
     } catch (err) {
@@ -319,6 +320,9 @@ async function startServer() {
 
     // Tell the admins about orders that have gone overdue (every 15 minutes).
     adminOverdueOrders.start();
+
+    // Medication dose reminders, missed doses and adherence (every 5 minutes).
+    medicationReminders.start();
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
@@ -334,6 +338,8 @@ process.on('SIGTERM', () => {
   // Stop reminder scheduler
   ReminderSchedulerService.stop();
   adminOverdueOrders.stop();
+  medicationReminders.stop();
+  notificationTriggers.stop();
   
   pool.end(() => {
     console.log('Database pool closed');

@@ -1,4 +1,8 @@
-const { query } = require('../config/db');
+const { query, pool } = require('../config/db');
+
+const ZONE = 'Africa/Johannesburg';
+// A reminder whose moment was missed (server down) is still sent this long afterwards.
+const REMINDER_GRACE_MINUTES = 30;
 
 /**
  * AppointmentReminder Model
@@ -276,35 +280,64 @@ class AppointmentReminder {
   }
 
   /**
-   * Get reminders that are due to be sent
-   * Returns reminders where the appointment is within the reminder window
+   * The reminders due now: one row per (reminder, minutes before, method).
+   *
+   * The appointment's time is its date and time_slot in South African time.
+   * A reminder is due from `minutes_before` ahead of that time, for
+   * REMINDER_GRACE_MINUTES (so a run after downtime catches up), and never
+   * once the appointment has started. Reminders already sent or skipped for
+   * that appointment time are left out; failed ones are offered again.
    */
-  static async getRemindersToSend() {
+  static async getRemindersToSend(db = pool) {
     try {
-      const result = await query(
-        `SELECT 
-           ar.id as reminder_id,
+      const result = await db.query(
+        `SELECT
+           ar.id AS reminder_id,
            ar.appointment_id,
            ar.patient_id,
-           ar.reminder_times,
-           ar.reminder_methods,
+           times.minutes_before,
+           methods.method AS reminder_method,
+           slot.appointment_at,
            a.appointment_date,
            a.time_slot,
            a.doctor_id,
-           u.email as patient_email,
-           u.phone as patient_phone,
-           u.first_name as patient_first_name,
-           u.last_name as patient_last_name,
-           d.first_name as doctor_first_name,
-           d.last_name as doctor_last_name
+           u.email AS patient_email,
+           u.phone AS patient_phone,
+           u.first_name AS patient_first_name,
+           u.last_name AS patient_last_name,
+           d.first_name AS doctor_first_name,
+           d.last_name AS doctor_last_name,
+           d.specialization,
+           d.clinic_name
          FROM appointment_reminders ar
          JOIN appointments a ON ar.appointment_id = a.id
          JOIN patients u ON ar.patient_id = u.id
          LEFT JOIN doctors d ON a.doctor_id = d.id
+         CROSS JOIN LATERAL (SELECT DISTINCT unnest(ar.reminder_times) AS minutes_before) AS times
+         CROSS JOIN LATERAL (SELECT DISTINCT unnest(ar.reminder_methods)::text AS method) AS methods
+         CROSS JOIN LATERAL (
+           SELECT CASE WHEN a.time_slot ~ '^([01][0-9]|2[0-3]):[0-5][0-9]'
+                       THEN (a.appointment_date + substring(a.time_slot FROM 1 FOR 5)::time) AT TIME ZONE $1
+                  END AS appointment_at
+         ) AS slot
          WHERE ar.is_enabled = true
-         AND a.status IN ('scheduled', 'rescheduled')
-         AND a.appointment_date = CURRENT_DATE
-         ORDER BY a.appointment_date, a.time_slot`
+           AND a.status IN ('scheduled', 'rescheduled')
+           AND a.appointment_date >= (now() AT TIME ZONE $1)::date
+           AND slot.appointment_at IS NOT NULL
+           AND slot.appointment_at > now()
+           AND now() >= slot.appointment_at - make_interval(mins => times.minutes_before)
+           AND now() < slot.appointment_at - make_interval(mins => times.minutes_before)
+                       + make_interval(mins => $2)
+           AND NOT EXISTS (
+             SELECT 1 FROM reminder_notification_history h
+             WHERE h.reminder_id = ar.id
+               AND h.reminder_method = methods.method
+               AND h.minutes_before = times.minutes_before
+               AND h.appointment_at = slot.appointment_at
+               AND h.status <> 'failed'
+           )
+         ORDER BY slot.appointment_at, ar.id, times.minutes_before DESC, methods.method`,
+        [ZONE, REMINDER_GRACE_MINUTES]
       );
 
       return result.rows;
@@ -312,6 +345,35 @@ class AppointmentReminder {
       console.error('Error fetching reminders to send:', error);
       throw error;
     }
+  }
+
+  /**
+   * Claim one reminder send by writing its 'pending' history row. Returns the
+   * history id, or null if another run already claimed (or sent) it.
+   */
+  static async claimSend(db, reminder) {
+    const result = await db.query(
+      `INSERT INTO reminder_notification_history
+         (reminder_id, appointment_id, patient_id, reminder_method, minutes_before, appointment_at, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [
+        reminder.reminder_id, reminder.appointment_id, reminder.patient_id,
+        reminder.reminder_method, reminder.minutes_before, reminder.appointment_at,
+      ]
+    );
+    return result.rows[0] ? result.rows[0].id : null;
+  }
+
+  /** Record how a claimed send ended: 'sent', 'skipped' or 'failed'. */
+  static async finishSend(db, historyId, status, errorMessage = null) {
+    await db.query(
+      `UPDATE reminder_notification_history
+       SET status = $2, error_message = $3, sent_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [historyId, status, errorMessage]
+    );
   }
 
   /**
@@ -371,7 +433,7 @@ class AppointmentReminder {
   }
 
   /**
-   * Get upcoming reminders for a patient (within next 24 hours)
+   * Get upcoming reminders for a patient (appointments today or tomorrow, South African dates)
    */
   static async getUpcomingReminders(patient_id) {
     try {
@@ -395,10 +457,10 @@ class AppointmentReminder {
          WHERE ar.patient_id = $1
          AND ar.is_enabled = true
          AND a.status IN ('scheduled', 'rescheduled')
-         AND a.appointment_date >= CURRENT_DATE
-         AND a.appointment_date <= CURRENT_DATE + INTERVAL '24 hours'
+         AND a.appointment_date BETWEEN (now() AT TIME ZONE $2)::date
+                                    AND (now() AT TIME ZONE $2)::date + 1
          ORDER BY a.appointment_date, a.time_slot`,
-        [patient_id]
+        [patient_id, ZONE]
       );
       return result.rows;
     } catch (error) {
@@ -427,5 +489,8 @@ class AppointmentReminder {
     }
   }
 }
+
+AppointmentReminder.ZONE = ZONE;
+AppointmentReminder.REMINDER_GRACE_MINUTES = REMINDER_GRACE_MINUTES;
 
 module.exports = AppointmentReminder;
