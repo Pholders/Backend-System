@@ -1,8 +1,9 @@
 /**
  * Medication reminders and adherence. Runs on start and then every 5 minutes:
  *   1. creates the upcoming dose rows from each active medication's schedule,
- *   2. marks doses nobody logged within 2 hours as missed (updating adherence),
- *   3. sends one reminder per dose, reminder_time_window minutes before it.
+ *   2. sets medications whose course has ended to past,
+ *   3. marks doses nobody logged within 2 hours as missed (updating adherence),
+ *   4. sends one reminder per dose, reminder_time_window minutes before it.
  * See services/medicationDoseService.js for the rules.
  *
  * Uses a plain interval rather than node-cron, which is not installed.
@@ -19,15 +20,15 @@ async function runOnce() {
   if (running) return null; // a slow run must not overlap the next
   running = true;
   try {
-    const { created, missed } = await doses.refreshDoses();
+    const { created, missed, completed } = await doses.refreshDoses();
     const reminders = await doses.sendDueReminders(undefined, notificationService.sendToPatient);
-    if (missed || reminders.claimed) {
+    if (missed || completed || reminders.claimed) {
       console.log(
-        `💊 Medication doses: ${created} created, ${missed} missed, ` +
+        `💊 Medication doses: ${created} created, ${missed} missed, ${completed} courses completed, ` +
         `${reminders.sent}/${reminders.claimed} reminders sent, ${reminders.failed} failed`
       );
     }
-    return { created, missed, ...reminders };
+    return { created, missed, completed, ...reminders };
   } catch (error) {
     console.error('Medication reminders job failed:', error.message);
     return null;

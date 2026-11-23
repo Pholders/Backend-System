@@ -15,6 +15,7 @@ What the patient app needs for medication reminders, logging doses, changing dos
 2. waits for the patient to log the dose as **taken** or **skipped**;
 3. marks a dose **missed** if nobody logs it within 2 hours of its time;
 4. keeps `adherence_percent` on each medication up to date.
+5. sets the medication's `status` to `past` once its course is complete: from the day after `end_date` (South African date). It then gets no more doses or reminders, `schedule_editable` turns `false`, and its adherence stays as it was. Doses still pending on the last day go on to be marked missed as usual.
 
 ```
 adherence_percent = taken / (taken + skipped + missed)

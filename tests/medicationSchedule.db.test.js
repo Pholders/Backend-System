@@ -5,7 +5,7 @@
 // Everything runs inside one transaction that is rolled back, so the
 // database is left exactly as it was. Needs one patient and one doctor row.
 // Refuses to run in production. Uses times up to 3.5 hours either side of
-// now, so run it away from local midnight.
+// now, closer when that would cross local midnight; skips within an hour of it.
 //
 // Run with: node tests/medicationSchedule.db.test.js
 const assert = require('assert');
@@ -65,8 +65,18 @@ async function main() {
       doses.changeSchedule(client, { patientId: who, medicationId, schedule });
     const tomorrow = doses.localDate(new Date(Date.now() + 24 * 60 * MINUTE));
 
-    // Doses 2.5 hours ago (taken), in 20 minutes (reminder sent) and in 2.5 hours.
-    const T = { past: clock(-150), soon: clock(20), later: clock(150), newPast: clock(-60), newLater: clock(200) };
+    // Doses 2.5 hours ago (taken), in 20 minutes (reminder sent) and in 2.5 hours,
+    // squeezed closer to now when that would cross local midnight.
+    const [hh, mm] = doses.localTime(new Date()).split(':').map(Number);
+    const sinceMidnight = hh * 60 + mm;
+    const untilMidnight = 24 * 60 - sinceMidnight;
+    if (sinceMidnight < 60 || untilMidnight < 60) {
+      console.log('Skipped: within an hour of local midnight. Run again later.');
+      return;
+    }
+    const ahead = (m) => clock(Math.round(m * Math.min(1, (untilMidnight - 5) / 200)));
+    const behind = (m) => clock(-Math.round(m * Math.min(1, (sinceMidnight - 5) / 150)));
+    const T = { past: behind(150), soon: ahead(20), later: ahead(150), newPast: behind(60), newLater: ahead(200) };
     await addMedication('med_sched_a', [T.past, T.soon, T.later]);
     await doses.generateDoses(client, { patientId });
     const before = await dosesOf('med_sched_a');
@@ -202,6 +212,49 @@ async function main() {
       await rejects(change(prescribed.id, ['07:00', '13:00', '19:00']), 422);
       const r = await change(prescribed.id, ['19:30', '07:30']);
       assert.deepStrictEqual(r.schedule, ['07:30', '19:30']);
+    });
+
+    // Course completion: a medication whose end_date has passed is no longer active.
+    await addMedication('med_course_ended', ['08:00'], { endOffset: -1 });
+    await addMedication('med_course_ends_today', ['08:00'], { endOffset: 0 });
+    await addMedication('med_course_critical_ended', ['08:00'], { status: 'critical', endOffset: -2 });
+    const lastDay = (await client.query(
+      `INSERT INTO medication_doses (medication_id, patient_id, scheduled_at)
+       VALUES ('med_course_ended', $1, now() - interval '20 hours') RETURNING id`,
+      [patientId]
+    )).rows[0].id;
+    const completed = await doses.completeFinishedCourses(client, { patientId });
+    const statusOf = async (id) =>
+      (await client.query('SELECT status FROM medications WHERE id = $1', [id])).rows[0].status;
+
+    await it('a medication whose course ended becomes past', async () => {
+      assert.ok(completed.includes('med_course_ended'));
+      assert.strictEqual(await statusOf('med_course_ended'), 'past');
+      assert.strictEqual(await statusOf('med_course_critical_ended'), 'past');
+    });
+
+    await it('a medication whose course ends today is still active', async () => {
+      assert.ok(!completed.includes('med_course_ends_today'));
+      assert.strictEqual(await statusOf('med_course_ends_today'), 'active');
+    });
+
+    await it('a completed course gets no new doses and is no longer editable', async () => {
+      const before = (await dosesOf('med_course_ended')).length;
+      await doses.generateDoses(client, { patientId });
+      assert.strictEqual((await dosesOf('med_course_ended')).length, before);
+      const [med] = await fetchMedications(client, patientId, 'med_course_ended');
+      assert.strictEqual(med.schedule_editable, false);
+    });
+
+    await it("a completed course's last pending dose is still marked missed", async () => {
+      await doses.markMissedDoses(client, { patientId });
+      const row = (await client.query('SELECT status FROM medication_doses WHERE id = $1', [lastDay])).rows[0];
+      assert.strictEqual(row.status, 'missed');
+    });
+
+    await it('completing again changes nothing', async () => {
+      const again = await doses.completeFinishedCourses(client, { patientId });
+      assert.ok(!again.includes('med_course_ended'));
     });
   } finally {
     await client.query('ROLLBACK');

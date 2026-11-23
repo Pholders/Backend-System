@@ -132,11 +132,32 @@ async function markMissedDoses(db = pool, { patientId = null } = {}) {
   return result.rowCount;
 }
 
-/** Bring one patient's (or everyone's) doses up to date. */
+/**
+ * A medication whose course has ended (its end_date is before today, South
+ * African date) is no longer active: set it to past. The last day's doses are
+ * already created by then, and doses still pending go on to be marked missed
+ * as usual, so adherence is unaffected.
+ * @returns {Promise<Array<string>>} ids of the medications completed
+ */
+async function completeFinishedCourses(db = pool, { patientId = null } = {}) {
+  const result = await db.query(
+    `UPDATE medications
+     SET status = 'past', updated_at = now()
+     WHERE status = ANY($2::text[])
+       AND end_date < (now() AT TIME ZONE $1)::date
+       AND ($3::int IS NULL OR patient_id = $3)
+     RETURNING id`,
+    [ZONE, TRACKED_STATUSES, patientId]
+  );
+  return result.rows.map((r) => r.id);
+}
+
+/** Bring one patient's (or everyone's) doses and course statuses up to date. */
 async function refreshDoses(db = pool, { patientId = null } = {}) {
   const created = await generateDoses(db, { patientId });
+  const completed = (await completeFinishedCourses(db, { patientId })).length;
   const missed = await markMissedDoses(db, { patientId });
-  return { created, missed };
+  return { created, missed, completed };
 }
 
 // ── reminders ────────────────────────────────────────────────────────────
@@ -441,6 +462,7 @@ module.exports = {
   generateDoses,
   recalculateAdherence,
   markMissedDoses,
+  completeFinishedCourses,
   refreshDoses,
   claimDueReminders,
   releaseReminder,
