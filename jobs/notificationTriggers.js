@@ -1,84 +1,29 @@
 /**
  * Notification Triggers
  *
- * Three triggers (per sprint):
- *   1. Medication trigger  — scheduled (cron)
- *   2. Appointment trigger — scheduled (cron, reminders for tomorrow's appts)
+ *   1. Medication trigger  — lives in jobs/medicationReminders.js
+ *   2. Appointment trigger — scheduled: a reminder the day before each appointment
  *                          + event-driven (notifyAppointmentConfirmed/Updated)
  *   3. Doctor message trigger — event-driven (notifyDoctorMessage / notifyPrescriptionUpdate)
  *
- * The medication-schedule table and appointments / messages tables belong to
- * other sprints and may not yet exist. The cron jobs detect missing tables
- * and no-op gracefully so this module never crashes the server.
- *
- * Install once: `npm install node-cron`
+ * The scheduled trigger runs on a plain interval (no node-cron). It is safe to
+ * run often: each appointment records the date it was reminded for, so a
+ * reminder is sent once, a run after downtime catches up, and a rescheduled
+ * appointment is reminded again for its new date.
  */
 
 const { pool } = require('../config/db');
 const notificationService = require('../services/notificationService');
 
-let cron = null;
-try {
-  // eslint-disable-next-line global-require
-  cron = require('node-cron');
-} catch (_) {
-  console.warn('⚠️  node-cron not installed — scheduled triggers will be skipped. Run `npm install node-cron`.');
-}
+const ZONE = 'Africa/Johannesburg';
+const APPOINTMENT_CHECK_MINUTES = 15;
+// Day-before reminders go out from this local hour, so nobody is woken at midnight.
+const APPOINTMENT_REMINDER_HOUR = Number.parseInt(process.env.APPOINTMENT_REMINDER_HOUR || '8', 10);
+const REMINDABLE_STATUSES = ['scheduled', 'rescheduled'];
 
-// ---------- helpers ----------
-
-async function tableExists(tableName) {
-  const result = await pool.query(
-    `SELECT to_regclass($1) AS reg`,
-    [tableName]
-  );
-  return Boolean(result.rows[0].reg);
-}
-
-// ---------- 1. Medication trigger (scheduled) ----------
-
-/**
- * Runs daily at MEDICATION_REMINDER_CRON (default 08:00 every day).
- * For each patient with a medication scheduled today, send a reminder.
- *
- * Expects a `medication_schedules` table with at least:
- *   patient_id, medication_name, scheduled_time (TIME or TIMESTAMP)
- * If the table doesn't exist, this no-ops.
- */
-async function runMedicationReminders() {
-  if (!(await tableExists('medication_schedules'))) {
-    return { skipped: true, reason: 'medication_schedules table not present' };
-  }
-
-  let rows = [];
-  try {
-    const res = await pool.query(`
-      SELECT ms.patient_id, ms.medication_name, ms.scheduled_time
-      FROM medication_schedules ms
-      JOIN notification_preferences np ON np.patient_id = ms.patient_id
-      WHERE
-        ms.scheduled_time::time BETWEEN
-          (CURRENT_TIME)
-          AND ((CURRENT_TIME + (np.reminder_time_window || ' minutes')::interval)::time)
-    `);
-    rows = res.rows;
-  } catch (e) {
-    return { skipped: true, reason: `query failed: ${e.message}` };
-  }
-
-  let sent = 0;
-  for (const r of rows) {
-    const result = await notificationService.sendToPatient({
-      patientId: r.patient_id,
-      type: 'medication',
-      title: 'Medication Reminder',
-      body: `Take your ${r.medication_name} dose`,
-      data: { medicationName: r.medication_name },
-    }).catch((err) => ({ delivered: false, reason: err.message }));
-    if (result.delivered) sent += 1;
-  }
-  return { sent, total: rows.length };
-}
+// ---------- 1. Medication trigger ----------
+// Medication reminders live in jobs/medicationReminders.js, which works from
+// the medication_doses table and also tracks adherence.
 
 // ---------- 2. Appointment trigger ----------
 
@@ -109,43 +54,77 @@ async function notifyAppointmentUpdated({ patientId, appointmentTime, doctorName
   });
 }
 
-/**
- * Scheduled: each morning, send a reminder for any appointment happening tomorrow.
- * Expects an `appointments` table with: patient_id, scheduled_at TIMESTAMP, doctor_name (optional).
- * No-ops if the table is missing.
- */
-async function runAppointmentReminders() {
-  if (!(await tableExists('appointments'))) {
-    return { skipped: true, reason: 'appointments table not present' };
-  }
+function appointmentReminderMessage({ time_slot: timeSlot, doctor_name: doctorName }) {
+  const time = /^\d{2}:\d{2}/.test(timeSlot || '') ? timeSlot.slice(0, 5) : null;
+  return {
+    title: 'Appointment Reminder',
+    body: `You have a consultation tomorrow${time ? ` at ${time}` : ''}` +
+      `${doctorName ? ` with Dr. ${doctorName}` : ''}.`,
+  };
+}
 
-  let rows = [];
-  try {
-    const res = await pool.query(`
-      SELECT id, patient_id, scheduled_at,
-             COALESCE(doctor_name, '') AS doctor_name
-      FROM appointments
-      WHERE scheduled_at::date = (CURRENT_DATE + INTERVAL '1 day')
-    `);
-    rows = res.rows;
-  } catch (e) {
-    return { skipped: true, reason: `query failed: ${e.message}` };
-  }
+/**
+ * Scheduled: remind patients the day before each scheduled appointment, from
+ * APPOINTMENT_REMINDER_HOUR (South African time), unless the patient set
+ * their own reminders for it. Claiming an appointment and
+ * stamping day_before_reminder_for happen in one statement, so overlapping
+ * runs or server instances never send the same reminder twice. A failed send
+ * is released and retried on the next run. `send` is
+ * notificationService.sendToPatient, which honours the patient's
+ * appointment_notifications preference.
+ */
+async function runAppointmentReminders(
+  db = pool,
+  send = notificationService.sendToPatient,
+  { fromHour = APPOINTMENT_REMINDER_HOUR } = {}
+) {
+  const claimed = await db.query(
+    `WITH due AS (
+       SELECT a.id
+       FROM appointments a
+       WHERE a.status = ANY($2::text[])
+         AND EXTRACT(HOUR FROM now() AT TIME ZONE $1) >= $3
+         AND a.appointment_date = (now() AT TIME ZONE $1)::date + 1
+         AND a.day_before_reminder_for IS DISTINCT FROM a.appointment_date
+         -- A patient who set their own reminders for this appointment gets
+         -- those instead (services/reminderNotificationService.js).
+         AND NOT EXISTS (
+           SELECT 1 FROM appointment_reminders ar
+           WHERE ar.appointment_id = a.id AND ar.is_enabled = true
+         )
+       FOR UPDATE OF a SKIP LOCKED
+     )
+     UPDATE appointments a
+     SET day_before_reminder_for = a.appointment_date
+     FROM due
+     WHERE a.id = due.id
+     RETURNING a.id, a.patient_id, a.appointment_date, a.time_slot,
+       (SELECT NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), '')
+        FROM doctors d WHERE d.id = a.doctor_id) AS doctor_name`,
+    [ZONE, REMINDABLE_STATUSES, fromHour]
+  );
 
   let sent = 0;
-  for (const r of rows) {
-    const t = new Date(r.scheduled_at);
-    const time = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const result = await notificationService.sendToPatient({
-      patientId: r.patient_id,
-      type: 'appointment',
-      title: 'Appointment Reminder',
-      body: `Consultation tomorrow at ${time}${r.doctor_name ? ` with Dr. ${r.doctor_name}` : ''}.`,
-      data: { appointmentId: r.id, scheduledAt: r.scheduled_at },
-    }).catch((err) => ({ delivered: false, reason: err.message }));
-    if (result.delivered) sent += 1;
+  let failed = 0;
+  for (const appointment of claimed.rows) {
+    try {
+      const result = await send({
+        patientId: appointment.patient_id,
+        type: 'appointment',
+        ...appointmentReminderMessage(appointment),
+        data: { action: 'view_appointment', appointmentId: appointment.id },
+      });
+      if (result && result.delivered) sent += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`Appointment reminder for appointment ${appointment.id} failed:`, error.message);
+      await db.query(
+        'UPDATE appointments SET day_before_reminder_for = NULL WHERE id = $1',
+        [appointment.id]
+      ).catch(() => {});
+    }
   }
-  return { sent, total: rows.length };
+  return { claimed: claimed.rows.length, sent, failed };
 }
 
 // ---------- 3. Doctor message / prescription triggers (event-driven) ----------
@@ -172,34 +151,47 @@ async function notifyPrescriptionUpdate({ patientId, summary, prescriptionId }) 
 
 // ---------- scheduler bootstrap ----------
 
-function start() {
-  if (!cron) return;
+let appointmentInterval = null;
+let appointmentRunning = false;
 
-  const medCron = process.env.MEDICATION_REMINDER_CRON || '*/15 * * * *'; // every 15 min
-  const apptCron = process.env.APPOINTMENT_REMINDER_CRON || '0 8 * * *';  // daily 08:00
-
-  if (cron.validate(medCron)) {
-    cron.schedule(medCron, () => {
-      runMedicationReminders()
-        .then((r) => console.log('[medication-reminders]', r))
-        .catch((e) => console.error('[medication-reminders] error', e.message));
-    });
-    console.log(`🕗 Medication reminders scheduled: ${medCron}`);
+async function runAppointmentRemindersOnce() {
+  if (appointmentRunning) return null; // a slow run must not overlap the next
+  appointmentRunning = true;
+  try {
+    const result = await runAppointmentReminders();
+    if (result.claimed) {
+      console.log(`📅 Appointment reminders: ${result.sent}/${result.claimed} sent, ${result.failed} failed`);
+    }
+    return result;
+  } catch (error) {
+    console.error('Appointment reminders job failed:', error.message);
+    return null;
+  } finally {
+    appointmentRunning = false;
   }
+}
 
-  if (cron.validate(apptCron)) {
-    cron.schedule(apptCron, () => {
-      runAppointmentReminders()
-        .then((r) => console.log('[appointment-reminders]', r))
-        .catch((e) => console.error('[appointment-reminders] error', e.message));
-    });
-    console.log(`🕗 Appointment reminders scheduled: ${apptCron}`);
+function start() {
+  if (appointmentInterval) return;
+  runAppointmentRemindersOnce();
+  appointmentInterval = setInterval(runAppointmentRemindersOnce, APPOINTMENT_CHECK_MINUTES * 60 * 1000);
+  console.log(
+    `✅ Appointment reminders job started (every ${APPOINTMENT_CHECK_MINUTES} minutes, ` +
+    `day-before reminders from ${String(APPOINTMENT_REMINDER_HOUR).padStart(2, '0')}:00)`
+  );
+}
+
+function stop() {
+  if (appointmentInterval) {
+    clearInterval(appointmentInterval);
+    appointmentInterval = null;
   }
 }
 
 module.exports = {
   start,
-  runMedicationReminders,
+  stop,
+  appointmentReminderMessage,
   runAppointmentReminders,
   notifyAppointmentConfirmed,
   notifyAppointmentUpdated,

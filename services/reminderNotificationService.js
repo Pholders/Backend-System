@@ -1,413 +1,254 @@
-const { query } = require('../config/db');
+const { pool } = require('../config/db');
 const EmailService = require('./emailService');
+const notificationService = require('./notificationService');
 
 /**
- * Appointment Reminder Notification Service
- * Handles sending reminder notifications via email, SMS, push, and in-app methods
+ * Patient-set appointment reminders ("remind me 1 day and 1 hour before, by
+ * email and push"). ReminderSchedulerService calls processDueReminders every
+ * 5 minutes.
+ *
+ * Each (reminder, minutes before, method) is sent once per appointment time:
+ * it is claimed by writing a 'pending' row to reminder_notification_history,
+ * which a unique index lets through only once, then marked
+ *   sent     delivered,
+ *   skipped  deliberately not sent (no SMS provider yet, no email address,
+ *            the patient turned appointment notifications off); not retried,
+ *   failed   the send threw; offered again on the next run while still due.
+ * Which reminders are due is decided in AppointmentReminder.getRemindersToSend.
  */
 
-class ReminderNotificationService {
-  /**
-   * Send appointment reminder via specified methods
-   */
-  static async sendReminder(appointmentData, reminderMethod, minutesBefore) {
-    try {
-      const {
-        reminder_id,
-        appointment_id,
-        patient_id,
-        patient_email,
-        patient_phone,
-        patient_first_name,
-        patient_last_name,
-        doctor_first_name,
-        doctor_last_name,
-        specialization,
-        clinic_name,
-        appointment_date,
-        time_slot
-      } = appointmentData;
+const ZONE = 'Africa/Johannesburg';
+const dayFormat = new Intl.DateTimeFormat('en-ZA', {
+  timeZone: ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+});
+const timeFormat = new Intl.DateTimeFormat('en-GB', {
+  timeZone: ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
 
-      let notificationStatus = 'sent';
-      let errorMessage = null;
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const joinName = (first, last) => [first, last].filter(Boolean).join(' ').trim();
+
+/** "tomorrow", "in 1 hour", "in 3 days" ... for a reminder sent `minutesBefore` ahead. */
+function formatReminderTime(minutesBefore) {
+  if (minutesBefore === 1440) return 'tomorrow';
+  if (minutesBefore >= 2880 && minutesBefore % 1440 === 0) return `in ${minutesBefore / 1440} days`;
+  if (minutesBefore < 60) return `in ${minutesBefore} minute${minutesBefore === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutesBefore / 60);
+  return `in ${hours} hour${hours > 1 ? 's' : ''}`;
+}
+
+/** Everything a reminder says, worked out once for every method. */
+function describe(reminder) {
+  const at = new Date(reminder.appointment_at);
+  const doctor = joinName(reminder.doctor_first_name, reminder.doctor_last_name);
+  return {
+    when: formatReminderTime(reminder.minutes_before),
+    day: dayFormat.format(at),
+    time: timeFormat.format(at),
+    doctor: doctor ? `Dr. ${doctor}` : 'your doctor',
+    patient: joinName(reminder.patient_first_name, reminder.patient_last_name) || 'there',
+    specialization: reminder.specialization || null,
+    clinic: reminder.clinic_name || null,
+  };
+}
+
+function shortMessage(reminder) {
+  const d = describe(reminder);
+  return `Your appointment with ${d.doctor} is ${d.when}: ${d.day} at ${d.time}.`;
+}
+
+function emailContent(reminder) {
+  const d = describe(reminder);
+  const rows = [
+    ['Doctor', d.doctor],
+    ['Specialisation', d.specialization],
+    ['Clinic', d.clinic],
+    ['Date and time', `${d.day} at ${d.time}`],
+  ].filter(([, value]) => value);
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background-color: #1e40af; color: white; padding: 20px; text-align: center;">
+        <h1>Appointment Reminder</h1>
+      </div>
+      <div style="padding: 20px; background-color: #f9fafb; border: 1px solid #e5e7eb;">
+        <p>Hi ${escapeHtml(d.patient)},</p>
+        <p style="margin-top: 20px;">You have an appointment <strong>${escapeHtml(d.when)}</strong>:</p>
+        <div style="background-color: white; padding: 15px; border-left: 4px solid #1e40af; margin: 20px 0;">
+          ${rows.map(([label, value]) => `<p><strong>${label}:</strong> ${escapeHtml(value)}</p>`).join('\n          ')}
+        </div>
+        <p style="margin-top: 20px; color: #666;">Please arrive on time. If you need to reschedule or cancel, log into your account.</p>
+        <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #999; font-size: 12px;">
+          This is an automated reminder. Please do not reply to this email.
+        </p>
+      </div>
+    </div>`;
+
+  const text = [
+    'Appointment Reminder',
+    '',
+    `Hi ${d.patient},`,
+    '',
+    `You have an appointment ${d.when}:`,
+    '',
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    '',
+    'Please arrive on time.',
+  ].join('\n');
+
+  return { subject: 'Appointment Reminder', html, text };
+}
+
+/**
+ * One sender per method. Each resolves to { status: 'sent' | 'skipped', error? }
+ * and throws when the send fails.
+ */
+const defaultSenders = {
+  async email(reminder) {
+    if (!reminder.patient_email) return { status: 'skipped', error: 'Patient has no email address' };
+    await EmailService.sendEmail({ to: reminder.patient_email, ...emailContent(reminder) });
+    return { status: 'sent' };
+  },
+
+  async push(reminder) {
+    const result = await notificationService.sendToPatient({
+      patientId: reminder.patient_id,
+      type: 'appointment',
+      title: 'Appointment Reminder',
+      body: shortMessage(reminder),
+      data: { action: 'view_appointment', appointmentId: reminder.appointment_id },
+    });
+    return result.delivered
+      ? { status: 'sent' }
+      : { status: 'skipped', error: result.reason || 'Not delivered' };
+  },
+
+  // In the patient's notification inbox (GET /api/notifications), without a
+  // push. When the patient also chose push, the push already puts it in the
+  // inbox, so getRemindersToSend leaves in-app out.
+  async 'in-app'(reminder, db) {
+    const prefs = await db.query(
+      'SELECT appointment_notifications FROM notification_preferences WHERE patient_id = $1',
+      [reminder.patient_id]
+    );
+    if (prefs.rows[0] && prefs.rows[0].appointment_notifications === false) {
+      return { status: 'skipped', error: 'preference_disabled' };
+    }
+    await db.query(
+      `INSERT INTO notifications (patient_id, type, title, body, data)
+       VALUES ($1, 'appointment', 'Appointment Reminder', $2, $3)`,
+      [
+        reminder.patient_id,
+        shortMessage(reminder),
+        { action: 'view_appointment', appointmentId: reminder.appointment_id },
+      ]
+    );
+    return { status: 'sent' };
+  },
+
+  // No SMS provider is integrated yet. Recorded honestly rather than as sent.
+  async sms() {
+    return { status: 'skipped', error: 'SMS reminders are not configured' };
+  },
+};
+
+class ReminderNotificationService {
+  static formatReminderTime(minutesBefore) {
+    return formatReminderTime(minutesBefore);
+  }
+
+  static shortMessage(reminder) {
+    return shortMessage(reminder);
+  }
+
+  static emailContent(reminder) {
+    return emailContent(reminder);
+  }
+
+  /** Send one reminder by one method, without recording history. */
+  static async sendReminder(reminder, method, db = pool, senders = defaultSenders) {
+    const sender = senders[method];
+    if (!sender) throw new Error(`Unknown reminder method: ${method}`);
+    return sender(reminder, db);
+  }
+
+  /**
+   * Send every reminder that is due. Called by the scheduler every 5 minutes.
+   * `db` and `senders` can be swapped in tests.
+   */
+  static async processDueReminders(db = pool, senders = defaultSenders) {
+    const AppointmentReminder = require('../models/AppointmentReminder');
+    const due = await AppointmentReminder.getRemindersToSend(db);
+
+    let sentCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    for (const reminder of due) {
+      const historyId = await AppointmentReminder.claimSend(db, reminder);
+      if (!historyId) continue; // another run got there first
 
       try {
-        switch (reminderMethod) {
-          case 'email':
-            await this.sendEmailReminder({
-              patientEmail: patient_email,
-              patientName: `${patient_first_name} ${patient_last_name}`,
-              doctorName: `${doctor_first_name} ${doctor_last_name}`,
-              specialization,
-              clinicName: clinic_name,
-              appointmentDate: appointment_date,
-              appointmentTime: time_slot,
-              minutesBefore
-            });
-            break;
-
-          case 'sms':
-            await this.sendSmsReminder({
-              patientPhone: patient_phone,
-              patientName: `${patient_first_name} ${patient_last_name}`,
-              doctorName: `${doctor_first_name} ${doctor_last_name}`,
-              appointmentTime: time_slot,
-              minutesBefore
-            });
-            break;
-
-          case 'push':
-            await this.sendPushReminder({
-              patientId: patient_id,
-              patientName: `${patient_first_name} ${patient_last_name}`,
-              doctorName: `${doctor_first_name} ${doctor_last_name}`,
-              appointmentDate: appointment_date,
-              appointmentTime: time_slot,
-              minutesBefore
-            });
-            break;
-
-          case 'in-app':
-            await this.sendInAppReminder({
-              patientId: patient_id,
-              appointmentId: appointment_id,
-              doctorName: `${doctor_first_name} ${doctor_last_name}`,
-              specialization,
-              appointmentDate: appointment_date,
-              appointmentTime: time_slot,
-              minutesBefore
-            });
-            break;
-
-          default:
-            throw new Error(`Unknown reminder method: ${reminderMethod}`);
-        }
+        const result = await this.sendReminder(reminder, reminder.reminder_method, db, senders);
+        await AppointmentReminder.finishSend(db, historyId, result.status, result.error || null);
+        if (result.status === 'sent') sentCount++;
+        else skippedCount++;
       } catch (error) {
-        notificationStatus = 'failed';
-        errorMessage = error.message;
-        console.error(`❌ Error sending ${reminderMethod} reminder:`, error);
+        failedCount++;
+        console.error(`❌ ${reminder.reminder_method} reminder for appointment ${reminder.appointment_id} failed:`, error.message);
+        await AppointmentReminder.finishSend(db, historyId, 'failed', error.message).catch(() => {});
       }
-
-      // Record notification history
-      const AppointmentReminder = require('../models/AppointmentReminder');
-      await AppointmentReminder.recordNotificationHistory(
-        reminder_id,
-        appointment_id,
-        patient_id,
-        reminderMethod,
-        minutesBefore,
-        notificationStatus,
-        errorMessage
-      );
-
-      return {
-        success: notificationStatus === 'sent',
-        method: reminderMethod,
-        status: notificationStatus,
-        error: errorMessage
-      };
-    } catch (error) {
-      console.error('❌ Error in sendReminder:', error);
-      throw error;
     }
+
+    if (sentCount || skippedCount || failedCount) {
+      console.log(`📨 Appointment reminders: ${sentCount} sent, ${skippedCount} skipped, ${failedCount} failed`);
+    }
+    return { sentCount, skippedCount, failedCount };
   }
 
-  /**
-   * Send email reminder
-   */
-  static async sendEmailReminder(data) {
-    const {
-      patientEmail,
-      patientName,
-      doctorName,
-      specialization,
-      clinicName,
-      appointmentDate,
-      appointmentTime,
-      minutesBefore
-    } = data;
-
-    const timeString = this.formatReminderTime(minutesBefore);
-
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background-color: #1e40af; color: white; padding: 20px; text-align: center;">
-          <h1>📅 Appointment Reminder</h1>
-        </div>
-        
-        <div style="padding: 20px; background-color: #f9fafb; border: 1px solid #e5e7eb;">
-          <p>Hi ${patientName},</p>
-          
-          <p style="margin-top: 20px;">You have an upcoming appointment <strong>${timeString}</strong>:</p>
-          
-          <div style="background-color: white; padding: 15px; border-left: 4px solid #1e40af; margin: 20px 0;">
-            <p><strong>Doctor:</strong> ${doctorName}</p>
-            <p><strong>Specialization:</strong> ${specialization}</p>
-            <p><strong>Clinic:</strong> ${clinicName}</p>
-            <p><strong>Date & Time:</strong> ${appointmentDate} at ${appointmentTime}</p>
-          </div>
-          
-          <p style="margin-top: 20px; color: #666;">Please make sure to arrive on time. If you need to reschedule or cancel, please log into your account.</p>
-          
-          <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #999; font-size: 12px;">
-            This is an automated reminder. Please do not reply to this email.
-          </p>
-        </div>
-      </div>
-    `;
-
-    const textContent = `Appointment Reminder\n\nHi ${patientName},\n\nYou have an upcoming appointment ${timeString}:\n\nDoctor: ${doctorName}\nSpecialization: ${specialization}\nClinic: ${clinicName}\nDate & Time: ${appointmentDate} at ${appointmentTime}\n\nPlease make sure to arrive on time.`;
-
-    try {
-      await EmailService.sendEmail(
-        patientEmail,
-        'Appointment Reminder',
-        htmlContent,
-        textContent
-      );
-      console.log(`✅ Email reminder sent to ${patientEmail}`);
-    } catch (error) {
-      console.error(`❌ Failed to send email reminder to ${patientEmail}:`, error);
-      throw error;
-    }
+  /** Reminders due right now (debug/admin). */
+  static async getPendingReminders(db = pool) {
+    const AppointmentReminder = require('../models/AppointmentReminder');
+    const reminders = await AppointmentReminder.getRemindersToSend(db);
+    return reminders.map((r) => ({
+      reminderId: r.reminder_id,
+      appointmentId: r.appointment_id,
+      patientName: joinName(r.patient_first_name, r.patient_last_name),
+      doctorName: joinName(r.doctor_first_name, r.doctor_last_name),
+      appointmentAt: r.appointment_at,
+      minutesBefore: r.minutes_before,
+      method: r.reminder_method,
+    }));
   }
 
-  /**
-   * Send SMS reminder
-   */
-  static async sendSmsReminder(data) {
-    const {
-      patientPhone,
-      patientName,
-      doctorName,
-      appointmentTime,
-      minutesBefore
-    } = data;
-
-    const timeString = this.formatReminderTime(minutesBefore);
-
-    const smsMessage = `Hi ${patientName}, reminder: You have an appointment with Dr. ${doctorName} ${timeString} at ${appointmentTime}. Please arrive on time.`;
-
-    try {
-      // TODO: Integrate with SMS service provider (Twilio, AWS SNS, etc.)
-      console.log(`✅ SMS reminder would be sent to ${patientPhone}: ${smsMessage}`);
-      // Placeholder - implement actual SMS sending
-      // await twilioClient.messages.create({
-      //   body: smsMessage,
-      //   from: process.env.TWILIO_PHONE_NUMBER,
-      //   to: patientPhone
-      // });
-    } catch (error) {
-      console.error(`❌ Failed to send SMS reminder to ${patientPhone}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Send push notification
-   */
-  static async sendPushReminder(data) {
-    const {
-      patientId,
-      patientName,
-      doctorName,
-      appointmentDate,
-      appointmentTime,
-      minutesBefore
-    } = data;
-
-    const timeString = this.formatReminderTime(minutesBefore);
-
-    const pushPayload = {
-      title: 'Appointment Reminder',
-      body: `${timeString}: You have an appointment with Dr. ${doctorName} on ${appointmentDate} at ${appointmentTime}`,
-      data: {
-        appointmentId: data.appointmentId,
-        action: 'view_appointment'
-      }
-    };
-
-    try {
-      // TODO: Integrate with push notification service (Firebase Cloud Messaging, OneSignal, etc.)
-      console.log(`✅ Push notification would be sent to patient ${patientId}: ${JSON.stringify(pushPayload)}`);
-      // Placeholder - implement actual push notification sending
-      // await firebaseAdmin.messaging().sendToDevice(deviceToken, pushPayload);
-    } catch (error) {
-      console.error(`❌ Failed to send push notification to patient ${patientId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Send in-app reminder notification
-   */
-  static async sendInAppReminder(data) {
-    const {
-      patientId,
-      appointmentId,
-      doctorName,
-      specialization,
-      appointmentDate,
-      appointmentTime,
-      minutesBefore
-    } = data;
-
-    const timeString = this.formatReminderTime(minutesBefore);
-
-    try {
-      // Store in-app notification in database
-      await query(
-        `INSERT INTO in_app_notifications (patient_id, appointment_id, title, message, notification_type, is_read)
-         VALUES ($1, $2, $3, $4, $5, FALSE)`,
-        [
-          patientId,
-          appointmentId,
-          'Appointment Reminder',
-          `${timeString}: Dr. ${doctorName} (${specialization}) on ${appointmentDate} at ${appointmentTime}`,
-          'appointment_reminder'
-        ]
-      );
-      console.log(`✅ In-app notification recorded for patient ${patientId}`);
-    } catch (error) {
-      // If in-app notifications table doesn't exist, log but don't fail
-      console.warn(`⚠️  Could not store in-app notification:`, error.message);
-    }
-  }
-
-  /**
-   * Format reminder time text
-   */
-  static formatReminderTime(minutesBefore) {
-    if (minutesBefore === 1440) {
-      return 'tomorrow';
-    } else if (minutesBefore === 720) {
-      return 'in 12 hours';
-    } else if (minutesBefore === 60) {
-      return 'in 1 hour';
-    } else if (minutesBefore === 30) {
-      return 'in 30 minutes';
-    } else if (minutesBefore === 15) {
-      return 'in 15 minutes';
-    } else if (minutesBefore < 60) {
-      return `in ${minutesBefore} minutes`;
-    } else {
-      const hours = Math.floor(minutesBefore / 60);
-      return `in ${hours} hour${hours > 1 ? 's' : ''}`;
-    }
-  }
-
-  /**
-   * Process and send all due reminders
-   * Called by the scheduler service
-   */
-  static async processDueReminders() {
-    try {
-      const AppointmentReminder = require('../models/AppointmentReminder');
-      const remindersToSend = await AppointmentReminder.getRemindersToSend();
-
-      let sentCount = 0;
-      let failedCount = 0;
-
-      for (const reminder of remindersToSend) {
-        // Check if reminder is still enabled
-        if (!reminder.reminder_methods || reminder.reminder_methods.length === 0) {
-          continue;
-        }
-
-        // For each reminder time, check if it matches the current time
-        const appointmentDateTime = new Date(reminder.appointment_date);
-        // Parse time_slot to get the actual appointment time
-        const [hours, minutes] = reminder.time_slot.split(':');
-        appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-
-        const now = new Date();
-        const minutesUntilAppointment = Math.floor((appointmentDateTime - now) / 60000);
-
-        // Check if any reminder time matches
-        for (const reminderMinutes of reminder.reminder_times) {
-          // Allow 2-minute window for reminder (e.g., if reminder is 60 minutes, send between 60-62 minutes)
-          if (Math.abs(minutesUntilAppointment - reminderMinutes) <= 2) {
-            // Send reminder via all configured methods
-            for (const method of reminder.reminder_methods) {
-              try {
-                const result = await this.sendReminder(reminder, method, reminderMinutes);
-                if (result.success) {
-                  sentCount++;
-                } else {
-                  failedCount++;
-                }
-              } catch (error) {
-                failedCount++;
-                console.error(`Failed to send ${method} reminder:`, error);
-              }
-            }
-          }
-        }
-      }
-
-      if (sentCount > 0 || failedCount > 0) {
-        console.log(`📨 Reminder processing: ${sentCount} sent, ${failedCount} failed`);
-      }
-
-      return { sentCount, failedCount };
-    } catch (error) {
-      console.error('❌ Error processing due reminders:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get pending reminders (for debugging/admin purposes)
-   */
-  static async getPendingReminders() {
-    try {
-      const AppointmentReminder = require('../models/AppointmentReminder');
-      const reminders = await AppointmentReminder.getRemindersToSend();
-      return reminders.map(r => ({
-        reminderId: r.id,
-        appointmentId: r.appointment_id,
-        patientName: `${r.patient_first_name} ${r.patient_last_name}`,
-        doctorName: `${r.doctor_first_name} ${r.doctor_last_name}`,
-        appointmentDate: r.appointment_date,
-        appointmentTime: r.time_slot,
-        reminderTimes: r.reminder_times,
-        reminderMethods: r.reminder_methods
-      }));
-    } catch (error) {
-      console.error('Error fetching pending reminders:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Test reminder notification
-   */
+  /** Send a sample reminder by one method, e.g. to check email delivery. Nothing is recorded. */
   static async testReminder(method, testEmail = null) {
-    try {
-      const testData = {
-        reminder_id: 0,
-        appointment_id: 0,
-        patient_id: 0,
-        patient_email: testEmail || process.env.TEST_EMAIL,
-        patient_phone: '+1234567890',
-        patient_first_name: 'Test',
-        patient_last_name: 'Patient',
-        doctor_first_name: 'Dr.',
-        doctor_last_name: 'Smith',
-        specialization: 'General Practitioner',
-        clinic_name: 'Test Clinic',
-        appointment_date: new Date().toISOString().split('T')[0],
-        time_slot: '14:00'
-      };
-
-      const result = await this.sendReminder(testData, method, 60);
-      console.log(`✅ Test ${method} reminder sent`);
-      return result;
-    } catch (error) {
-      console.error(`❌ Failed to send test ${method} reminder:`, error);
-      throw error;
-    }
+    const inOneHour = new Date(Date.now() + 60 * 60 * 1000);
+    return this.sendReminder({
+      reminder_id: 0,
+      appointment_id: null,
+      patient_id: null,
+      patient_email: testEmail || process.env.TEST_EMAIL,
+      patient_first_name: 'Test',
+      patient_last_name: 'Patient',
+      doctor_first_name: 'Sam',
+      doctor_last_name: 'Smith',
+      specialization: 'General Practitioner',
+      clinic_name: 'Test Clinic',
+      appointment_at: inOneHour,
+      minutes_before: 60,
+    }, method);
   }
 }
+
+ReminderNotificationService.defaultSenders = defaultSenders;
 
 module.exports = ReminderNotificationService;

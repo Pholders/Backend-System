@@ -20,6 +20,11 @@ function handleUploadError(error, req, res, next) {
 
 router.post('/', medicationAuth, MedicationController.create);
 router.get('/', medicationAuth, MedicationController.list);
+
+// Scheduled doses: reminders and adherence
+router.get('/doses', medicationAuth, MedicationController.listDoses);
+router.post('/doses/:doseId/taken', medicationAuth, MedicationController.logDose('taken'));
+router.post('/doses/:doseId/skipped', medicationAuth, MedicationController.logDose('skipped'));
 router.post(
   '/:medicationId/attachments',
   medicationAuth,
