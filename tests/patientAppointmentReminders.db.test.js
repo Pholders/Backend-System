@@ -123,18 +123,33 @@ async function main() {
       ].sort());
     });
 
-    await it('SMS is recorded as skipped, not as sent; in-app is written', async () => {
+    await it('SMS is recorded as skipped, not as sent; in-app is left to push', async () => {
       const rows = await history(inAnHourReminder);
       const by = Object.fromEntries(rows.map((r) => [r.reminder_method, r]));
       assert.strictEqual(by.email.status, 'sent');
       assert.strictEqual(by.push.status, 'sent');
       assert.strictEqual(by.sms.status, 'skipped');
       assert.match(by.sms.error_message, /not configured/);
-      assert.strictEqual(by['in-app'].status, 'sent');
-      const inApp = await client.query(
-        'SELECT message FROM in_app_notifications WHERE appointment_id = $1', [inAnHour]
+      assert.strictEqual(by['in-app'], undefined, 'push already puts it in the inbox');
+    });
+
+    await it('in-app on its own puts the reminder in the notification inbox', async () => {
+      const appt = await appointment(58);
+      const id = await reminder(appt, [60], ['in-app']);
+      ours.add(id);
+      console.log = () => {};
+      await Reminders.processDueReminders(client, senders().senders);
+      console.log = silence;
+      assert.deepStrictEqual((await history(id)).map((r) => r.status), ['sent']);
+      const inbox = await client.query(
+        `SELECT type, title, body, data FROM notifications
+         WHERE patient_id = $1 AND (data->>'appointmentId')::int = $2`,
+        [patient.id, appt]
       );
-      assert.strictEqual(inApp.rows.length, 1);
+      assert.strictEqual(inbox.rows.length, 1);
+      assert.strictEqual(inbox.rows[0].type, 'appointment');
+      assert.strictEqual(inbox.rows[0].data.action, 'view_appointment');
+      assert.ok(inbox.rows[0].body.includes('is in 1 hour'), inbox.rows[0].body);
     });
 
     await it('cancelled, disabled, too-late and too-early reminders are not sent', async () => {

@@ -322,6 +322,8 @@ class AppointmentReminder {
          ) AS slot
          WHERE ar.is_enabled = true
            AND a.status IN ('scheduled', 'rescheduled')
+           -- push already puts the reminder in the inbox; don't add it twice
+           AND NOT (methods.method = 'in-app' AND 'push' = ANY(ar.reminder_methods))
            AND a.appointment_date >= (now() AT TIME ZONE $1)::date
            AND slot.appointment_at IS NOT NULL
            AND slot.appointment_at > now()

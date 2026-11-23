@@ -131,11 +131,25 @@ const defaultSenders = {
       : { status: 'skipped', error: result.reason || 'Not delivered' };
   },
 
+  // In the patient's notification inbox (GET /api/notifications), without a
+  // push. When the patient also chose push, the push already puts it in the
+  // inbox, so getRemindersToSend leaves in-app out.
   async 'in-app'(reminder, db) {
+    const prefs = await db.query(
+      'SELECT appointment_notifications FROM notification_preferences WHERE patient_id = $1',
+      [reminder.patient_id]
+    );
+    if (prefs.rows[0] && prefs.rows[0].appointment_notifications === false) {
+      return { status: 'skipped', error: 'preference_disabled' };
+    }
     await db.query(
-      `INSERT INTO in_app_notifications (patient_id, appointment_id, title, message, notification_type, is_read)
-       VALUES ($1, $2, $3, $4, $5, FALSE)`,
-      [reminder.patient_id, reminder.appointment_id, 'Appointment Reminder', shortMessage(reminder), 'appointment_reminder']
+      `INSERT INTO notifications (patient_id, type, title, body, data)
+       VALUES ($1, 'appointment', 'Appointment Reminder', $2, $3)`,
+      [
+        reminder.patient_id,
+        shortMessage(reminder),
+        { action: 'view_appointment', appointmentId: reminder.appointment_id },
+      ]
     );
     return { status: 'sent' };
   },

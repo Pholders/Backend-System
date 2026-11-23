@@ -1440,7 +1440,7 @@ class AppointmentController {
             specialization: reminder.specialization,
             clinicName: reminder.clinic_name,
             appointmentDate: reminder.appointment_date,
-            appointmentTime: reminder.appointment_time,
+            appointmentTime: reminder.time_slot,
             reminderTimes: reminder.reminder_times,
             reminderMethods: reminder.reminder_methods,
             consultationFee: reminder.consultation_fee,

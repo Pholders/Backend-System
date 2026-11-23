@@ -9,6 +9,7 @@
 | Role | File | Description |
 |------|------|-------------|
 | Patient | [PATIENT_ENDPOINTS.md](./PATIENT_ENDPOINTS.md) | Registration, appointments, prescriptions, payments, PHR, profile, notifications, orders |
+| Patient | [PATIENT_REMINDERS_FRONTEND.md](./PATIENT_REMINDERS_FRONTEND.md) | Medication dose reminders and adherence, appointment reminders, reminder push payloads |
 | Doctor | [DOCTOR_ENDPOINTS.md](./DOCTOR_ENDPOINTS.md) | Registration, appointments, prescription management, patient PHR access |
 | Pharmacy | [PHARMACY_ENDPOINTS.md](./PHARMACY_ENDPOINTS.md) | Registration, dispensing, claim routing, orders, tier management |
 | Admin | [ADMIN_ENDPOINTS.md](./ADMIN_ENDPOINTS.md) | Security monitoring, partnership management, compliance, routing statistics |
