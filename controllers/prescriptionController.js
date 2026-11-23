@@ -453,14 +453,58 @@ class PrescriptionController {
   }
 
   /**
+   * The QR code works only while the prescription can still be collected.
+   */
+  static qrUsable(prescriptionStatus) {
+    return prescriptionStatus === 'active' || prescriptionStatus === 'in_progress';
+  }
+
+  /** One prescription in the patient's list. `status` stays the signature status. */
+  static patientListItem(p) {
+    return {
+      id: p.id,
+      prescriptionNumber: p.prescription_number,
+      doctor: p.prescriber_name,
+      diagnosis: p.diagnosis,
+      status: p.signature_status,
+      prescriptionStatus: p.status,
+      isHistory: Prescription.HISTORY_STATUSES.includes(p.status),
+      qrActive: PrescriptionController.qrUsable(p.status),
+      claimedAt: p.claimed_at || null,
+      claimedAtPharmacy: p.claimed_by_pharmacy_name || null,
+      claimExpiresAt: p.claim_expires_at || null,
+      dispensedAt: p.dispensed_at || null,
+      dispensedBy: p.dispensed_pharmacy || null,
+      createdAt: p.created_at,
+      isRevoked: p.is_revoked
+    };
+  }
+
+  /**
    * Patient: Get all prescriptions
    */
   static async getPatientPrescriptions(req, res) {
     try {
       const patientId = req.user.id;
-      const { limit = 50, offset = 0, filter = 'all' } = req.query;
+      const { limit = 50, offset = 0, filter = 'all', view = 'all' } = req.query;
 
-      const prescriptions = await Prescription.getByPatientId(patientId, parseInt(limit), parseInt(offset));
+      // view=current: still to be collected. view=history: dispensed or expired.
+      const VIEWS = {
+        all: null,
+        current: Prescription.CURRENT_STATUSES,
+        history: Prescription.HISTORY_STATUSES
+      };
+      if (!Object.prototype.hasOwnProperty.call(VIEWS, view)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid view. Allowed: ${Object.keys(VIEWS).join(', ')}`
+        });
+      }
+
+      const [prescriptions, counts] = await Promise.all([
+        Prescription.getByPatientId(patientId, parseInt(limit), parseInt(offset), VIEWS[view]),
+        Prescription.countByStatusForPatient(patientId)
+      ]);
 
       // Filter by signature status if needed
       let filtered = prescriptions;
@@ -470,20 +514,19 @@ class PrescriptionController {
         filtered = prescriptions.filter(p => p.signature_status === 'pending');
       }
 
+      const sum = (statuses) => statuses.reduce((n, s) => n + (counts[s] || 0), 0);
+
       res.status(200).json({
         success: true,
         message: 'Prescriptions retrieved successfully',
         data: {
           total: filtered.length,
-          prescriptions: filtered.map(p => ({
-            id: p.id,
-            prescriptionNumber: p.prescription_number,
-            doctor: p.prescriber_name,
-            diagnosis: p.diagnosis,
-            status: p.signature_status,
-            createdAt: p.created_at,
-            isRevoked: p.is_revoked
-          }))
+          counts: {
+            ...counts,
+            current: sum(Prescription.CURRENT_STATUSES),
+            history: sum(Prescription.HISTORY_STATUSES)
+          },
+          prescriptions: filtered.map(p => PrescriptionController.patientListItem(p))
         }
       });
     } catch (error) {
@@ -520,6 +563,8 @@ class PrescriptionController {
           revokedAt: prescription.revoke_timestamp
         });
       }
+
+      const lifecycle = await Prescription.getStatus(prescription.id);
 
       // Safely parse digital signature
       let parsedCertificate = null;
@@ -577,6 +622,17 @@ class PrescriptionController {
               timestamp: prescription.signature_timestamp,
               certificate: parsedCertificate
             },
+            prescriptionStatus: lifecycle.status,
+            isHistory: Prescription.HISTORY_STATUSES.includes(lifecycle.status),
+            qrActive: PrescriptionController.qrUsable(lifecycle.status),
+            claim: {
+              claimedAt: prescription.claimed_at || null,
+              pharmacy: prescription.claimed_by_pharmacy_name || null,
+              expiresAt: prescription.claim_expires_at || null
+            },
+            dispensing: lifecycle.status === 'dispensed'
+              ? { dispensedAt: lifecycle.dispensed_at, pharmacy: lifecycle.dispensed_pharmacy }
+              : null,
             createdAt: prescription.created_at,
             updatedAt: prescription.updated_at
           }
@@ -766,6 +822,16 @@ class PrescriptionController {
         return res.status(404).json({
           success: false,
           message: 'Prescription not found'
+        });
+      }
+
+      const lifecycle = await Prescription.getStatus(prescription.id);
+      if (lifecycle.status === 'dispensed') {
+        return res.status(409).json({
+          success: false,
+          code: 'PRESCRIPTION_DISPENSED',
+          message: 'This prescription has already been dispensed, so it has no QR code.',
+          data: { dispensedAt: lifecycle.dispensed_at, pharmacy: lifecycle.dispensed_pharmacy }
         });
       }
 
@@ -1201,6 +1267,15 @@ class PrescriptionController {
         return res.status(404).json({
           success: false,
           message: 'Prescription not found or not yours'
+        });
+      }
+
+      const lifecycle = await Prescription.getStatus(prescription.id);
+      if (lifecycle.status === 'dispensed') {
+        return res.status(409).json({
+          success: false,
+          code: 'PRESCRIPTION_DISPENSED',
+          message: 'This prescription has already been dispensed.'
         });
       }
 

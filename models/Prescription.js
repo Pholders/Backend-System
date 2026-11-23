@@ -7,7 +7,76 @@ const PrescriptionMedicationService = require('../services/prescriptionMedicatio
  * Handles all database operations for e-prescriptions
  */
 
+/**
+ * Where a prescription is in its life, for the patient. `p` is the
+ * prescriptions alias. Dispensed means the pharmacy dispensed it, or an
+ * order for it was picked up (which also sets is_dispensed, but older
+ * pickups did not).
+ *
+ *   pending_signature  the doctor hasn't signed it yet
+ *   active             signed, can be taken to a pharmacy
+ *   in_progress        claimed at a pharmacy, or an order for it is open
+ *   dispensed          the patient has the medicine            (history)
+ *   expired            the 30-day claim window passed unused   (history)
+ */
+const PICKED_UP_ORDER = (p) =>
+  `SELECT 1 FROM orders o WHERE o.prescription_id = ${p}.id AND o.status = 'picked_up'`;
+
+const DISPENSED_SQL = (p) =>
+  `(COALESCE(${p}.is_dispensed, FALSE) OR EXISTS (${PICKED_UP_ORDER(p)}))`;
+
+const STATUS_SQL = (p) => `
+  CASE
+    WHEN ${DISPENSED_SQL(p)} THEN 'dispensed'
+    WHEN ${p}.signature_status = 'pending' THEN 'pending_signature'
+    WHEN COALESCE(${p}.claimed, FALSE)
+      OR EXISTS (SELECT 1 FROM orders o WHERE o.prescription_id = ${p}.id
+                 AND o.status NOT IN ('picked_up', 'cancelled', 'rejected')) THEN 'in_progress'
+    WHEN ${p}.claim_expires_at IS NOT NULL AND ${p}.claim_expires_at <= CURRENT_TIMESTAMP THEN 'expired'
+    ELSE 'active'
+  END`;
+
+const HISTORY_STATUSES = ['dispensed', 'expired'];
+const CURRENT_STATUSES = ['pending_signature', 'active', 'in_progress'];
+
 class Prescription {
+  static get HISTORY_STATUSES() { return HISTORY_STATUSES; }
+  static get CURRENT_STATUSES() { return CURRENT_STATUSES; }
+
+  /**
+   * The patient-facing status, when it was dispensed and where.
+   * @returns {Promise<{status, dispensed_at, dispensed_pharmacy}|null>}
+   */
+  static async getStatus(prescriptionId, db = { query }) {
+    const result = await db.query(
+      `SELECT ${STATUS_SQL('p')} AS status,
+              COALESCE(p.dispensed_at, (SELECT MAX(o.completed_at) FROM orders o
+                 WHERE o.prescription_id = p.id AND o.status = 'picked_up')) AS dispensed_at,
+              COALESCE(p.dispensed_by_pharmacy_name, (SELECT ph.pharmacy_name FROM orders o
+                 JOIN pharmacies ph ON ph.id = o.pharmacy_id
+                 WHERE o.prescription_id = p.id AND o.status = 'picked_up'
+                 ORDER BY o.completed_at DESC NULLS LAST LIMIT 1)) AS dispensed_pharmacy
+       FROM prescriptions p
+       WHERE p.id = $1`,
+      [prescriptionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Turn off every QR code of a prescription. Run inside the dispensing
+   * transaction so a dispensed prescription can never be scanned again.
+   */
+  static async deactivateQRCodes(db, prescriptionId) {
+    const result = await db.query(
+      `UPDATE prescription_qr_access
+       SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+       WHERE prescription_id = $1 AND is_active = TRUE`,
+      [prescriptionId]
+    );
+    return result.rowCount;
+  }
+
   /**
    * Create the prescriptions table
    */
@@ -245,23 +314,51 @@ class Prescription {
   /**
    * Get prescriptions by patient
    */
-  static async getByPatientId(patientId, limit = 50, offset = 0) {
+  static async getByPatientId(patientId, limit = 50, offset = 0, statuses = null, db = { query }) {
     const getQuery = `
-      SELECT id, prescription_number, diagnosis, signature_status, created_at, 
-             prescriber_name, doctor_id, is_revoked, appointment_id
-      FROM prescriptions
-      WHERE patient_id = $1 AND is_revoked = FALSE
-      ORDER BY created_at DESC
+      SELECT * FROM (
+        SELECT p.id, p.prescription_number, p.diagnosis, p.signature_status, p.created_at,
+               p.prescriber_name, p.doctor_id, p.is_revoked, p.appointment_id,
+               p.claimed_at, p.claimed_by_pharmacy_name, p.claim_expires_at,
+               ${STATUS_SQL('p')} AS status,
+               COALESCE(p.dispensed_at, (SELECT MAX(o.completed_at) FROM orders o
+                  WHERE o.prescription_id = p.id AND o.status = 'picked_up')) AS dispensed_at,
+               COALESCE(p.dispensed_by_pharmacy_name, (SELECT ph.pharmacy_name FROM orders o
+                  JOIN pharmacies ph ON ph.id = o.pharmacy_id
+                  WHERE o.prescription_id = p.id AND o.status = 'picked_up'
+                  ORDER BY o.completed_at DESC NULLS LAST LIMIT 1)) AS dispensed_pharmacy
+        FROM prescriptions p
+        WHERE p.patient_id = $1 AND p.is_revoked = FALSE
+      ) rx
+      WHERE $4::text[] IS NULL OR rx.status = ANY($4::text[])
+      ORDER BY rx.created_at DESC, rx.id DESC
       LIMIT $2 OFFSET $3;
     `;
 
     try {
-      const result = await query(getQuery, [patientId, limit, offset]);
+      const result = await db.query(getQuery, [patientId, limit, offset, statuses]);
       return result.rows;
     } catch (error) {
       console.error('❌ Error fetching patient prescriptions:', error);
       throw error;
     }
+  }
+
+  /**
+   * How many of the patient's prescriptions are in each status.
+   * @returns {Promise<Object>} e.g. { active: 2, dispensed: 5 }
+   */
+  static async countByStatusForPatient(patientId, db = { query }) {
+    const result = await db.query(
+      `SELECT ${STATUS_SQL('p')} AS status, COUNT(*)::int AS n
+       FROM prescriptions p
+       WHERE p.patient_id = $1 AND p.is_revoked = FALSE
+       GROUP BY 1`,
+      [patientId]
+    );
+    const counts = Object.fromEntries([...CURRENT_STATUSES, ...HISTORY_STATUSES].map((s) => [s, 0]));
+    for (const row of result.rows) counts[row.status] = row.n;
+    return counts;
   }
 
   /**
@@ -515,6 +612,18 @@ class Prescription {
       const qrAccess = result.rows[0];
       const prescriptionId = qrAccess.prescription_id;
 
+      // A dispensed prescription's codes are turned off when it is
+      // dispensed; this also covers codes from before that was done.
+      const rxStatus = await Prescription.getStatus(prescriptionId);
+      if (rxStatus && rxStatus.status === 'dispensed') {
+        await Prescription.deactivateQRCodes({ query }, prescriptionId);
+        return {
+          valid: false,
+          message: 'This prescription has already been dispensed',
+          prescriptionId
+        };
+      }
+
       // Check if already accessed
       if (qrAccess.accessed === true) {
         return {
@@ -617,6 +726,14 @@ class Prescription {
 
       const qrAccess = result.rows[0];
       const isExpired = new Date(qrAccess.expires_at) < new Date();
+      const rxStatus = await Prescription.getStatus(qrAccess.prescription_id);
+      const isDispensed = !!rxStatus && rxStatus.status === 'dispensed';
+
+      let status = 'VALID';
+      if (isDispensed) status = 'DISPENSED';
+      else if (qrAccess.accessed) status = 'USED';
+      else if (isExpired) status = 'EXPIRED';
+      else if (!qrAccess.is_active) status = 'INACTIVE';
 
       return {
         exists: true,
@@ -624,9 +741,11 @@ class Prescription {
         used: qrAccess.accessed,
         usedAt: qrAccess.accessed_at,
         expires: qrAccess.expires_at,
-        isActive: qrAccess.is_active,
+        isActive: qrAccess.is_active && !isDispensed,
         isExpired,
-        status: qrAccess.accessed ? 'USED' : isExpired ? 'EXPIRED' : 'VALID'
+        isDispensed,
+        dispensedAt: isDispensed ? rxStatus.dispensed_at : null,
+        status
       };
     } catch (error) {
       console.error('❌ Error checking QR code status:', error);
@@ -1007,6 +1126,9 @@ class Prescription {
       // Log the dispensing event
       await client.query(auditQuery, [prescriptionId, pharmacyId, pharmacyName, staffName, notes]);
 
+      // The QR code has done its job; it must not work again
+      await Prescription.deactivateQRCodes(client, prescriptionId);
+
       // The patient now has the medicine, so its medications become active
       const medications = await PrescriptionMedicationService.createForDispensedPrescription(client, prescriptionId);
 
@@ -1022,6 +1144,71 @@ class Prescription {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * An order was picked up: the patient has the medicine, so the
+   * prescription is dispensed by that pharmacy. Records it the same way as
+   * POST /prescriptions/:id/dispense (audit row, QR codes off, medications
+   * activated). Does nothing if the prescription is already dispensed.
+   * @param {Object} order - the orders row, after the pickup
+   * @param {Object} [db] - a client already in a transaction; without one
+   *   this runs in its own transaction
+   * @returns {Promise<{dispensed: boolean, pharmacyName: string, medications: Array}>}
+   */
+  static async markDispensedByOrder(order, db = null) {
+    if (db) return Prescription.recordOrderDispensing(db, order);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await Prescription.recordOrderDispensing(client, order);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  static async recordOrderDispensing(client, order) {
+    const pharmacy = (await client.query(
+      'SELECT pharmacy_name FROM pharmacies WHERE id = $1',
+      [order.pharmacy_id]
+    )).rows[0];
+    const pharmacyName = (pharmacy && pharmacy.pharmacy_name) || 'Pharmacy';
+    const notes = `Collected with order #${order.id}`;
+
+    const updated = await client.query(
+      `UPDATE prescriptions
+       SET is_dispensed = TRUE,
+           dispensed_at = CURRENT_TIMESTAMP,
+           dispensed_by_pharmacy_id = $2,
+           dispensed_by_pharmacy_name = $3,
+           dispensing_notes = $4,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND COALESCE(is_dispensed, FALSE) = FALSE
+       RETURNING id, patient_id`,
+      [order.prescription_id, String(order.pharmacy_id), pharmacyName, notes]
+    );
+
+    let medications = [];
+    if (updated.rows.length) {
+      await client.query(
+        `INSERT INTO prescription_dispensing
+           (prescription_id, patient_id, pharmacy_id, pharmacy_name, notes)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [order.prescription_id, updated.rows[0].patient_id, String(order.pharmacy_id), pharmacyName, notes]
+      );
+      medications = await PrescriptionMedicationService.createForDispensedPrescription(
+        client, order.prescription_id
+      );
+    }
+    // Also when it was already dispensed: a code made since must not work
+    await Prescription.deactivateQRCodes(client, order.prescription_id);
+
+    return { dispensed: updated.rows.length > 0, pharmacyName, medications };
   }
 
   /**
