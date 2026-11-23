@@ -25,6 +25,8 @@ router.get('/', medicationAuth, MedicationController.list);
 router.get('/doses', medicationAuth, MedicationController.listDoses);
 router.post('/doses/:doseId/taken', medicationAuth, MedicationController.logDose('taken'));
 router.post('/doses/:doseId/skipped', medicationAuth, MedicationController.logDose('skipped'));
+// Change the times a medication is taken; rebuilds its upcoming doses
+router.patch('/:medicationId/schedule', medicationAuth, MedicationController.updateSchedule);
 router.post(
   '/:medicationId/attachments',
   medicationAuth,

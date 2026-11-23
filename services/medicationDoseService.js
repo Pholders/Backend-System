@@ -296,8 +296,141 @@ async function recordDose(db = pool, { patientId, doseId, status, takenAt = null
   return result.rows[0];
 }
 
+// ── changing a medication's times ────────────────────────────────────────
+
+const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const MAX_TIMES_PER_DAY = 12;
+
+/**
+ * How many times a day the medication must be taken, or null when the
+ * patient may choose. A medication from a prescription keeps the prescribed
+ * count, so the patient changes when they take it but not how often.
+ * `row` needs prescription_item_id, schedule and prescribed_frequency.
+ */
+function dosesPerDay(row) {
+  if (row.prescription_item_id === null || row.prescription_item_id === undefined) return null;
+  if (row.prescribed_frequency) {
+    // Required lazily: prescriptionMedicationService does not depend on this file
+    const { scheduleFromFrequency } = require('./prescriptionMedicationService');
+    return scheduleFromFrequency(row.prescribed_frequency).length;
+  }
+  const schedule = Array.isArray(row.schedule) ? row.schedule : JSON.parse(row.schedule || '[]');
+  return schedule.length;
+}
+
+/**
+ * SQL for whether the patient can still change a medication's times: it is
+ * tracked and its course hasn't ended (South African date). `m` is the
+ * medications alias; $tz is the parameter holding ZONE, $statuses the one
+ * holding TRACKED_STATUSES.
+ */
+const SCHEDULE_EDITABLE_SQL = (m, tz, statuses) =>
+  `(${m}.status = ANY(${statuses}::text[]) AND ${m}.end_date >= (now() AT TIME ZONE ${tz})::date)`;
+
+/** Validate new times. Returns { schedule } sorted, or { fields } for a 400. */
+function parseSchedule(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return { fields: { schedule: 'Must contain at least one time.' } };
+  }
+  if (value.length > MAX_TIMES_PER_DAY) {
+    return { fields: { schedule: `Must contain at most ${MAX_TIMES_PER_DAY} times.` } };
+  }
+  const fields = {};
+  value.forEach((time, index) => {
+    if (typeof time !== 'string' || !TIME_PATTERN.test(time)) {
+      fields[`schedule[${index}]`] = 'Must be in HH:mm format.';
+    }
+  });
+  if (Object.keys(fields).length) return { fields };
+  if (new Set(value).size !== value.length) {
+    return { fields: { schedule: 'Must not contain the same time twice.' } };
+  }
+  return { schedule: [...value].sort() };
+}
+
+/**
+ * Change the times a medication is taken and rebuild its upcoming doses.
+ * Run it inside a transaction.
+ *
+ * Doses already logged or missed are kept, so adherence does not change.
+ * Pending doses from now on at times no longer in the schedule are deleted,
+ * and their reminders with them (a reminder is a dose's reminded_at).
+ * Pending doses at times that stay are kept, so a reminder already sent for
+ * one isn't sent again. New times get doses from now on: a new time that has
+ * already passed today starts tomorrow instead of turning into a missed dose.
+ * That is done by moving dose_tracking_from to now, the point from which
+ * generateDoses creates doses.
+ *
+ * @returns {Promise<{ medicationId, schedule, removed, created }>}
+ */
+async function changeSchedule(db = pool, { patientId, medicationId, schedule }) {
+  const parsed = parseSchedule(schedule);
+  if (parsed.fields) {
+    const error = new DoseError(400, 'VALIDATION_ERROR', 'The request contains invalid fields.');
+    error.fields = parsed.fields;
+    throw error;
+  }
+
+  const found = await db.query(
+    `SELECT m.id, m.patient_id, m.schedule, m.prescription_item_id,
+            pi.frequency AS prescribed_frequency,
+            ${SCHEDULE_EDITABLE_SQL('m', '$2', '$3')} AS schedule_editable
+     FROM medications m
+     LEFT JOIN prescription_items pi ON pi.id = m.prescription_item_id
+     WHERE m.id = $1
+     FOR UPDATE OF m`,
+    [medicationId, ZONE, TRACKED_STATUSES]
+  );
+  const medication = found.rows[0];
+  if (!medication) throw new DoseError(404, 'NOT_FOUND', 'Medication not found.');
+  if (medication.patient_id !== patientId) {
+    throw new DoseError(403, 'FORBIDDEN', 'You do not have access to this medication.');
+  }
+  if (!medication.schedule_editable) {
+    throw new DoseError(409, 'MEDICATION_NOT_ACTIVE', 'Only an active medication can have its times changed.');
+  }
+  const required = dosesPerDay(medication);
+  if (required !== null && parsed.schedule.length !== required) {
+    throw new DoseError(
+      422,
+      'DOSES_PER_DAY_MISMATCH',
+      `This medication is prescribed ${required} time${required === 1 ? '' : 's'} a day, so choose exactly ${required} time${required === 1 ? '' : 's'}.`
+    );
+  }
+
+  await db.query(
+    `UPDATE medications
+     SET schedule = $2::jsonb, dose_tracking_from = now(), updated_at = now()
+     WHERE id = $1`,
+    [medicationId, JSON.stringify(parsed.schedule)]
+  );
+
+  const removed = await db.query(
+    `DELETE FROM medication_doses
+     WHERE medication_id = $1
+       AND status = 'pending'
+       AND scheduled_at >= now()
+       AND NOT (to_char(scheduled_at AT TIME ZONE $2, 'HH24:MI') = ANY($3::text[]))`,
+    [medicationId, ZONE, parsed.schedule]
+  );
+  const created = await generateDoses(db, { patientId });
+
+  return {
+    medicationId,
+    schedule: parsed.schedule,
+    removed: removed.rowCount,
+    created,
+  };
+}
+
 module.exports = {
   ZONE,
+  MAX_TIMES_PER_DAY,
+  TRACKED_STATUSES,
+  SCHEDULE_EDITABLE_SQL,
+  dosesPerDay,
+  parseSchedule,
+  changeSchedule,
   MISSED_AFTER_MINUTES,
   STALE_REMINDER_MINUTES,
   EARLIEST_LOG_MINUTES,

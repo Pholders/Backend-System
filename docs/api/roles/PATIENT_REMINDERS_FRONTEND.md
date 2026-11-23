@@ -1,6 +1,6 @@
 # Patient Reminders & Adherence — Frontend Integration
 
-What the patient app needs for medication reminders, logging doses, adherence, and appointment reminders.
+What the patient app needs for medication reminders, logging doses, changing dose times, adherence, and appointment reminders.
 
 **Base URL**: `https://backend-system-u8s2.onrender.com/api`
 **Auth**: every endpoint needs `Authorization: Bearer <token>` from a patient login. A doctor, pharmacy or admin token gets `403`.
@@ -47,6 +47,8 @@ These endpoints use the medications error format, which is different from the `/
 | `403` | `FORBIDDEN` | Not a patient token, or the dose belongs to another patient |
 | `404` | `NOT_FOUND` | The dose doesn't exist |
 | `409` | `DOSE_NOT_DUE` | The dose is more than 60 minutes away |
+| `409` | `MEDICATION_NOT_ACTIVE` | Changing the times of a medication that is past or whose course has ended |
+| `422` | `DOSES_PER_DAY_MISMATCH` | Changing a prescribed medication's times to a different number per day |
 | `500` | `INTERNAL_ERROR` | Server error |
 
 ### The dose object
@@ -137,7 +139,7 @@ Log that the patient deliberately didn't take the dose. There is no body. It fol
 
 ---
 
-### Adherence on GET `/medications`
+### New fields on GET `/medications`
 
 Each medication in the existing list now carries:
 
@@ -145,8 +147,65 @@ Each medication in the existing list now carries:
 |---|---|
 | `adherence_percent` | 0–100 |
 | `adherence_doses_counted` | How many doses the percentage is based on (taken + skipped + missed) |
+| `schedule_editable` | `true` while the times can be changed: the medication is active and its course hasn't ended. Hide the Edit button when `false` |
+| `doses_per_day` | For a medication from a prescription, the prescribed number of times a day: show that many time pickers. `null` for a medication the patient added, which can have any number |
 
 When `adherence_doses_counted` is `0`, show "No data yet" instead of "0%". It's a new medication, or none of its doses have come round yet.
+
+---
+
+### PATCH `/medications/:medicationId/schedule`
+
+Change the times the patient takes a medication. The upcoming doses and their reminders follow the new times.
+
+**Request body**
+```json
+{ "schedule": ["07:30", "19:30"] }
+```
+
+**Rules**
+- Times are `HH:mm`, 24-hour, South African time: the same format as `schedule` in `GET /medications`. At least one, at most 12, with no time twice. They're stored sorted.
+- A medication from a prescription keeps its prescribed number of times a day: send exactly `doses_per_day` times, or get `422 DOSES_PER_DAY_MISMATCH`. A medication the patient added themselves (`doses_per_day` is `null`) can have any number.
+- Only while `schedule_editable` is `true`. Otherwise `409 MEDICATION_NOT_ACTIVE`.
+
+**What changes**
+- Doses already taken, skipped or missed stay as they are, so `adherence_percent` and `adherence_doses_counted` don't change.
+- Upcoming doses at times that are no longer in the schedule are removed, along with their reminders.
+- Upcoming doses at times that stay are kept, so a reminder already sent for one isn't sent again.
+- A new time later today gets a dose today. A new time that has already passed today starts tomorrow; it never shows up as missed.
+
+After saving, reload `GET /medications/doses` for the Today screen.
+
+**Response `200`.** The medication, in the same shape as one item of `GET /medications`:
+```json
+{
+  "data": {
+    "id": "med_6c1f0d0e8a2b4f7c9d3e5a1b2c4d6e8f",
+    "name": "Amoxicillin",
+    "schedule": ["07:30", "19:30"],
+    "status": "active",
+    "adherence_percent": 85,
+    "adherence_doses_counted": 12,
+    "schedule_editable": true,
+    "doses_per_day": 2,
+    "...": "the other existing fields"
+  }
+}
+```
+
+**Errors** use the medications format above. Show `error.message` to the patient.
+
+| Status | `code` | When |
+|---|---|---|
+| `400` | `VALIDATION_ERROR` | Not a list, empty, a time not in `HH:mm`, or the same time twice. `error.fields` says which |
+| `403` | `FORBIDDEN` | The medication belongs to another patient |
+| `404` | `NOT_FOUND` | No such medication |
+| `409` | `MEDICATION_NOT_ACTIVE` | The medication is past, or its course has ended |
+| `422` | `DOSES_PER_DAY_MISMATCH` | A prescribed medication with a different number of times than prescribed |
+
+```json
+{ "error": { "code": "DOSES_PER_DAY_MISMATCH", "message": "This medication is prescribed 2 times a day, so choose exactly 2 times." } }
+```
 
 ---
 
