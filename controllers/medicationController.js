@@ -156,6 +156,8 @@ class MedicationController {
     const body = req.body;
     const id = `med_${randomUUID().replace(/-/g, '')}`;
     const schedule = [...new Set(body.schedule)].sort();
+    // A course that has already ended is not active, whatever was sent
+    const status = body.end_date < doses.localDate() ? 'past' : body.status;
 
     try {
       const result = await query(
@@ -168,7 +170,7 @@ class MedicationController {
         ) RETURNING *`,
         [
           id, req.user.id, body.name.trim(), body.type.trim(), body.dosage.trim(),
-          JSON.stringify(schedule), body.start_date, body.end_date, body.status,
+          JSON.stringify(schedule), body.start_date, body.end_date, status,
           body.prescribed_by.trim(), body.issued_date, body.indication.trim(),
           body.refills_remaining, body.supply_unit.trim(), body.next_refill_date || null,
           body.notes === undefined || body.notes === null ? null : body.notes.trim()
@@ -294,6 +296,8 @@ class MedicationController {
 
   static async list(req, res) {
     try {
+      // Don't wait for the job: a course that ended reads as past straight away
+      await doses.completeFinishedCourses(undefined, { patientId: req.user.id });
       const rows = await fetchMedications(undefined, req.user.id);
       return res.json({ data: rows });
     } catch (error) {
