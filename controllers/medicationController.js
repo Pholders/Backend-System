@@ -1,6 +1,6 @@
 const path = require('path');
 const { randomUUID } = require('crypto');
-const { query } = require('../config/db');
+const { query, pool } = require('../config/db');
 const storage = require('../services/storage');
 const doses = require('../services/medicationDoseService');
 
@@ -99,11 +99,53 @@ function validationFields(body) {
 }
 
 function medicationResponse(row) {
-  return {
-    ...row,
+  const { prescribed_frequency: _frequency, ...rest } = row;
+  const response = {
+    ...rest,
     schedule: Array.isArray(row.schedule) ? row.schedule : JSON.parse(row.schedule),
     attachments: row.attachments || []
   };
+  if (Object.prototype.hasOwnProperty.call(row, 'schedule_editable')) {
+    response.doses_per_day = doses.dosesPerDay(row);
+  }
+  return response;
+}
+
+/**
+ * A patient's medications as GET /api/medications returns them, or just one
+ * when medicationId is given. `db` defaults to the pool.
+ */
+async function fetchMedications(db = { query }, patientId, medicationId = null) {
+  const result = await db.query(
+    `SELECT m.*,
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', ma.id,
+            'type', ma.type,
+            'file_name', ma.file_name,
+            'content_type', ma.content_type,
+            'url', '/api/medications/' || m.id || '/attachments/' || ma.id,
+            'created_at', ma.created_at
+          )
+          ORDER BY ma.created_at
+        ) FILTER (WHERE ma.id IS NOT NULL),
+        '[]'::json
+      ) AS attachments,
+      (SELECT COUNT(*)::int FROM medication_doses d
+        WHERE d.medication_id = m.id AND d.status <> 'pending') AS adherence_doses_counted,
+      ${doses.SCHEDULE_EDITABLE_SQL('m', '$3', '$4')} AS schedule_editable,
+      pi.frequency AS prescribed_frequency
+    FROM medications m
+    LEFT JOIN medication_attachments ma ON ma.medication_id = m.id
+    LEFT JOIN prescription_items pi ON pi.id = m.prescription_item_id
+    WHERE m.patient_id = $1
+      AND ($2::varchar IS NULL OR m.id = $2)
+    GROUP BY m.id, pi.frequency
+    ORDER BY m.start_date DESC, m.created_at DESC`,
+    [patientId, medicationId, doses.ZONE, doses.TRACKED_STATUSES]
+  );
+  return result.rows.map(medicationResponse);
 }
 
 class MedicationController {
@@ -252,37 +294,42 @@ class MedicationController {
 
   static async list(req, res) {
     try {
-      const result = await query(
-        `SELECT m.*,
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'id', ma.id,
-                'type', ma.type,
-                'file_name', ma.file_name,
-                'content_type', ma.content_type,
-                'url', '/api/medications/' || m.id || '/attachments/' || ma.id,
-                'created_at', ma.created_at
-              )
-              ORDER BY ma.created_at
-            ) FILTER (WHERE ma.id IS NOT NULL),
-            '[]'::json
-          ) AS attachments,
-          (SELECT COUNT(*)::int FROM medication_doses d
-            WHERE d.medication_id = m.id AND d.status <> 'pending') AS adherence_doses_counted
-        FROM medications m
-        LEFT JOIN medication_attachments ma ON ma.medication_id = m.id
-        WHERE m.patient_id = $1
-        GROUP BY m.id
-        ORDER BY m.start_date DESC, m.created_at DESC`,
-        [req.user.id]
-      );
-      return res.json({ data: result.rows.map(medicationResponse) });
+      const rows = await fetchMedications(undefined, req.user.id);
+      return res.json({ data: rows });
     } catch (error) {
       console.error('Error listing medications:', error);
       return res.status(500).json({
         error: { code: 'INTERNAL_ERROR', message: 'Unable to retrieve medications.' }
       });
+    }
+  }
+
+  // PATCH /api/medications/:medicationId/schedule   body: { schedule: ["07:30", "19:30"] }
+  static async updateSchedule(req, res) {
+    const schedule = req.body && req.body.schedule;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await doses.changeSchedule(client, {
+        patientId: req.user.id,
+        medicationId: req.params.medicationId,
+        schedule,
+      });
+      const [medication] = await fetchMedications(client, req.user.id, req.params.medicationId);
+      await client.query('COMMIT');
+      return res.json({ data: medication });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (error instanceof doses.DoseError) {
+        if (error.fields) return validationError(res, error.fields);
+        return res.status(error.status).json({ error: { code: error.code, message: error.message } });
+      }
+      console.error('Error changing medication schedule:', error);
+      return res.status(500).json({
+        error: { code: 'INTERNAL_ERROR', message: 'Unable to change the medication times.' }
+      });
+    } finally {
+      client.release();
     }
   }
 
@@ -341,3 +388,4 @@ class MedicationController {
 }
 
 module.exports = MedicationController;
+module.exports.fetchMedications = fetchMedications;
