@@ -99,6 +99,15 @@ class OrderController {
         return res.status(403).json({ success: false, message: 'You do not own this prescription' });
       }
 
+      const lifecycle = await Prescription.getStatus(rx.id);
+      if (lifecycle && lifecycle.status === 'dispensed') {
+        return res.status(409).json({
+          success: false,
+          code: 'PRESCRIPTION_DISPENSED',
+          message: 'This prescription has already been dispensed.',
+        });
+      }
+
       // Block double-active orders for the same prescription.
       const active = await Order.findActiveForPrescription(prescription_id);
       if (active) {

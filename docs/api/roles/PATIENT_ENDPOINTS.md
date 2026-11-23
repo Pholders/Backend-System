@@ -2129,9 +2129,27 @@ Delete a review.
 ---
 
 ### GET `/prescriptions`
-List all of the patient's prescriptions.
+List the patient's prescriptions, newest first. Use `view=current` for the main list and `view=history` for the history tab.
 
-**Query Params:** `limit` (default 50), `offset` (default 0), `filter` (`all` | `signed` | `pending`)
+**Query Params**
+
+| Param | Default | Notes |
+|---|---|---|
+| `view` | `all` | `current`: still to be collected (`pending_signature`, `active`, `in_progress`). `history`: `dispensed` or `expired`. `all`: both. Anything else gets `400` |
+| `filter` | `all` | `signed` or `pending`, by signature status, applied after `view` |
+| `limit` / `offset` | `50` / `0` | |
+
+**`prescriptionStatus`**
+
+| Value | Meaning | QR code |
+|---|---|---|
+| `pending_signature` | The doctor hasn't signed it yet | No |
+| `active` | Signed; the patient can take it to a pharmacy | Yes |
+| `in_progress` | Claimed at a pharmacy, or an order for it is open | Yes |
+| `dispensed` | The pharmacy dispensed it, or the order was picked up. **History** | No, turned off |
+| `expired` | The 30-day claim window passed without it being claimed. **History** | No |
+
+`status` is still the **signature** status (`pending` / `signed`), as before. Show `prescriptionStatus` to the patient. `qrActive` says whether to offer the QR code.
 
 **Response `200`**
 ```json
@@ -2139,7 +2157,11 @@ List all of the patient's prescriptions.
   "success": true,
   "message": "Prescriptions retrieved successfully",
   "data": {
-    "total": 2,
+    "total": 1,
+    "counts": {
+      "pending_signature": 0, "active": 1, "in_progress": 1, "dispensed": 4, "expired": 0,
+      "current": 2, "history": 4
+    },
     "prescriptions": [
       {
         "id": 33,
@@ -2147,6 +2169,14 @@ List all of the patient's prescriptions.
         "doctor": "Dr. John Smith",
         "diagnosis": "Hypertension",
         "status": "signed",
+        "prescriptionStatus": "dispensed",
+        "isHistory": true,
+        "qrActive": false,
+        "claimedAt": "2026-07-22T09:00:00.000Z",
+        "claimedAtPharmacy": "HealthPlus Pharmacy",
+        "claimExpiresAt": "2026-08-19T08:00:00.000Z",
+        "dispensedAt": "2026-07-22T10:00:00.000Z",
+        "dispensedBy": "HealthPlus Pharmacy",
         "createdAt": "2026-07-20T08:00:00.000Z",
         "isRevoked": false
       }
@@ -2154,6 +2184,10 @@ List all of the patient's prescriptions.
   }
 }
 ```
+
+`total` is the number in this page. `counts` covers all of the patient's prescriptions, whatever the `view`, so it can label both tabs. `dispensedAt` and `dispensedBy` are `null` until the prescription is dispensed.
+
+**When a prescription becomes `dispensed`:** when the pharmacy dispenses it, or when the pharmacy marks the order `picked_up`. At that moment every QR code for it stops working, and the patient's medications from it become active (see [PATIENT_REMINDERS_FRONTEND.md](./PATIENT_REMINDERS_FRONTEND.md)). Refresh the list when an `order:updated` event arrives with `toStatus: "picked_up"`.
 
 ---
 
@@ -2205,6 +2239,11 @@ View full prescription details including medicines and digital signature.
         "timestamp": "2026-07-20T09:00:00.000Z",
         "certificate": { "hash": "sha256:abc...", "method": "RSA-SHA256" }
       },
+      "prescriptionStatus": "dispensed",
+      "isHistory": true,
+      "qrActive": false,
+      "claim": { "claimedAt": "2026-07-22T09:00:00.000Z", "pharmacy": "HealthPlus Pharmacy", "expiresAt": "2026-08-19T08:00:00.000Z" },
+      "dispensing": { "dispensedAt": "2026-07-22T10:00:00.000Z", "pharmacy": "HealthPlus Pharmacy" },
       "createdAt": "2026-07-20T08:00:00.000Z",
       "updatedAt": "2026-07-20T09:00:00.000Z"
     }
@@ -2253,7 +2292,19 @@ Get printable prescription data.
 ---
 
 ### GET `/prescriptions/:prescriptionId/qrcode`
-Generate a QR code for the prescription.
+Generate a QR code for the prescription. Only while `qrActive` is `true`.
+
+A dispensed prescription has no QR code:
+
+**Response `409`**
+```json
+{
+  "success": false,
+  "code": "PRESCRIPTION_DISPENSED",
+  "message": "This prescription has already been dispensed, so it has no QR code.",
+  "data": { "dispensedAt": "2026-07-22T10:00:00.000Z", "pharmacy": "HealthPlus Pharmacy" }
+}
+```
 
 **Response `200`**
 ```json
@@ -2348,7 +2399,7 @@ Share the prescription via email.
 ---
 
 ### POST `/prescriptions/:prescriptionId/claim`
-Claim a prescription at a pharmacy.
+Claim a prescription at a pharmacy. A dispensed prescription gets `409` with `"code": "PRESCRIPTION_DISPENSED"` (so does `POST /orders` for one).
 
 **Request Body**
 ```json
@@ -2406,7 +2457,7 @@ View the routing history for a prescription.
 ---
 
 ### GET `/prescriptions/qr/:qrToken`
-Access a prescription via a QR token (public). Returns prescription summary for pharmacy verification.
+Access a prescription via a QR token (public). Returns prescription summary for pharmacy verification. Once the prescription is dispensed, every code for it gets `403` with `"message": "This prescription has already been dispensed"`.
 
 ---
 
@@ -2415,8 +2466,17 @@ Check whether a QR token is still valid (public).
 
 **Response `200`**
 ```json
-{ "success": true, "data": { "valid": true, "used": false, "expiresAt": "2026-08-04T23:59:59.000Z" } }
+{
+  "success": true,
+  "data": {
+    "exists": true, "prescriptionId": 33, "used": false, "usedAt": null,
+    "expires": "2026-10-18T09:00:00.000Z", "isActive": false, "isExpired": false,
+    "isDispensed": true, "dispensedAt": "2026-07-22T10:00:00.000Z", "status": "DISPENSED"
+  }
+}
 ```
+
+`status` is one of `VALID`, `USED`, `EXPIRED`, `INACTIVE` or `DISPENSED`. Only `VALID` can be scanned.
 
 ---
 

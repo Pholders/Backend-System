@@ -26,6 +26,8 @@ const OrderStatusHistory = require('../models/OrderStatusHistory');
 const orderNotifications = require('./orderNotifications');
 const adminNotifications = require('./adminNotifications');
 const realtimeService = require('./realtimeService');
+const Prescription = require('../models/Prescription');
+const doctorNotifications = require('./doctorNotifications');
 
 // status -> array of statuses it may transition to.
 // Note: cash orders go straight pending -> accepted -> preparing.
@@ -186,6 +188,21 @@ async function transition({ orderId, toStatus, actorType, actorId = null, notes 
     actor_id: actorId,
     notes,
   });
+
+  // Picked up: the prescription is dispensed and its QR code stops working.
+  // Best-effort: the pickup stands either way, and the prescription already
+  // reads as dispensed because a picked-up order exists.
+  if (toStatus === 'picked_up') {
+    try {
+      const result = await Prescription.markDispensedByOrder(updated);
+      if (result.dispensed) {
+        doctorNotifications.prescriptionDispensed(updated.prescription_id, result.pharmacyName);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[orderStateMachine] marking prescription dispensed failed for order ${orderId}:`, err.message);
+    }
+  }
 
   // Tell the admins when a pharmacy declines an order (never throws).
   if (toStatus === 'rejected') {

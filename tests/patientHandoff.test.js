@@ -45,6 +45,8 @@ function fakeRes() {
 let audits = [];
 Prescription.addShareAudit = async (id, entry) => { audits.push({ id, ...entry }); };
 Prescription.generateQRCodeAccess = async () => {};
+let rxStatus = 'active';
+Prescription.getStatus = async () => ({ status: rxStatus, dispensed_at: null, dispensed_pharmacy: null });
 QRCodeService.toDataURL = async () => 'data:image/png;base64,';
 PrescriptionController.renderOrLoadPdfSnapshot = async () => ({
   buffer: Buffer.from('%PDF'),
@@ -110,6 +112,22 @@ it("someone else's script gets no QR code and no log entry", async () => {
   await PrescriptionController.generateQRCode(
     { user: { id: 99, role: 'patient' }, params: { prescriptionId: '15' } }, res);
   assert.strictEqual(res.statusCode, 404);
+  assert.deepStrictEqual(audits, []);
+});
+
+it('a dispensed script gets no QR code and no log entry', async () => {
+  audits = [];
+  rxStatus = 'dispensed';
+  Prescription.getById = async () => script(ordinary);
+  const res = fakeRes();
+  try {
+    await PrescriptionController.generateQRCode(
+      { user: { id: 20, role: 'patient' }, params: { prescriptionId: '15' } }, res);
+  } finally {
+    rxStatus = 'active';
+  }
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'PRESCRIPTION_DISPENSED');
   assert.deepStrictEqual(audits, []);
 });
 
