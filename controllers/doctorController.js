@@ -19,6 +19,11 @@ const { containerMemoryLimitBytes } = require('../utils/containerMemory');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
+// Password reset: how long an emailed code lasts, and how many wrong codes
+// are allowed before it stops working.
+const DOCTOR_RESET_CODE_MINUTES = 15;
+const DOCTOR_RESET_MAX_WRONG_CODES = 5;
+
 // One removal peaks at roughly 1GB of resident memory, so anything under
 // this has no business attempting it. The margin is for the rest of the
 // server, which still has to answer every other request while it runs.
@@ -691,6 +696,145 @@ class DoctorController {
     } catch (error) {
       console.error('Change password error:', error);
       res.status(500).json({ success: false, message: 'Error changing your password' });
+    }
+  }
+
+  /**
+   * Forgot password: email the doctor a 6-digit reset code.
+   *
+   * The patient flow (POST /users/forgot-password) only looks in the patients
+   * table, so a doctor's email was never found there. Doctors get their own
+   * pair of endpoints. The answer is the same whether or not the email has an
+   * account, so the form cannot be used to find out who is registered.
+   */
+  static async forgotPassword(req, res) {
+    const genericResponse = {
+      success: true,
+      message: 'If a doctor account exists for this email, a 6-digit reset code has been sent. Check your inbox and spam folder.'
+    };
+    try {
+      const email = String(req.body?.email || '').trim();
+      if (!email) {
+        return res.status(400).json({ success: false, message: 'Enter your email address' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ success: false, message: 'Enter a valid email address' });
+      }
+
+      const doctor = await Doctor.findByEmail(email);
+      if (!doctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'forgot_password', 'failed', 'Doctor not found');
+        return res.json(genericResponse);
+      }
+
+      // Creating a code marks any earlier unused reset code as used.
+      const otp = await OTP.create(doctor.id, 'password_reset', 'doctor', DOCTOR_RESET_CODE_MINUTES);
+      try {
+        await emailService.sendPasswordResetOTP(doctor.email, otp.otp_code, doctor.first_name);
+      } catch (emailError) {
+        console.error('Doctor password reset email failed:', emailError.message);
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'forgot_password', 'failed', `Email error: ${emailError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'We could not send the reset code. Please try again in a few minutes.'
+        });
+      }
+
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'forgot_password', 'success');
+      res.json(genericResponse);
+    } catch (error) {
+      console.error('Doctor forgot password error:', error);
+      res.status(500).json({ success: false, message: 'Error sending the reset code' });
+    }
+  }
+
+  /**
+   * Reset password with the emailed code.
+   *
+   * One call checks the code and sets the password, so no reset token is
+   * needed (the patient token table references patients only). The password
+   * is checked first so a weak one does not use up the code. After
+   * DOCTOR_RESET_MAX_WRONG_CODES wrong codes the code stops working and a new
+   * one must be requested. Wrong codes are logged as 'password_reset' failures,
+   * which the login lockout does not count.
+   */
+  static async resetPassword(req, res) {
+    const invalidCode = {
+      success: false,
+      message: 'That code is wrong or has expired. Check the latest email, or request a new code.'
+    };
+    try {
+      const body = req.body || {};
+      const email = String(body.email || '').trim();
+      const code = String(body.otp || body.otp_code || '').trim();
+      const newPassword = String(body.new_password || body.newPassword || '');
+      const confirmPassword = String(body.confirm_password || body.confirmPassword || '');
+
+      if (!email || !code || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Your email, the 6-digit code and a new password are all needed'
+        });
+      }
+      if (newPassword !== confirmPassword) {
+        return res.status(400).json({ success: false, message: 'The two passwords do not match' });
+      }
+      const validation = PasswordValidator.validate(newPassword);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.errors.join('. '),
+          errors: validation.errors
+        });
+      }
+
+      const doctor = await Doctor.findByEmail(email);
+      if (!doctor) {
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'password_reset', 'failed', 'Doctor not found');
+        return res.status(400).json(invalidCode);
+      }
+
+      const wrongCodes = await AuditLog.countRecentEvents(email, 'password_reset', DOCTOR_RESET_CODE_MINUTES);
+      if (wrongCodes >= DOCTOR_RESET_MAX_WRONG_CODES) {
+        // Burn the code so guessing cannot continue on it.
+        await query(
+          `UPDATE otps SET is_used = true
+           WHERE user_id = $1 AND user_type = 'doctor' AND purpose = 'password_reset' AND is_used = false`,
+          [doctor.id]
+        );
+        return res.status(429).json({
+          success: false,
+          message: 'Too many wrong codes. Request a new code and try again in 15 minutes.'
+        });
+      }
+
+      const check = await OTP.verify(doctor.id, code, 'password_reset', 'doctor');
+      if (!check.valid) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'password_reset', 'failed', check.message);
+        return res.status(400).json(invalidCode);
+      }
+
+      const password_hash = await bcrypt.hash(newPassword, 10);
+      await Doctor.update(doctor.id, { password_hash });
+
+      // Anyone who was signed in with the old password is signed out.
+      try {
+        await Session.invalidateUserSessions(doctor.id, 'doctor', 'Password reset');
+      } catch (sessionError) {
+        console.error('Doctor session invalidation after reset failed:', sessionError.message);
+      }
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'reset_password', 'success');
+
+      try {
+        await emailService.sendPasswordResetConfirmation(doctor.email, doctor.first_name);
+      } catch (emailError) {
+        console.error('Doctor reset confirmation email failed (non-blocking):', emailError.message);
+      }
+
+      res.json({ success: true, message: 'Your password has been reset. You can now sign in with it.' });
+    } catch (error) {
+      console.error('Doctor reset password error:', error);
+      res.status(500).json({ success: false, message: 'Error resetting your password' });
     }
   }
 

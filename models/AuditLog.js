@@ -155,6 +155,24 @@ class AuditLog {
   }
 
   /**
+   * Count one kind of failed event for an email within the last few minutes.
+   * Used to cap wrong password-reset codes without touching the login
+   * lockout, which counts 'login_failed' and 'otp_failed' only.
+   */
+  static async countRecentEvents(email, eventType, minutes = 15) {
+    const selectQuery = `
+      SELECT COUNT(*) AS event_count
+      FROM audit_logs
+      WHERE email = $1
+        AND event_type = $2
+        AND status = 'failed'
+        AND created_at > NOW() - ($3::int * INTERVAL '1 minute')
+    `;
+    const result = await query(selectQuery, [email, eventType, minutes]);
+    return parseInt(result.rows[0].event_count, 10) || 0;
+  }
+
+  /**
    * Get suspicious activity (multiple failed attempts)
    */
   static async getSuspiciousActivity(threshold = 5, hours = 1) {

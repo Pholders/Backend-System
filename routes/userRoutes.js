@@ -855,6 +855,15 @@ router.post('/doctor/verify-otp', preventAuthenticated, DoctorController.verifyO
 router.post('/doctor/verify-email', preventAuthenticated, DoctorController.verifyEmail);
 router.post('/doctor/resend-verification', preventAuthenticated, DoctorController.resendVerificationEmail);
 
+// Doctor forgot / reset password (no auth). The patient routes above only
+// look in the patients table, so doctors need their own pair:
+//   POST /doctor/forgot-password  { email }  -> emails a 6-digit code
+//   POST /doctor/reset-password   { email, otp, new_password, confirm_password }
+// Like the patient routes, these take no auth middleware: a stale token left
+// in the browser must not block someone who has forgotten their password.
+router.post('/doctor/forgot-password', DoctorController.forgotPassword);
+router.post('/doctor/reset-password', DoctorController.resetPassword);
+
 // Medical aid catalogue — doctors pick from it, patients read the names.
 router.get('/medical-aids', authMiddleware, DoctorController.getMedicalAidCatalogue);
 
