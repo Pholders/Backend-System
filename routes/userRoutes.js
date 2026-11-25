@@ -963,6 +963,13 @@ router.post('/doctor/sessions/revoke-others', authMiddleware, requireRole('docto
 router.delete('/doctor/sessions/:sessionId', authMiddleware, requireRole('doctor'), DoctorController.revokeSession);
 router.post('/doctor/change-password', authMiddleware, requireRole('doctor'), DoctorController.changePassword);
 
+// Two-factor sign-in (email code on the first sign-in of the day per browser).
+// On: POST start emails a code, POST enable confirms it. Off: password.
+// The sign-in code itself is checked by POST /doctor/verify-otp.
+router.post('/doctor/2fa/start', authMiddleware, requireRole('doctor'), DoctorController.startTwoFactorEnable);
+router.post('/doctor/2fa/enable', authMiddleware, requireRole('doctor'), DoctorController.confirmTwoFactorEnable);
+router.post('/doctor/2fa/disable', authMiddleware, requireRole('doctor'), DoctorController.disableTwoFactor);
+
 /**
  * @swagger
  * /api/users/doctor/activity-log:

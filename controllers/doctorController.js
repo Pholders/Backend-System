@@ -16,6 +16,12 @@ const storage = require('../services/storage');
 const doctorNotifications = require('../services/doctorNotifications');
 const { normalizeSupportedImage } = require('../utils/imageUpload');
 const { containerMemoryLimitBytes } = require('../utils/containerMemory');
+const {
+  issueTrustedToday,
+  isTrustedToday,
+  MAX_WRONG_LOGIN_CODES,
+  LOGIN_CODE_MINUTES,
+} = require('../utils/doctorTwoFactor');
 
 const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 
@@ -23,6 +29,54 @@ const DOCTOR_PROFILE_IMAGE_FOLDER = 'doctor-profile-images';
 // are allowed before it stops working.
 const DOCTOR_RESET_CODE_MINUTES = 15;
 const DOCTOR_RESET_MAX_WRONG_CODES = 5;
+
+/**
+ * Issue the doctor's JWT, record the session and answer the sign-in.
+ *
+ * Shared by the password login and the two-factor code step, so both hand
+ * back the same 24-hour token and the same response shape.
+ */
+async function startDoctorSession(req, res, doctor, { ipAddress, userAgent, trustedDeviceToken } = {}) {
+  const token = jwt.sign(
+    {
+      id: doctor.id,
+      email: doctor.email,
+      role: 'doctor',
+      firstName: doctor.first_name,
+      lastName: doctor.last_name
+    },
+    process.env.JWT_SECRET || 'jwtSecret',
+    { expiresIn: '24h' }
+  );
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  await Session.create(doctor.id, 'doctor', tokenHash, ipAddress, userAgent, {
+    userAgent,
+    ipAddress,
+    timestamp: new Date().toISOString()
+  });
+
+  await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'login', 'success');
+
+  return res.status(200).json({
+    success: true,
+    message: 'Login successful. You can now sign prescriptions.',
+    data: {
+      token,
+      doctorId: doctor.id,
+      firstName: doctor.first_name,
+      lastName: doctor.last_name,
+      email: doctor.email,
+      hpcsaNumber: doctor.hpcsa_number,
+      ...(trustedDeviceToken ? { trustedDeviceToken } : {}),
+      sessionInfo: {
+        expiresIn: '8 hours',
+        canSignPrescriptions: true,
+        createdAt: new Date().toISOString()
+      }
+    }
+  });
+}
 
 // One removal peaks at roughly 1GB of resident memory, so anything under
 // this has no business attempting it. The margin is for the rest of the
@@ -99,7 +153,7 @@ const EDITABLE_PROFILE_COLUMNS = new Set([
 const READ_ONLY_PROFILE_COLUMNS = new Set([
   'id', 'email', 'password_hash', 'hpcsa_number', 'profile_image', 'status',
   'email_verified', 'email_verified_at', 'rating', 'review_count', 'full_name',
-  'tier', 'created_at', 'updated_at'
+  'tier', 'created_at', 'updated_at', 'two_fa_enabled'
 ]);
 
 // Names from the published API docs that don't follow from camelCase alone.
@@ -378,57 +432,29 @@ class DoctorController {
         });
       }
 
-      // ✅ Generate JWT token for authentication (24 hours)
-      const token = jwt.sign(
-        {
-          id: doctor.id,
-          email: doctor.email,
-          role: 'doctor',
-          firstName: doctor.first_name,
-          lastName: doctor.last_name
-        },
-        process.env.JWT_SECRET || 'jwtSecret',
-        { expiresIn: '24h' }
-      );
-
-      // ✅ Create session with token hash
-      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      
-      const deviceInfo = {
-        userAgent: userAgent,
-        ipAddress: ipAddress,
-        timestamp: new Date().toISOString()
-      };
-      
-      const session = await Session.create(
-        doctor.id,
-        'doctor',
-        tokenHash,
-        ipAddress,
-        userAgent,
-        deviceInfo
-      );
-
-      // Log successful login
-      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'success');
-
-      res.status(200).json({
-        success: true,
-        message: 'Login successful. You can now sign prescriptions.',
-        data: {
-          token,
-          doctorId: doctor.id,
-          firstName: doctor.first_name,
-          lastName: doctor.last_name,
-          email: doctor.email,
-          hpcsaNumber: doctor.hpcsa_number,
-          sessionInfo: {
-            expiresIn: '8 hours',
-            canSignPrescriptions: true,
-            createdAt: new Date().toISOString()
-          }
+      // Two-factor: the first sign-in of the day on this browser needs the
+      // emailed code. The session is only created once it is verified.
+      if (doctor.two_fa_enabled && !isTrustedToday(req.body.trusted_device_token, doctor)) {
+        const otp = await OTP.create(doctor.id, 'login', 'doctor', LOGIN_CODE_MINUTES);
+        try {
+          await emailService.sendOTP(doctor.email, otp.otp_code, doctor.first_name);
+        } catch (emailError) {
+          console.error('Doctor sign-in code email failed:', emailError.message);
+          await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'failed', `Email error: ${emailError.message}`);
+          return res.status(500).json({
+            success: false,
+            message: 'We could not email your sign-in code. Please try again in a few minutes.'
+          });
         }
-      });
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_generated', 'success', 'Two-factor sign-in');
+        return res.status(200).json({
+          success: true,
+          message: 'We emailed you a 6-digit sign-in code.',
+          data: { requiresOtp: true, email: doctor.email, expiresInMinutes: LOGIN_CODE_MINUTES }
+        });
+      }
+
+      return startDoctorSession(req, res, doctor, { ipAddress, userAgent });
 
     } catch (error) {
       console.error('Doctor login error:', error);
@@ -441,94 +467,150 @@ class DoctorController {
   }
 
   /**
-   * Verify OTP and complete login
+   * Complete a two-factor sign-in with the emailed code.
+   * Body: { email, otp_code }
+   *
+   * Signs the doctor in exactly as a normal login does, and also returns a
+   * trustedDeviceToken: sent back with later logins, it skips the code on this
+   * browser until midnight. Wrong codes count towards the same hourly lockout
+   * as wrong passwords, and once it is reached the code stops working.
    */
   static async verifyOTP(req, res) {
     try {
-      const { email, otp_code } = req.body;
-
+      const email = String(req.body?.email || '').trim();
+      const code = String(req.body?.otp_code || req.body?.otp || '').trim();
       const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
-      const userAgent = req.headers['user-agent'];
+      const userAgent = req.headers['user-agent'] || 'unknown';
 
-      if (!email || !otp_code) {
-        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'otp_verified', 'failed', 'Missing email or OTP');
+      if (!email || !code) {
         return res.status(400).json({
           success: false,
-          message: 'Email and OTP code are required'
+          message: 'Enter the 6-digit code from the email'
         });
       }
 
       const doctor = await Doctor.findByEmail(email);
       if (!doctor) {
-        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'otp_verified', 'failed', 'Doctor not found');
-        return res.status(403).json({
+        await AuditLog.logSecurityEvent(req, null, 'doctor', email, 'otp_failed', 'failed', 'Doctor not found');
+        return res.status(401).json({
           success: false,
-          message: 'No doctor account found with this email. Please use the correct login page.'
+          message: 'That code is wrong or has expired. Sign in again to get a new one.'
         });
       }
 
-      const otpResult = await OTP.verify(doctor.id, otp_code, 'login', 'doctor');
+      const failedAttempts = await AuditLog.getFailedLoginAttempts(email, 1);
+      if (failedAttempts >= MAX_WRONG_LOGIN_CODES) {
+        await query(
+          `UPDATE otps SET is_used = true
+           WHERE user_id = $1 AND user_type = 'doctor' AND purpose = 'login' AND is_used = false`,
+          [doctor.id]
+        );
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed attempts. Please wait an hour, then sign in again.'
+        });
+      }
+
+      const otpResult = await OTP.verify(doctor.id, code, 'login', 'doctor');
       if (!otpResult.valid) {
         await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_failed', 'failed', 'Invalid or expired OTP');
         return res.status(401).json({
           success: false,
-          message: 'Invalid or expired OTP code'
+          message: 'That code is wrong or has expired. Check the latest email, or sign in again to get a new one.'
         });
       }
 
-      delete doctor.password_hash;
-
-      const token = jwt.sign(
-        {
-          id: doctor.id,
-          email: doctor.email,
-          role: 'doctor',
-          type: 'doctor'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      // Create session
-      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      const deviceInfo = {
-        userAgent: userAgent,
-        ipAddress: ipAddress,
-        timestamp: new Date().toISOString()
-      };
-      
-      const session = await Session.create(
-        doctor.id,
-        'doctor',
-        tokenHash,
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'otp_verified', 'success', 'Two-factor sign-in');
+      return startDoctorSession(req, res, doctor, {
         ipAddress,
         userAgent,
-        deviceInfo
-      );
-
-      // Log successful login
-      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', email, 'login', 'success');
-
-      res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: {
-          doctor,
-          token,
-          session: {
-            id: session.id,
-            expiresAt: session.expires_at
-          }
-        }
+        trustedDeviceToken: issueTrustedToday(doctor),
       });
 
     } catch (error) {
       console.error('Doctor verify OTP error:', error);
       res.status(500).json({
         success: false,
-        message: 'Error verifying OTP',
+        message: 'Error verifying your code',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Two-factor settings for the signed-in doctor.
+   *
+   * Turning it on emails a code that must be entered, which proves the email
+   * address actually receives them before the doctor depends on it. Turning
+   * it off needs the current password.
+   */
+  static async startTwoFactorEnable(req, res) {
+    try {
+      const doctor = await Doctor.findById(req.user.id);
+      if (!doctor) return res.status(404).json({ success: false, message: 'Doctor not found' });
+      if (doctor.two_fa_enabled) {
+        return res.status(400).json({ success: false, message: 'Two-factor sign-in is already on' });
+      }
+      const otp = await OTP.create(doctor.id, 'twofa_enable', 'doctor', LOGIN_CODE_MINUTES);
+      await emailService.sendOTP(doctor.email, otp.otp_code, doctor.first_name);
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'twofa_enable_started', 'success', 'method=email');
+      res.json({
+        success: true,
+        message: `We emailed a 6-digit code to ${doctor.email}. Enter it to turn on two-factor sign-in.`,
+        data: { email: doctor.email }
+      });
+    } catch (error) {
+      console.error('Doctor 2FA start error:', error);
+      res.status(500).json({ success: false, message: 'We could not send the code. Please try again.' });
+    }
+  }
+
+  static async confirmTwoFactorEnable(req, res) {
+    try {
+      const code = String(req.body?.code || '').trim();
+      if (!code) return res.status(400).json({ success: false, message: 'Enter the 6-digit code from the email' });
+      const doctor = await Doctor.findById(req.user.id);
+      if (!doctor) return res.status(404).json({ success: false, message: 'Doctor not found' });
+
+      const check = await OTP.verify(doctor.id, code, 'twofa_enable', 'doctor');
+      if (!check.valid) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'twofa_enable_verify', 'failed', check.message);
+        return res.status(400).json({
+          success: false,
+          message: 'That code is wrong or has expired. Request a new one and try again.'
+        });
+      }
+      await Doctor.update(doctor.id, { two_fa_enabled: true });
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'twofa_enabled', 'success');
+      res.json({
+        success: true,
+        message: 'Two-factor sign-in is on. Each browser will ask for an emailed code on the first sign-in of the day.',
+        // This browser has just proved the code, so it need not ask again today.
+        data: { twoFaEnabled: true, trustedDeviceToken: issueTrustedToday(doctor) }
+      });
+    } catch (error) {
+      console.error('Doctor 2FA enable error:', error);
+      res.status(500).json({ success: false, message: 'We could not turn on two-factor sign-in' });
+    }
+  }
+
+  static async disableTwoFactor(req, res) {
+    try {
+      const password = String(req.body?.current_password || req.body?.currentPassword || '');
+      if (!password) return res.status(400).json({ success: false, message: 'Enter your current password' });
+      const doctor = await Doctor.findById(req.user.id);
+      if (!doctor) return res.status(404).json({ success: false, message: 'Doctor not found' });
+
+      if (!(await bcrypt.compare(password, doctor.password_hash))) {
+        await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'twofa_disable', 'failed', 'Wrong password');
+        return res.status(400).json({ success: false, message: 'Your current password is not right' });
+      }
+      await Doctor.update(doctor.id, { two_fa_enabled: false });
+      await AuditLog.logSecurityEvent(req, doctor.id, 'doctor', doctor.email, 'twofa_disabled', 'success');
+      res.json({ success: true, message: 'Two-factor sign-in is off.', data: { twoFaEnabled: false } });
+    } catch (error) {
+      console.error('Doctor 2FA disable error:', error);
+      res.status(500).json({ success: false, message: 'We could not turn off two-factor sign-in' });
     }
   }
 

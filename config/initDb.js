@@ -14,6 +14,7 @@ const { runMigration: addProfileSecurityColumns } = require('./addProfileSecurit
 const { runMigration: createLinkedServicesTables } = require('./createLinkedServicesTables');
 const { runMigration: createMedicalAidTables } = require('./createMedicalAidTables');
 const { runMigration: addDoctorMedicalAids } = require('./addDoctorMedicalAids');
+const { runMigration: addDoctorTwoFactor } = require('./addDoctorTwoFactor');
 const { runMigration: createInAppNotifications } = require('./createInAppNotifications');
 // Exports the function directly, unlike the { runMigration } modules above.
 const addQRCodeOneTimeUse = require('./addQRCodeOneTimeUse');
@@ -98,6 +99,7 @@ const initializeDatabase = async () => {
     // Which medical aids a doctor accepts, so patients can filter on cover.
     // Runs after the doctors table exists.
     await addDoctorMedicalAids();
+    await addDoctorTwoFactor();
 
     // Support tickets
     await createSupportTicketsTable();
